@@ -7,6 +7,8 @@ from typer.testing import CliRunner
 
 from gpu_token_utilization.cli import app
 
+from conftest import git
+
 runner = CliRunner()
 
 
@@ -16,7 +18,29 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("def f():\n    return 1\n")
+    git(tmp_path, "init", "-q", "-b", "main")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-q", "-m", "initial")
     return tmp_path
+
+
+def test_add_refuses_a_dirty_repo(repo):
+    (repo / "src" / "a.py").write_text("changed\n")
+    result = runner.invoke(app, ["add", "tests", "src/a.py"])
+    assert result.exit_code == 1 and "uncommitted changes" in result.output
+
+
+def test_add_refuses_a_folder_that_is_not_a_git_repo(tmp_path_factory, monkeypatch):
+    plain = tmp_path_factory.mktemp("plain")
+    (plain / "a.py").write_text("x = 1\n")
+    monkeypatch.chdir(plain)
+    result = runner.invoke(app, ["add", "tests", "a.py"])
+    assert result.exit_code == 1 and "not inside a git repository" in result.output
+
+
+def test_queueing_a_job_leaves_the_repo_clean(repo):
+    add("tests", "src/a.py")
+    assert git(repo, "status", "--porcelain") == ""  # .gtu/ ignores itself
 
 
 def add(*args):

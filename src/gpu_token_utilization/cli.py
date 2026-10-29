@@ -11,6 +11,7 @@ from .api import API_KEY_ENV, ApiError, ApiKeyMissing, list_models, verify_key
 from .client import AuthError, BharatCodeClient, RetryPolicy
 from .gate import Gate, GateConfig
 from .scheduler import Scheduler
+from . import worktree
 from .store import Store, StoreError
 
 app = typer.Typer(
@@ -80,9 +81,13 @@ def add(
     target: Path = typer.Argument(..., help="File or folder in this repo to work on."),
     note: str = typer.Option(None, "--note", help="Extra instructions for the job."),
 ) -> None:
-    """Queue a job. Nothing runs yet; jobs are only stored."""
-    repo = Path.cwd().resolve()
-    path = (repo / target).resolve()
+    """Queue a job. It runs later with `gtu start`, on its own branch gtu/<job-id>."""
+    try:
+        repo = worktree.repo_root(Path.cwd()).resolve()
+        worktree.ensure_clean(repo)
+    except worktree.GitError as exc:
+        _fail(str(exc))
+    path = (Path.cwd() / target).resolve()
     if not path.exists():
         _fail(f"{target} does not exist")
     try:
@@ -195,4 +200,8 @@ def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
             job = store.cancel_job(job_id)
         except StoreError as exc:
             _fail(str(exc))
-    typer.echo(f"Cancelled job {job.id}")
+    try:
+        worktree.remove(Path(job.repo), job.id)
+    except worktree.GitError as exc:
+        typer.echo(f"warning: could not remove the job's worktree: {exc}", err=True)
+    typer.echo(f"Cancelled job {job.id}. Anything it committed stays on branch {worktree.branch_name(job.id)}.")

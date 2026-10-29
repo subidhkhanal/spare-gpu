@@ -31,6 +31,28 @@ def client(fake, store):
     )
 
 
+def git(cwd, *args):
+    """Run git in a test repo; identity is passed in so tests work without a global git config."""
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+        cwd=cwd, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    """A small committed repo on branch main."""
+    repo = tmp_path / "sample"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
 @pytest.fixture
 def make_gate(fake, store, client):
     def make(probe=True, **overrides):
