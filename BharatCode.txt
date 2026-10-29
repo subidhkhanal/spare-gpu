@@ -1,0 +1,2 @@
+This project uses the BharatCode model API (https://bharatcode.ai/api/model/v1).
+It is intended for development work only (tests, docs and code review on the user's own repositories).
