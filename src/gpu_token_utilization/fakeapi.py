@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -19,12 +20,17 @@ MODELS = [
 
 
 class FakeClock:
-    def __init__(self) -> None:
+    def __init__(self, start: datetime | None = None) -> None:
         self.now = 0.0
         self.sleeps: list[float] = []
+        self.start = start or datetime.now(timezone.utc)
 
     def __call__(self) -> float:
         return self.now
+
+    def utcnow(self) -> datetime:
+        """Wall-clock view of the same fake time."""
+        return self.start + timedelta(seconds=self.now)
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
@@ -48,14 +54,49 @@ class Reply:
     headers: dict = field(default_factory=dict)
 
 
+@dataclass
+class UsageReply:
+    """One /api/serving/usage answer for the default model's api lane, or a raw override."""
+
+    active: int = 0
+    queued: int = 0
+    slots: int = 4
+    available: bool = True
+    stale_seconds: float = 0.0
+    status: int = 200
+    body: str | None = None  # raw body instead of the generated JSON
+    drop_model: bool = False
+    delay: float = 0.0
+
+
 class FakeBharatCode:
     def __init__(self, api_key: str = "bc_live_fake_key", clock: FakeClock | None = None):
         self.api_key = api_key
         self.clock = clock or FakeClock()
         self.replies: deque[Reply] = deque()
         self.default = Reply()
+        self.usage_replies: deque[UsageReply] = deque()
+        self.usage_default = UsageReply()
         self.requests: list[httpx.Request] = []
         self._ids = 0
+
+    @property
+    def usage_calls(self) -> int:
+        return sum(1 for r in self.requests if r.url.path.endswith("/api/serving/usage"))
+
+    @property
+    def chat_calls(self) -> int:
+        return sum(1 for r in self.requests if r.url.path.endswith("/chat/completions"))
+
+    def usage(self, times: int = 1, **fields) -> FakeBharatCode:
+        self.usage_replies.extend(UsageReply(**fields) for _ in range(times))
+        return self
+
+    def usage_quiet(self, times: int = 1) -> FakeBharatCode:
+        return self.usage(times)
+
+    def usage_busy(self, times: int = 1, queued: int = 6) -> FakeBharatCode:
+        return self.usage(times, active=4, queued=queued)
 
     # scripting
 
@@ -83,8 +124,34 @@ class FakeBharatCode:
 
     # handling
 
+    def _usage(self, request: httpx.Request) -> httpx.Response:
+        reply = self.usage_replies.popleft() if self.usage_replies else self.usage_default
+        if reply.delay:
+            self.clock.advance(reply.delay)
+            timeout = (request.extensions.get("timeout") or {}).get("read")
+            if timeout is not None and reply.delay > timeout:
+                raise httpx.ReadTimeout("fake live stats too slow", request=request)
+        if reply.body is not None or reply.status != 200:
+            return httpx.Response(reply.status, text=reply.body or "")
+        generated = self.clock.utcnow() - timedelta(seconds=reply.stale_seconds)
+        lane = {
+            "active_requests": reply.active,
+            "queued_requests": reply.queued,
+            "slot_capacity": reply.slots,
+            "capacity_used_pct": round(100 * reply.active / reply.slots) if reply.slots else 0,
+            "available": reply.available,
+        }
+        models = [] if reply.drop_model else [
+            {"id": "qwen-3.8-27b", "name": "Qwen 3.8 27B", **lane, "api": lane,
+             "chat": {"active_requests": 0, "queued_requests": 0}},
+        ]
+        body = {"generated_at": generated.isoformat().replace("+00:00", "Z"), **lane, "models": models}
+        return httpx.Response(200, json=body)
+
     def _handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        if request.url.path.endswith("/api/serving/usage"):
+            return self._usage(request)
         if request.url.path.endswith("/models"):
             # Like the real API, /models answers without checking the key and sends no x-request-id.
             return httpx.Response(200, json={"object": "list", "data": MODELS})

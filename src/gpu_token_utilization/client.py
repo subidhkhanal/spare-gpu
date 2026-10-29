@@ -136,8 +136,13 @@ class BharatCodeClient:
         tools: list[dict] | None = None,
         job_id: str | None = None,
         step_id: int | None = None,
+        gate: dict | None = None,
     ) -> ChatResult:
-        """Send the full history (the API is stateless) and return one non-streamed reply."""
+        """Send the full history (the API is stateless) and return one non-streamed reply.
+
+        `gate` holds the capacity gate's view at send time (gate_source, queue_at_send,
+        active_at_send) and is copied into every logged attempt.
+        """
         if not 1 <= max_tokens <= MAX_OUTPUT_TOKENS:
             raise ValueError(f"max_tokens must be between 1 and {MAX_OUTPUT_TOKENS}")
         body: dict = {
@@ -154,7 +159,10 @@ class BharatCodeClient:
         def log(attempt: int, **fields) -> None:
             if self.store is not None:
                 self.store.log_request(
-                    RequestLog(endpoint=CHAT_ENDPOINT, model=model, attempt=attempt, job_id=job_id, step_id=step_id, **fields)
+                    RequestLog(
+                        endpoint=CHAT_ENDPOINT, model=model, attempt=attempt, job_id=job_id, step_id=step_id,
+                        **(gate or {}), **fields,
+                    )
                 )
 
         # One request in flight at a time, never parallel.

@@ -1,6 +1,8 @@
 import re
 
+import httpx
 import pytest
+import respx
 from typer.testing import CliRunner
 
 from gpu_token_utilization.cli import app
@@ -67,3 +69,30 @@ def test_status_of_unknown_job_fails(repo):
 
 def test_list_when_empty(repo):
     assert "No jobs." in runner.invoke(app, ["list"]).output
+
+
+@respx.mock
+def test_why_explains_the_gate(repo):
+    from datetime import datetime, timezone
+
+    from gpu_token_utilization.gate import USAGE_URL
+
+    lane = {"active_requests": 4, "queued_requests": 6, "slot_capacity": 4, "capacity_used_pct": 100, "available": True}
+    respx.get(USAGE_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "models": [{"id": "qwen-3.8-27b", "api": lane}],
+            },
+        )
+    )
+    result = runner.invoke(app, ["why"])
+    assert result.exit_code == 0, result.output
+    assert "Paused (live stats): qwen-3.8-27b api lane 4/4 slots busy, 6 queued." in result.output
+
+
+def test_start_without_key_fails(repo, monkeypatch):
+    monkeypatch.delenv("BHARATCODE_API_KEY", raising=False)
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 1 and "BHARATCODE_API_KEY" in result.output

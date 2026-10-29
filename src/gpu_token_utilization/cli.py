@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -7,6 +8,9 @@ import typer
 
 from . import __version__
 from .api import API_KEY_ENV, ApiError, ApiKeyMissing, list_models, verify_key
+from .client import AuthError, BharatCodeClient, RetryPolicy
+from .gate import Gate, GateConfig
+from .scheduler import Scheduler
 from .store import Store, StoreError
 
 app = typer.Typer(
@@ -129,6 +133,47 @@ def status(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
     )
     if summary["last_request_id"]:
         typer.echo(f"  last x-request-id: {summary['last_request_id']}")
+
+
+@app.command()
+def why() -> None:
+    """Show whether the capacity gate would send work now, and why."""
+    with Store.open_default() as store:
+        gate = Gate(store, GateConfig.from_env())
+        try:
+            decision = gate.check(allow_probe=False)
+        finally:
+            gate.close()
+    typer.echo(decision.describe())
+
+
+@app.command()
+def start(
+    max_steps: int = typer.Option(None, "--max-steps", help="Stop after this many completed steps."),
+) -> None:
+    """Run queued jobs one step at a time while BharatCode has spare capacity."""
+
+    def log(message: str) -> None:
+        typer.echo(f"[{datetime.now():%H:%M:%S}] {message}")
+
+    with Store.open_default() as store:
+        try:
+            # No client-side retries: a busy answer closes the gate, which decides when to try again.
+            client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0))
+        except ApiKeyMissing:
+            _fail(f"{API_KEY_ENV} is not set. Export it and try again.")
+        gate = Gate(store, GateConfig.from_env(), client=client)
+        try:
+            steps = Scheduler(store, gate, client, log=log).run(max_steps=max_steps)
+        except AuthError as exc:
+            _fail(str(exc))
+        except KeyboardInterrupt:
+            typer.echo("\nStopped. Progress is saved; run `gtu start` again to resume.")
+            raise typer.Exit(130)
+        finally:
+            gate.close()
+            client.close()
+    log(f"Completed {steps} step(s).")
 
 
 @app.command()

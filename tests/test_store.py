@@ -61,6 +61,27 @@ def test_steps_are_numbered_in_order(store):
     assert steps[0]["output"] == "read 3 functions"
 
 
+def test_phase1_database_gains_new_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE requests (id INTEGER PRIMARY KEY, sent_at TEXT, endpoint TEXT, attempt INTEGER)")
+    conn.commit()
+    conn.close()
+    with Store(path) as s:
+        cols = {r["name"] for r in s.conn.execute("PRAGMA table_info(requests)")}
+    assert {"gate_source", "queue_at_send", "active_at_send"} <= cols
+
+
+def test_interrupted_steps_become_pending(store):
+    job = store.add_job("tests", "a.py", "/repo")
+    step = store.add_step(job.id, "write tests")
+    store.set_step(step, "running")
+    assert store.reset_interrupted_steps(job.id) == 1
+    assert store.steps(job.id)[0]["status"] == "pending"
+
+
 def test_request_summary(store):
     job = store.add_job("tests", "a.py", "/repo")
     store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=503, request_id="r1", job_id=job.id))

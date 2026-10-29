@@ -62,7 +62,27 @@ CREATE TABLE IF NOT EXISTS requests (
     truncated          INTEGER NOT NULL DEFAULT 0,
     error              TEXT
 );
+
+CREATE TABLE IF NOT EXISTS gate_readings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    taken_at      TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    model         TEXT,
+    active        INTEGER,
+    queued        INTEGER,
+    slots         INTEGER,
+    verdict       TEXT NOT NULL CHECK (verdict IN ('quiet', 'busy', 'unknown')),
+    decision      TEXT NOT NULL CHECK (decision IN ('open', 'closed')),
+    quiet_streak  INTEGER NOT NULL,
+    busy_streak   INTEGER NOT NULL,
+    reason        TEXT NOT NULL
+);
 """
+
+# Columns added after Phase 1; older databases get them on open.
+ADDED_COLUMNS = {
+    "requests": {"gate_source": "TEXT", "queue_at_send": "INTEGER", "active_at_send": "INTEGER"},
+}
 
 
 class StoreError(Exception):
@@ -102,6 +122,25 @@ class RequestLog:
     error: str | None = None
     job_id: str | None = None
     step_id: int | None = None
+    gate_source: str | None = None
+    queue_at_send: int | None = None
+    active_at_send: int | None = None
+
+
+@dataclass
+class GateReading:
+    taken_at: str
+    source: str
+    verdict: str
+    decision: str
+    quiet_streak: int
+    busy_streak: int
+    reason: str
+    model: str | None = None
+    active: int | None = None
+    queued: int | None = None
+    slots: int | None = None
+    id: int | None = None
 
 
 class Store:
@@ -116,6 +155,12 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            for name, kind in columns.items():
+                if name not in existing:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+        self.conn.commit()
 
     @classmethod
     def open_default(cls) -> Store:
@@ -201,6 +246,15 @@ class Store:
     def steps(self, job_id: str) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM job_steps WHERE job_id = ? ORDER BY seq", (job_id,)).fetchall()
 
+    def reset_interrupted_steps(self, job_id: str) -> int:
+        """Steps left 'running' by a killed process never finished; make them pending again."""
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE job_steps SET status = 'pending', started_at = NULL WHERE job_id = ? AND status = 'running'",
+                (job_id,),
+            )
+        return cur.rowcount
+
     # request log
 
     def log_request(self, entry: RequestLog) -> int:
@@ -208,13 +262,14 @@ class Store:
             cur = self.conn.execute(
                 """INSERT INTO requests (job_id, step_id, sent_at, endpoint, model, attempt, status_code,
                        elapsed_ms, request_id, prompt_tokens, completion_tokens, reasoning_tokens,
-                       total_tokens, finish_reason, truncated, error)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       total_tokens, finish_reason, truncated, error, gate_source, queue_at_send, active_at_send)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     entry.job_id, entry.step_id, utc_now(), entry.endpoint, entry.model, entry.attempt,
                     entry.status_code, entry.elapsed_ms, entry.request_id, entry.prompt_tokens,
                     entry.completion_tokens, entry.reasoning_tokens, entry.total_tokens,
                     entry.finish_reason, int(entry.truncated), entry.error,
+                    entry.gate_source, entry.queue_at_send, entry.active_at_send,
                 ),
             )
         return cur.lastrowid
@@ -223,6 +278,38 @@ class Store:
         if job_id is None:
             return self.conn.execute("SELECT * FROM requests ORDER BY id").fetchall()
         return self.conn.execute("SELECT * FROM requests WHERE job_id = ? ORDER BY id", (job_id,)).fetchall()
+
+    def recent_requests(self, limit: int) -> list[sqlite3.Row]:
+        """Most recent request attempts, newest first."""
+        return self.conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+    def recent_latencies(self, limit: int) -> list[float]:
+        """Response times (ms) of the most recent successful requests."""
+        rows = self.conn.execute(
+            "SELECT elapsed_ms FROM requests WHERE status_code = 200 AND elapsed_ms IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    # gate readings
+
+    def add_gate_reading(self, reading: GateReading) -> GateReading:
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO gate_readings (taken_at, source, model, active, queued, slots, verdict, decision,
+                       quiet_streak, busy_streak, reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    reading.taken_at, reading.source, reading.model, reading.active, reading.queued, reading.slots,
+                    reading.verdict, reading.decision, reading.quiet_streak, reading.busy_streak, reading.reason,
+                ),
+            )
+        reading.id = cur.lastrowid
+        return reading
+
+    def last_gate_reading(self) -> GateReading | None:
+        row = self.conn.execute("SELECT * FROM gate_readings ORDER BY id DESC LIMIT 1").fetchone()
+        return GateReading(**dict(row)) if row else None
 
     def request_summary(self, job_id: str | None = None) -> dict:
         where, args = ("WHERE job_id = ?", (job_id,)) if job_id is not None else ("", ())
