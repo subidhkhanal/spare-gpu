@@ -90,16 +90,30 @@ gtu start   # work through the queue, one step at a time, until it is empty
 
 ### The capacity gate
 
-- **Main signal: BharatCode's public live stats** (`/api/serving/usage`), checked at most once a minute. It counts as quiet only when the model is up, a slot in the API lane is free, **and** nothing is queued. Queued requests have been seen while slots sat idle, so neither check is enough alone.
+- **Main signal: BharatCode's public live stats** (`/api/serving/usage`), checked at most once a minute. It counts as quiet when the model is up and a slot in the API lane is free, as long as the queue is within a tolerance (see below).
 - **It changes its mind slowly.** It needs 3 quiet readings in a row (about 3 minutes) to open and 2 busy ones to close. It closes at once if BharatCode answers one of our requests with "busy".
 - **Fallback.** That endpoint is undocumented, so any odd answer (error, timeout, changed shape, stale data, model missing) switches to our own signals: how our last 5 requests went (busy answers, slowdowns), plus a tiny probe request at most every 5 minutes when there's been no traffic. In fallback it also only runs inside a time window, `GTU_WINDOW` (default `00:00-09:00` IST).
-- The window isn't used while live stats work, because the finding above showed nights in India are not reliably quiet. Set `GTU_WINDOW_ALWAYS=1` to enforce it anyway, and `GTU_MAX_QUEUED=1` to tolerate a short queue.
+- The window isn't used while live stats work, because the finding above showed nights in India are not reliably quiet. Set `GTU_WINDOW_ALWAYS=1` to enforce it anyway.
+- **The queue is a tolerance, not a blocker.** BharatCode paces accounts to free capacity for low-usage users, so requests can sit queued while slots are idle. "Quiet" therefore means the model is up and a slot is free; the queue only counts once it is longer than `GTU_MAX_QUEUED` (default `5`). Use `GTU_MAX_QUEUED=0` for the original strict rule (any queue means busy), or `none` to ignore the queue.
 - Every reading is stored, and every request records what the gate saw when it was sent (source, queue length, busy slots).
 
 ### How it talks to BharatCode
 
 - One request at a time, never in parallel.
-- When BharatCode is busy (HTTP 503, and 429 by our choice), the client can wait 5, 10, 20, then 40 seconds (plus a little randomness, max 120 s, longer if the server asks) before giving up. `gtu start` turns these retries off and lets the gate decide when to try again.
+- **Patient by default.** BharatCode paces accounts and has asked automated clients to raise their timeout and retry limits, so:
+  - each request may take up to **180 s** before it counts as timed out;
+  - when BharatCode is busy (HTTP 503, and 429 by our choice) or a request times out, the client retries **8 times**, waiting about 5, 10, 20, 40, 80, 160, 300 and 300 seconds (each ±20% so clients don't retry in lockstep, never more than 300 s, longer if the server sends `Retry-After`). That's about 15 minutes before it gives up.
+- `gtu start` turns these client retries off and lets the gate decide when to try again: a busy answer closes the gate, and it reopens after 3 quiet readings. So `gtu start` itself never gives up; it just waits.
+
+All of it is configurable:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GTU_TIMEOUT` | `180` | Seconds to wait for a model response (also used by `gtu check`). |
+| `GTU_MAX_RETRIES` | `8` | Retries after a busy answer or timeout, before giving up. |
+| `GTU_RETRY_BASE` | `5` | First wait in seconds; each later wait doubles. |
+| `GTU_RETRY_MAX_DELAY` | `300` | Longest single wait in seconds. |
+| `GTU_RETRY_JITTER` | `0.2` | Random spread on each wait (0.2 = ±20%). |
 - If an answer is cut off (`finish_reason: length`), the partial text is kept, any half-written tool call is thrown away rather than run, and it is not retried automatically.
 - Every attempt is logged with its time, tokens (including reasoning tokens), response time, `x-request-id`, and whether it was cut off.
 

@@ -72,7 +72,9 @@ class GateConfig:
     poll_interval: float = 60.0
     quiet_needed: int = 3
     busy_needed: int = 2
-    max_queued: int = 0
+    # BharatCode paces accounts, so a queue can sit there while slots are idle; it is a
+    # tolerance, not a blocker. 0 restores the original strict rule; None ignores the queue.
+    max_queued: int | None = 5
     max_skew: float = 180.0
     usage_timeout: float = 5.0
     window: tuple[time, time] = (time(0, 0), time(9, 0))
@@ -90,8 +92,11 @@ class GateConfig:
         if os.environ.get("GTU_WINDOW"):
             cfg.window = parse_window(os.environ["GTU_WINDOW"])
         cfg.window_always = os.environ.get("GTU_WINDOW_ALWAYS", "") in ("1", "true", "yes")
-        if os.environ.get("GTU_MAX_QUEUED"):
-            cfg.max_queued = int(os.environ["GTU_MAX_QUEUED"])
+        max_queued = os.environ.get("GTU_MAX_QUEUED", "").strip().lower()
+        if max_queued in ("none", "off"):
+            cfg.max_queued = None
+        elif max_queued:
+            cfg.max_queued = int(max_queued)
         return cfg
 
 
@@ -128,6 +133,20 @@ class Decision:
             f"Paused ({label}): {r.reason}. Need {need} quiet readings in a row; have {r.quiet_streak}. "
             f"Next check in {self.next_check:.0f} s."
         )
+
+
+def lane_verdict(lane: LaneStats, cfg: GateConfig) -> tuple[str, str]:
+    """('quiet' or 'busy', reason) for one live-stats reading of a model's api lane."""
+    # Quiet means the model is up and a slot is free. The queue only counts beyond the
+    # tolerance: under BharatCode's account pacing it can be non-empty while slots sit idle.
+    over_queue = cfg.max_queued is not None and lane.queued_requests > cfg.max_queued
+    quiet = lane.available and lane.active_requests < lane.slot_capacity and not over_queue
+    reason = f"{cfg.model} api lane {lane.active_requests}/{lane.slot_capacity} slots busy, {lane.queued_requests} queued"
+    if not lane.available:
+        reason += ", model unavailable"
+    if over_queue:
+        reason += f" (tolerance {cfg.max_queued})"
+    return ("quiet" if quiet else "busy"), reason
 
 
 def _parse_ts(text: str) -> datetime:
@@ -228,13 +247,9 @@ class Gate:
             return unusable(f"live stats have no api lane for {self.cfg.model}")
 
         lane = model.api
-        # Both checks matter: queued requests have been seen while slots sat idle.
-        quiet = lane.available and lane.active_requests < lane.slot_capacity and lane.queued_requests <= self.cfg.max_queued
-        reason = f"{self.cfg.model} api lane {lane.active_requests}/{lane.slot_capacity} slots busy, {lane.queued_requests} queued"
-        if not lane.available:
-            reason += ", model unavailable"
+        verdict, reason = lane_verdict(lane, self.cfg)
         return Signal(
-            "livestats", "quiet" if quiet else "busy", reason,
+            "livestats", verdict, reason,
             active=lane.active_requests, queued=lane.queued_requests, slots=lane.slot_capacity,
         )
 

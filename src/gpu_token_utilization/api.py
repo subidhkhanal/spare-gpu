@@ -14,6 +14,25 @@ from pydantic import BaseModel
 
 BASE_URL = "https://bharatcode.ai/api/model/v1"
 API_KEY_ENV = "BHARATCODE_API_KEY"
+# BharatCode paces accounts and asked automated clients to allow long waits.
+DEFAULT_TIMEOUT = 180.0
+TIMEOUT_ENV = "GTU_TIMEOUT"
+
+
+def env_number(name: str, default: float) -> float:
+    """A positive number from the environment, or the default if unset."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    value = float(raw)
+    if value < 0:
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
+def request_timeout() -> float:
+    """Seconds to wait for a model response (GTU_TIMEOUT, default 180)."""
+    return env_number(TIMEOUT_ENV, DEFAULT_TIMEOUT)
 
 
 class ApiKeyMissing(Exception):
@@ -96,11 +115,12 @@ PREFERRED_MODEL = "qwen-3.8-27b"
 def verify_key(
     models: list[Model],
     base_url: str = BASE_URL,
-    timeout: float = 60.0,
+    timeout: float | None = None,
     client: httpx.Client | None = None,
 ) -> KeyCheck:
     """Send a 1-token POST /chat/completions. GET /models does not check the key, this does."""
     key = get_api_key()
+    timeout = request_timeout() if timeout is None else timeout
     ids = [m.id for m in models]
     model = PREFERRED_MODEL if PREFERRED_MODEL in ids or not ids else ids[0]
     body = {

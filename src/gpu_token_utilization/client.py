@@ -10,11 +10,12 @@ import random
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Callable
 
 import httpx
 
-from .api import BASE_URL, get_api_key
+from .api import BASE_URL, env_number, get_api_key, request_timeout
 from .store import RequestLog, Store
 
 DEFAULT_MODEL = "qwen-3.8-27b"
@@ -38,17 +39,34 @@ class BusyError(BharatCodeError):
 
 @dataclass
 class RetryPolicy:
-    max_retries: int = 4
+    # Patient by default, as BharatCode asked of automated clients under account pacing:
+    # 8 retries waiting about 5, 10, 20, 40, 80, 160, 300, 300 s (~15 min in all), each ±20%.
+    max_retries: int = 8
     base_delay: float = 5.0
-    max_delay: float = 120.0
-    jitter: float = 0.25
+    max_delay: float = 300.0
+    jitter: float = 0.2
+
+    @classmethod
+    def from_env(cls) -> RetryPolicy:
+        d = cls()
+        return cls(
+            max_retries=int(env_number("GTU_MAX_RETRIES", d.max_retries)),
+            base_delay=env_number("GTU_RETRY_BASE", d.base_delay),
+            max_delay=env_number("GTU_RETRY_MAX_DELAY", d.max_delay),
+            jitter=env_number("GTU_RETRY_JITTER", d.jitter),
+        )
 
     def delay(self, attempt: int, retry_after: float | None = None, rng: Callable[[], float] = random.random) -> float:
-        """Wait before retry number `attempt` (1-based): doubling, jittered, capped."""
-        wait = self.base_delay * (2 ** (attempt - 1)) * (1 + self.jitter * rng())
+        """Wait before retry number `attempt` (1-based): doubling, ±jitter, capped at max_delay."""
+        wait = self.base_delay * (2 ** (attempt - 1))
+        wait *= 1 + self.jitter * (2 * rng() - 1)
         if retry_after is not None:
             wait = max(wait, retry_after)
         return min(wait, self.max_delay)
+
+    def total_wait(self) -> float:
+        """Longest the waits add up to before giving up (jitter ignored)."""
+        return sum(min(self.base_delay * 2 ** i, self.max_delay) for i in range(self.max_retries))
 
 
 @dataclass
@@ -82,6 +100,27 @@ class ChatResult:
     tool_calls: list[dict] = field(default_factory=list)
     # Tool calls from a truncated reply. Possibly incomplete, so they must never be executed.
     dropped_tool_calls: list[dict] = field(default_factory=list)
+    # How long BharatCode's scheduler held the request before serving it, as it reports.
+    queue_wait_ms: int | None = None
+
+
+# BharatCode's scheduler reports how long it held each request. Not in the public docs.
+SCHEDULER_HEADERS = {
+    "x-bharatcode-queue-wait-ms": "queue_wait_ms",
+    "x-bharatcode-scheduler-requested-at-ms": "scheduler_requested_at_ms",
+    "x-bharatcode-scheduler-admitted-at-ms": "scheduler_admitted_at_ms",
+}
+
+
+def scheduler_headers(response: httpx.Response) -> dict:
+    """The scheduler timing headers present on a response, as ints."""
+    found = {}
+    for header, name in SCHEDULER_HEADERS.items():
+        try:
+            found[name] = int(float(response.headers[header]))
+        except (KeyError, ValueError):
+            pass
+    return found
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -97,7 +136,7 @@ class BharatCodeClient:
         *,
         base_url: str = BASE_URL,
         api_key: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = None,
         retry: RetryPolicy | None = None,
         store: Store | None = None,
         transport: httpx.BaseTransport | None = None,
@@ -106,8 +145,9 @@ class BharatCodeClient:
         rng: Callable[[], float] = random.random,
     ):
         self._key = api_key or get_api_key()
-        self._http = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
-        self.retry = retry or RetryPolicy()
+        self.timeout = request_timeout() if timeout is None else timeout
+        self._http = httpx.Client(base_url=base_url, timeout=self.timeout, transport=transport)
+        self.retry = retry or RetryPolicy.from_env()
         self.store = store
         self._sleep = sleep
         self._clock = clock
@@ -156,12 +196,15 @@ class BharatCodeClient:
         if tools:
             body["tools"] = tools
 
+        # Per-attempt facts: when it was sent, and BharatCode's scheduler headers once it answers.
+        attempt_meta: dict = {}
+
         def log(attempt: int, **fields) -> None:
             if self.store is not None:
                 self.store.log_request(
                     RequestLog(
                         endpoint=CHAT_ENDPOINT, model=model, attempt=attempt, job_id=job_id, step_id=step_id,
-                        **(gate or {}), **fields,
+                        **(gate or {}), **attempt_meta, **fields,
                     )
                 )
 
@@ -170,6 +213,8 @@ class BharatCodeClient:
             attempt = 0
             while True:
                 attempt += 1
+                attempt_meta.clear()
+                attempt_meta["sent_at"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
                 start = self._clock()
                 try:
                     response = self._http.post(CHAT_ENDPOINT, json=body, headers={"Authorization": f"Bearer {self._key}"})
@@ -185,6 +230,7 @@ class BharatCodeClient:
                 elapsed_ms = (self._clock() - start) * 1000
                 request_id = response.headers.get("x-request-id")
                 status = response.status_code
+                attempt_meta.update(scheduler_headers(response))
 
                 if status in BUSY_STATUSES:
                     log(attempt, status_code=status, elapsed_ms=elapsed_ms, request_id=request_id, error="busy")
@@ -203,6 +249,7 @@ class BharatCodeClient:
                 except (ValueError, KeyError, IndexError, TypeError, AttributeError):
                     log(attempt, status_code=status, elapsed_ms=elapsed_ms, request_id=request_id, error="bad body")
                     raise BharatCodeError("unexpected response body from /chat/completions") from None
+                result.queue_wait_ms = attempt_meta.get("queue_wait_ms")
                 u = result.usage
                 log(
                     attempt,

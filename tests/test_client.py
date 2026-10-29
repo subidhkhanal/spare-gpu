@@ -21,7 +21,13 @@ def store(tmp_path):
         yield s
 
 
-def make_client(fake, store, key=KEY, timeout=120.0):
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    for name in ("GTU_TIMEOUT", "GTU_MAX_RETRIES", "GTU_RETRY_BASE", "GTU_RETRY_MAX_DELAY", "GTU_RETRY_JITTER"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def make_client(fake, store, key=KEY, timeout=None):
     return BharatCodeClient(
         api_key=key,
         timeout=timeout,
@@ -29,7 +35,7 @@ def make_client(fake, store, key=KEY, timeout=120.0):
         transport=fake.transport(),
         sleep=fake.clock.sleep,
         clock=fake.clock,
-        rng=lambda: 0.0,  # no jitter, so delays are exact
+        rng=lambda: 0.5,  # middle of the ±jitter range, so delays are exact
     )
 
 
@@ -79,7 +85,7 @@ def test_gives_up_after_capped_retries(fake, store):
 def test_retry_after_is_honoured_but_capped(fake, store):
     fake.busy(1, retry_after=30).busy(1, retry_after=999).ok()
     make_client(fake, store).chat(MESSAGES)
-    assert fake.clock.sleeps == [30.0, 120.0]
+    assert fake.clock.sleeps == [30.0, 300.0]
 
 
 def test_truncated_reply_keeps_partial_output_and_is_not_retried(fake, store):
@@ -146,3 +152,87 @@ def test_key_never_leaks(fake, store):
     assert KEY not in repr(client)
     for row in store.requests():
         assert KEY not in json.dumps(dict(row))
+
+
+def test_default_retry_ladder_is_patient():
+    policy = RetryPolicy()
+    waits = [policy.delay(n, rng=lambda: 0.5) for n in range(1, policy.max_retries + 1)]
+    assert waits == [5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 300.0, 300.0]
+    assert policy.total_wait() == 915.0
+
+
+@pytest.mark.parametrize("rng, factor", [(0.0, 0.8), (0.5, 1.0), (1.0, 1.2)])
+def test_jitter_is_plus_or_minus_twenty_percent(rng, factor):
+    assert RetryPolicy().delay(3, rng=lambda: rng) == pytest.approx(20.0 * factor)
+
+
+def test_jitter_never_exceeds_the_ceiling():
+    assert RetryPolicy().delay(8, rng=lambda: 1.0) == 300.0
+
+
+def test_gives_up_only_after_the_full_ladder(fake, store):
+    fake.busy(20)
+    with pytest.raises(BusyError):
+        make_client(fake, store).chat(MESSAGES)
+    assert len(fake.requests) == 9  # first try + 8 retries
+    assert sum(fake.clock.sleeps) == 915.0
+
+
+def test_default_timeout_is_180_seconds(fake, store):
+    client = make_client(fake, store)
+    assert client.timeout == 180.0
+    fake.slow(170, content="slow but served")
+    assert client.chat(MESSAGES).content == "slow but served"
+
+
+def test_retry_and_timeout_settings_from_env(fake, store, monkeypatch):
+    monkeypatch.setenv("GTU_TIMEOUT", "600")
+    monkeypatch.setenv("GTU_MAX_RETRIES", "3")
+    monkeypatch.setenv("GTU_RETRY_BASE", "10")
+    monkeypatch.setenv("GTU_RETRY_MAX_DELAY", "15")
+    monkeypatch.setenv("GTU_RETRY_JITTER", "0")
+    client = make_client(fake, store)
+    assert client.timeout == 600.0
+    assert client.retry == RetryPolicy(max_retries=3, base_delay=10.0, max_delay=15.0, jitter=0.0)
+
+
+def test_negative_setting_is_rejected(monkeypatch):
+    monkeypatch.setenv("GTU_RETRY_BASE", "-1")
+    with pytest.raises(ValueError):
+        RetryPolicy.from_env()
+
+
+def test_scheduler_headers_are_logged(fake, store):
+    from gpu_token_utilization.fakeapi import Reply
+
+    fake.queue(Reply(content="ok", queue_wait_ms=14583))
+    result = make_client(fake, store).chat(MESSAGES)
+    assert result.queue_wait_ms == 14583
+    row = store.requests()[0]
+    assert row["queue_wait_ms"] == 14583
+    assert row["scheduler_admitted_at_ms"] - row["scheduler_requested_at_ms"] == 14583
+
+
+def test_missing_scheduler_headers_are_left_empty(fake, store):
+    result = make_client(fake, store).chat(MESSAGES)
+    assert result.queue_wait_ms is None and store.requests()[0]["queue_wait_ms"] is None
+
+
+def test_sent_at_is_the_send_time_not_the_reply_time(fake, store):
+    from datetime import datetime
+
+    before = datetime.now().astimezone()
+    before = before.replace(microsecond=before.microsecond // 1000 * 1000)  # sent_at keeps milliseconds
+    fake.slow(1)  # fake time only; the real clock barely moves
+    make_client(fake, store).chat(MESSAGES)
+    after = datetime.now().astimezone()
+    sent = datetime.fromisoformat(store.requests()[0]["sent_at"])
+    assert before <= sent <= after
+    assert "." in store.requests()[0]["sent_at"]  # millisecond precision
+
+
+def test_each_retry_records_its_own_send_time(fake, store):
+    fake.busy(1).ok()
+    make_client(fake, store).chat(MESSAGES)
+    first, second = (r["sent_at"] for r in store.requests())
+    assert first <= second

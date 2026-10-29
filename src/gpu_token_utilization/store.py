@@ -60,7 +60,13 @@ CREATE TABLE IF NOT EXISTS requests (
     total_tokens       INTEGER NOT NULL DEFAULT 0,
     finish_reason      TEXT,
     truncated          INTEGER NOT NULL DEFAULT 0,
-    error              TEXT
+    error              TEXT,
+    gate_source        TEXT,
+    queue_at_send      INTEGER,
+    active_at_send     INTEGER,
+    queue_wait_ms      INTEGER,
+    scheduler_requested_at_ms INTEGER,
+    scheduler_admitted_at_ms  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS gate_readings (
@@ -81,7 +87,10 @@ CREATE TABLE IF NOT EXISTS gate_readings (
 
 # Columns added after Phase 1; older databases get them on open.
 ADDED_COLUMNS = {
-    "requests": {"gate_source": "TEXT", "queue_at_send": "INTEGER", "active_at_send": "INTEGER"},
+    "requests": {
+        "gate_source": "TEXT", "queue_at_send": "INTEGER", "active_at_send": "INTEGER",
+        "queue_wait_ms": "INTEGER", "scheduler_requested_at_ms": "INTEGER", "scheduler_admitted_at_ms": "INTEGER",
+    },
 }
 
 
@@ -125,6 +134,11 @@ class RequestLog:
     gate_source: str | None = None
     queue_at_send: int | None = None
     active_at_send: int | None = None
+    # When the request left us; defaults to the time the row is written.
+    sent_at: str | None = None
+    queue_wait_ms: int | None = None
+    scheduler_requested_at_ms: int | None = None
+    scheduler_admitted_at_ms: int | None = None
 
 
 @dataclass
@@ -262,14 +276,16 @@ class Store:
             cur = self.conn.execute(
                 """INSERT INTO requests (job_id, step_id, sent_at, endpoint, model, attempt, status_code,
                        elapsed_ms, request_id, prompt_tokens, completion_tokens, reasoning_tokens,
-                       total_tokens, finish_reason, truncated, error, gate_source, queue_at_send, active_at_send)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       total_tokens, finish_reason, truncated, error, gate_source, queue_at_send, active_at_send,
+                       queue_wait_ms, scheduler_requested_at_ms, scheduler_admitted_at_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    entry.job_id, entry.step_id, utc_now(), entry.endpoint, entry.model, entry.attempt,
-                    entry.status_code, entry.elapsed_ms, entry.request_id, entry.prompt_tokens,
+                    entry.job_id, entry.step_id, entry.sent_at or utc_now(), entry.endpoint, entry.model,
+                    entry.attempt, entry.status_code, entry.elapsed_ms, entry.request_id, entry.prompt_tokens,
                     entry.completion_tokens, entry.reasoning_tokens, entry.total_tokens,
                     entry.finish_reason, int(entry.truncated), entry.error,
                     entry.gate_source, entry.queue_at_send, entry.active_at_send,
+                    entry.queue_wait_ms, entry.scheduler_requested_at_ms, entry.scheduler_admitted_at_ms,
                 ),
             )
         return cur.lastrowid

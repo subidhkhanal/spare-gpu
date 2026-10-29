@@ -27,7 +27,7 @@ def client(fake, store):
     # Scheduler-style client: no retries, the gate decides when to try again.
     return BharatCodeClient(
         api_key=KEY, store=store, transport=fake.transport(), retry=RetryPolicy(max_retries=0),
-        sleep=fake.clock.sleep, clock=fake.clock, rng=lambda: 0.0,
+        sleep=fake.clock.sleep, clock=fake.clock, rng=lambda: 0.5,  # 0.5 = no jitter
     )
 
 

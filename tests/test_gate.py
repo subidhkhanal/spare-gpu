@@ -48,7 +48,7 @@ def test_busy_reading_resets_the_quiet_streak(fake, make_gate):
     "fields",
     [
         {"active": 4, "queued": 0},  # no free slot
-        {"active": 0, "queued": 16},  # queued while slots idle (seen on the real API)
+        {"active": 0, "queued": 6},  # queue beyond the default tolerance of 5
         {"active": 0, "queued": 0, "available": False},
     ],
 )
@@ -58,9 +58,35 @@ def test_busy_conditions(fake, make_gate, fields):
     assert reading.source == "livestats" and reading.verdict == "busy"
 
 
-def test_max_queued_can_be_relaxed(fake, make_gate):
-    fake.usage(active=1, queued=1)
-    assert make_gate(max_queued=1).check().reading.verdict == "quiet"
+@pytest.mark.parametrize("queued", [0, 3, 5])
+def test_queue_within_tolerance_is_quiet_by_default(fake, make_gate, queued):
+    # Account pacing leaves requests queued while slots sit idle (seen on the real API).
+    fake.usage(active=0, queued=queued)
+    assert make_gate().check().reading.verdict == "quiet"
+
+
+def test_free_slot_is_still_required(fake, make_gate):
+    fake.usage(active=4, queued=0, slots=4)
+    assert make_gate(max_queued=None).check().reading.verdict == "busy"
+
+
+def test_strict_mode_treats_any_queue_as_busy(fake, make_gate):
+    fake.usage(active=0, queued=1)
+    reading = make_gate(max_queued=0).check().reading
+    assert reading.verdict == "busy" and "(tolerance 0)" in reading.reason
+
+
+def test_queue_can_be_ignored_entirely(fake, make_gate):
+    fake.usage(active=1, queued=40)
+    assert make_gate(max_queued=None).check().reading.verdict == "quiet"
+
+
+@pytest.mark.parametrize("value, expected", [("", 5), ("0", 0), ("12", 12), ("none", None), ("OFF", None)])
+def test_max_queued_from_env(monkeypatch, value, expected):
+    from gpu_token_utilization.gate import GateConfig
+
+    monkeypatch.setenv("GTU_MAX_QUEUED", value)
+    assert GateConfig.from_env().max_queued == expected
 
 
 def test_force_busy_closes_immediately(fake, make_gate):
@@ -158,9 +184,9 @@ def test_returns_to_live_stats_when_they_recover(fake, make_gate):
 
 
 def test_describe_explains_a_pause(fake, make_gate):
-    fake.usage(active=4, queued=6)
+    fake.usage(active=4, queued=2)
     text = make_gate().check().describe()
-    assert text.startswith("Paused (live stats): qwen-3.8-27b api lane 4/4 slots busy, 6 queued.")
+    assert text.startswith("Paused (live stats): qwen-3.8-27b api lane 4/4 slots busy, 2 queued.")
     assert "Need 3 quiet readings in a row; have 0. Next check in 60 s." in text
 
 

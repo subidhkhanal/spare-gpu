@@ -150,6 +150,12 @@ def why() -> None:
 @app.command()
 def start(
     max_steps: int = typer.Option(None, "--max-steps", help="Stop after this many completed steps."),
+    quiet_readings: int = typer.Option(
+        None, "--quiet-readings", min=1, help="Override: quiet readings in a row needed to open the gate (default 3)."
+    ),
+    max_queued: int = typer.Option(
+        None, "--max-queued", min=0, help="Override: queue length still counted as quiet (default GTU_MAX_QUEUED or 5)."
+    ),
 ) -> None:
     """Run queued jobs one step at a time while BharatCode has spare capacity."""
 
@@ -162,7 +168,12 @@ def start(
             client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0))
         except ApiKeyMissing:
             _fail(f"{API_KEY_ENV} is not set. Export it and try again.")
-        gate = Gate(store, GateConfig.from_env(), client=client)
+        config = GateConfig.from_env()
+        if quiet_readings is not None:
+            config.quiet_needed = quiet_readings
+        if max_queued is not None:
+            config.max_queued = max_queued
+        gate = Gate(store, config, client=client)
         try:
             steps = Scheduler(store, gate, client, log=log).run(max_steps=max_steps)
         except AuthError as exc:

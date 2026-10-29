@@ -52,6 +52,7 @@ class Reply:
     tool_calls: list[dict] | None = None
     retry_after: float | None = None
     headers: dict = field(default_factory=dict)
+    queue_wait_ms: int | None = None  # sent as BharatCode's scheduler headers when set
 
 
 @dataclass
@@ -168,6 +169,11 @@ class FakeBharatCode:
 
         self._ids += 1
         headers = {"x-request-id": f"fake-req-{self._ids}", **reply.headers}
+        if reply.queue_wait_ms is not None:
+            requested = int(self.clock.utcnow().timestamp() * 1000)
+            headers["x-bharatcode-scheduler-requested-at-ms"] = str(requested)
+            headers["x-bharatcode-queue-wait-ms"] = str(reply.queue_wait_ms)
+            headers["x-bharatcode-scheduler-admitted-at-ms"] = str(requested + reply.queue_wait_ms)
         if reply.status != 200:
             if reply.retry_after is not None:
                 headers["retry-after"] = str(reply.retry_after)
