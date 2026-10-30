@@ -1,29 +1,31 @@
 # spare-gpu
 
-Queue the repo chores you keep putting off — tests, docs, code review — and let them run on BharatCode's spare capacity, each on its own git branch.
+**A harness for BharatCode that does your repo chores unattended: tests, docs and code review, run on BharatCode's spare capacity, each on its own git branch.**
+
+A harness is software that combines an AI model with prompts, tools and a workflow to solve a real problem. spare-gpu combines BharatCode's model with:
+
+- **prompts** written for each chore (write passing tests, add docs without touching code, review with line references);
+- **tools**: BharatCode's own CLI as the worker, plus an MCP server so you can drive it by asking in plain words;
+- **capacity awareness**: it reads BharatCode's live load and only sends work when there's a free slot;
+- **git isolation**: every job works in its own worktree on branch `gtu/<job-id>`; your branch and files are never touched;
+- **verification**: generated tests are run and only passing ones are kept; docs changes are checked to be docs-only; anything else is reverted;
+
+so coding work can run overnight, safely, without you watching it.
 
 > **Windows-first.** spare-gpu is built and tested for Windows 10 and 11, and CI runs on Windows only. It may work on macOS or Linux, but it isn't supported or tested there: stopping a running job, in particular, is known to fail on both.
 
 ## Get started
 
-You'll talk to spare-gpu from inside **BharatCode's CLI**: ask it to queue a chore, and spare-gpu does the work in the background when BharatCode has spare capacity. Three steps, all in **PowerShell** (Start menu → type "PowerShell" → Enter). If anything goes wrong, see [Troubleshooting](#troubleshooting).
+All in **PowerShell** (Start menu → type "PowerShell" → Enter). If anything goes wrong, see [Troubleshooting](#troubleshooting).
 
-**1. Install the tools spare-gpu runs on** (skip any you already have): Python, Git, Node.js and BharatCode's CLI.
+**1. Install Python and Git** (skip what you already have):
 
 ```powershell
 winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
 winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
-winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-**Close PowerShell and open a new one**, then:
-
-```powershell
-npm.cmd install -g bharatcode
-bharatcode.cmd auth login
-```
-
-(`npm.cmd` and `bharatcode.cmd`, not `npm` and `bharatcode`: they work even where PowerShell blocks scripts, which it does by default on many PCs. No winget? Download [Python](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH"), [Git](https://git-scm.com/download/win) and [Node.js LTS](https://nodejs.org) by hand.)
+No winget? Download [Python](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH") and [Git](https://git-scm.com/download/win) by hand. Then **close PowerShell and open a new one**.
 
 **2. Install spare-gpu:**
 
@@ -40,33 +42,93 @@ pipx install spare-gpu
 
 Until spare-gpu is published on PyPI, use `pipx install git+https://github.com/subidhkhanal/spare-gpu` instead.
 
-**3. Set it up:**
+**3. Save your BharatCode API key** (get one at [bharatcode.ai/account](https://bharatcode.ai/account)):
 
 ```powershell
-gtu setup
+gtu setkey
 ```
 
-It asks for your BharatCode API key once (get one at [bharatcode.ai/account](https://bharatcode.ai/account); nothing shows while you paste, that's on purpose), checks it, saves it for your Windows account, and registers spare-gpu with BharatCode's CLI. It finishes with `BharatCode reports: spare-gpu connected`. Safe to run again any time.
+Paste the key when asked; nothing shows while you paste, that's on purpose. It's checked and saved for your Windows account, so every terminal finds it.
 
-### Now just ask
+**4. See it work**, in a folder with some of your code:
 
-Open BharatCode in one of your git repos (`bharatcode.cmd` in the repo's folder) and talk to it:
+```powershell
+gtu demo
+```
 
-| You say | What spare-gpu does |
+A short code review of one of your files, usually within a minute or two.
+
+**5. Queue real work** in a git repo (commit your changes first: jobs start from your last commit):
+
+```powershell
+gtu add review src/app.py      # or: gtu add tests src/payments, gtu add docs src/utils
+gtu start                      # runs the queue while BharatCode has spare capacity; leave it running overnight
+gtu report                     # in the morning: what ran, what it produced, what it cost
+```
+
+Each job's work lands on its own branch: look with `git diff HEAD...gtu/<job-id>` and merge what you like. `gtu why` says what it's waiting for; `gtu stop` pauses it. `tests` and `docs` jobs also need BharatCode's CLI; see [Command-line reference](#command-line-reference).
+
+## Power-user route: ask BharatCode (MCP)
+
+If you work inside BharatCode's CLI, you don't need the commands above day to day: spare-gpu includes an [MCP](https://modelcontextprotocol.io) server, so you ask the agent in plain words and it calls spare-gpu for you. It comes with the same install.
+
+**Set it up once** (after step 3 above, with BharatCode's CLI installed: `npm.cmd install -g bharatcode`, then `bharatcode.cmd auth login`):
+
+```powershell
+gtu integrate
+```
+
+It finds BharatCode's config file (`%APPDATA%\BharatCode\Config\opencode.jsonc`), backs it up, adds spare-gpu's entry, keeps everything else, and checks BharatCode reports `spare-gpu connected`. It prints exactly what it changed and how to undo it (`gtu integrate --uninstall`), and running it again changes nothing. (`gtu setup` does steps 3 and this together.) The entry it adds, if you'd rather paste it yourself:
+
+```jsonc
+{
+  "mcp": {
+    "spare-gpu": { "type": "local", "command": ["gtu", "mcp"], "enabled": true }
+  }
+}
+```
+
+**Then just ask**, in BharatCode, in one of your git repos:
+
+| You say | Tool the agent uses |
 |---|---|
-| "queue tests for src/payments tonight" | Queues a **tests** job and starts its background runner. Only tests that pass are kept. |
-| "get docs written for src/utils overnight" | Queues a **docs** job: docstrings and README text, never code changes. |
-| "review app/api.py when there's capacity" | Queues a **review**: likely bugs, risky code, suggestions, as a report file. |
-| "what's queued?" / "is my tests job done?" | Lists jobs by status, with ids and tokens used. |
-| "what did spare-gpu do last night?" | What ran in the last 24 hours, what each job produced, tokens used. |
-| "why hasn't my job started?" | BharatCode's live load and the capacity gate's decision. |
-| "cancel the docs job" / "stop spare-gpu" | Cancels a job, or pauses the runner (jobs are kept). |
+| "queue tests for the payments module", "get docs written for src/utils overnight" | `spare_queue_work`: queues the job and starts spare-gpu's background runner, which keeps going after you close BharatCode |
+| "what's queued?", "is my tests job done?", "why hasn't my job started?" | `spare_work_status`: queued, running and finished work, and why anything is waiting |
+| "what did spare-gpu do last night?" | `spare_last_night`: what ran, what each job produced, what it cost |
+| "cancel the docs job" | `spare_cancel_work` |
+| "is now a good time to run a big refactor?" | `spare_capacity_advice`: BharatCode's load now, its quietest hours over the past week, and how long your own requests waited |
+| "how much of that was CLI overhead?" | `spare_token_cost`: tokens per job, split into overhead and task (see below) |
+| "run the test suite when BharatCode is free" | `spare_run_when_free`: runs a test, build or lint command, or `bharatcode run`, once there's capacity (an allowlist enforced in code; no shell) |
 
-Every job works on its own git branch, `gtu/<job-id>`; your own branch and files are never touched. When it's done, look at the work with `git diff HEAD...gtu/<job-id>` and merge what you like. The runner keeps going after you close BharatCode, sends work only while BharatCode has spare capacity, and stops by itself when the queue is empty.
+**Why seven tools:** an agent picks the right tool less reliably as the number of tools grows and when tools overlap, so related questions are merged into one task-shaped tool (one status tool answers "what's queued", "is it done" and "why isn't it running") rather than one tool per internal function.
 
-Name the folder or file when you can ("src/payments", not "the payments module"), and commit your work first: jobs start from your last commit, so a repo with uncommitted changes is refused.
+Name the folder or file when you can ("src/payments" rather than "the payments module"); the agent otherwise has to search for it first.
 
-**Prefer the terminal?** Everything also works as plain commands: `gtu add tests src/payments`, `gtu start`, `gtu report`. See [Command-line reference](#command-line-reference).
+## Token overhead: what you pay before your prompt
+
+Every request a coding agent sends carries its own system prompt and the descriptions of every tool it can use, before your actual request. Divide the total tokens by the tokens that were really about your task, and you get the **overhead multiplier**. It matters most on a fixed allowance, like a student's 10M tokens a day: an agent that takes 10 steps pays that fixed part 10 times.
+
+**Our measurements** (BharatCode CLI 1.15.46, 31 Oct 2026; method and raw numbers in [research/token-overhead.md](research/token-overhead.md)):
+
+| Before a one-line prompt, BharatCode's CLI sent | Tokens |
+|---|---|
+| its system prompt | about 2,000 |
+| plus its built-in tool schemas (the floor, in an empty folder) | **11,504** |
+| plus spare-gpu's seven MCP tools | **13,833** (+2,329) |
+
+That's paid again on **every agent step**. spare-gpu's own tests and docs jobs switch its MCP tools off inside the CLI, so they don't pay the extra 2.3k.
+
+**For comparison, published benchmarks** (not our measurements): the Systima Applied Research team (July 2026) measured about **7,000** tokens of system prompt, tool schemas and scaffolding for OpenCode, which BharatCode's CLI is built on, and about **33,000** for Claude Code, before reading the user's prompt.
+
+**See your own numbers:**
+
+```powershell
+gtu cost            # the last 24 hours: overhead, task, and the overhead multiplier, per job
+gtu cost <job-id>   # one job
+gtu cost all
+```
+
+For BharatCode CLI steps, spare-gpu counts the measured ~11,500-token floor as overhead and the rest as task. The CLI reports one input number per step, so the floor is our measurement rather than per-request data; set `GTU_CLI_OVERHEAD_TOKENS` to use your own. Reviews, which spare-gpu sends directly, have no harness overhead (about 1.0x).
 
 ---
 
@@ -121,7 +183,8 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 ## What works today vs. what's coming
 
 **Today:**
-- An MCP server inside BharatCode's CLI: queue, check, report and cancel jobs by asking in plain words; `gtu setup` registers it in one step, and queueing a job starts a background runner that outlives the BharatCode session.
+- An MCP server inside BharatCode's CLI with seven task-shaped tools: queue, check, report and cancel work by asking in plain words, plus capacity advice, token cost with the overhead multiplier, and run-any-allowed-command-when-free. `gtu integrate` registers it (with a backup and an undo), and queueing a job starts a background runner that outlives the BharatCode session.
+- `gtu advice` (is now a good time?), `gtu cost` (overhead, task and the overhead multiplier per job) and `gtu run-when-free` (a test, build or lint command, once there's capacity).
 - A SQLite job store (`gtu add`, `gtu list`, `gtu status`, `gtu cancel`) — jobs can be queued, listed and cancelled.
 - A capacity gate (`gtu why`, `gtu start`) that polls BharatCode's live stats, falls back to our own request history when that's unusable, and only sends work while it's genuinely quiet.
 - A runner (`gtu start`) that works through the queue one step at a time, survives being stopped (Ctrl+C, a crash, closing the terminal) and resumes without redoing finished steps.
@@ -155,6 +218,8 @@ Windows only (10 and 11); macOS and Linux aren't supported. It works the same in
 |---|---|---|---|
 | spare-gpu, Git, an API key | ✓ | ✓ | ✓ |
 | BharatCode's CLI (Node.js, `npm.cmd install -g bharatcode`, `bharatcode.cmd auth login`) | not needed | **needed** | **needed** |
+
+To install BharatCode's CLI: `winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements`, open a new PowerShell, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login`. (`npm.cmd` and `bharatcode.cmd` rather than `npm` and `bharatcode`: they work even where PowerShell blocks scripts, which it does by default on many PCs.)
 
 If the CLI is missing, `gtu add tests` / `gtu add docs` say so straight away, `gtu check` reports it, and `gtu start` leaves those jobs queued (not failed) and still runs review jobs.
 
@@ -265,20 +330,11 @@ All of it is configurable:
 
 ## How the BharatCode integration works
 
-`gtu setup` adds spare-gpu as an [MCP](https://modelcontextprotocol.io) server to BharatCode's global config, `%APPDATA%\BharatCode\Config\opencode.jsonc`, keeping anything already in it (the old file is saved next to it). If you'd rather do it by hand, add this and run `bharatcode.cmd mcp list` to check for `✓ spare-gpu connected`:
+`gtu integrate` registers spare-gpu as an MCP server in BharatCode's global config (`%APPDATA%\BharatCode\Config\opencode.jsonc`; it asks BharatCode's CLI for the exact location). Before changing the file it saves a copy next to it (`opencode.jsonc.spare-gpu-backup`); it edits the file in place, so your comments and other settings stay. If the file can't be edited safely (it doesn't parse, say), it changes nothing and prints the snippet and path to paste by hand. `bharatcode.cmd mcp list` should then show `✓ spare-gpu connected`.
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "spare-gpu": { "type": "local", "command": ["gtu", "mcp"], "enabled": true }
-  }
-}
-```
+A project-level `opencode.json` in a repo's root works too (commit it; an uncommitted file makes jobs refuse the repo). BharatCode ignores a file named `bharatcode.json`.
 
-A project-level `opencode.json` in a repo's root works too (commit it; an uncommitted file makes jobs refuse the repo). BharatCode ignores a file named `bharatcode.json`. `gtu setup --remove` unregisters spare-gpu.
-
-The agent gets seven tools: `spare_add_job`, `spare_list_jobs`, `spare_report`, `spare_why`, `spare_cancel`, `spare_start` and `spare_stop`. Each is a thin wrapper over the same code as the matching `gtu` command, and they share the repo's `.gtu\gtu.db` safely with a running `gtu start`. Queueing a job starts the background runner (`gtu start`, with no window, output in `.gtu\runner.log`) if it isn't already running.
+`gtu mcp` is the server itself; BharatCode starts it. Each of the seven tools is a thin wrapper over the same code as a `gtu` command (`gtu add`, `gtu list` + `gtu why`, `gtu report`, `gtu cancel`, `gtu advice`, `gtu cost`, `gtu run-when-free`), and they share the repo's `.gtu\gtu.db` safely with a running `gtu start`. No tool blocks the agent: queueing a job starts the background runner (`gtu start`, no window, output in `.gtu\runner.log`), and `spare_run_when_free` starts a small waiter per command (output in `.gtu\commands\<id>.log`). Commands for `spare_run_when_free` are checked in code against an allowlist of test, build and lint tools plus `bharatcode run`, never run through a shell, and refused if they contain shell characters; `GTU_RUN_ALLOWED` adds your own command prefixes.
 
 ## Troubleshooting
 
@@ -292,7 +348,7 @@ The agent gets seven tools: `spare_add_job`, `spare_list_jobs`, `spare_report`, 
 
 **"BharatCode rejected your API key".** The key was mistyped, revoked or expired. Copy it again from [bharatcode.ai/account](https://bharatcode.ai/account) and run `gtu setkey`.
 
-**"BharatCode's CLI isn't installed" or "not signed in".** Only `tests` and `docs` jobs need it. Install Node.js, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login` (see [Get started](#get-started)), and open a new terminal. Queued tests and docs jobs wait for it and run on the next `gtu start`.
+**"BharatCode's CLI isn't installed" or "not signed in".** Only `tests` and `docs` jobs (and the MCP route) need it. Install Node.js (`winget install --id OpenJS.NodeJS.LTS -e --source winget`), open a new terminal, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login`. Queued tests and docs jobs wait for it and run on the next `gtu start`.
 
 **"Credential store permissions or access could not be verified".** This error comes from BharatCode's own CLI, not from spare-gpu. On our test machine (CLI 1.15.46) it appeared, with or without spare-gpu, whenever the agent needed a second step, so tests and docs jobs and multi-step MCP requests stop there. `bharatcode.cmd auth status` still said "Signed in". We haven't found a fix yet; `bharatcode.cmd auth reconnect`, or `auth logout` then `auth login`, are the first things to try, and BharatCode's support should hear about it. Review jobs, `gtu demo` and `gtu check` don't use the CLI and aren't affected.
 
@@ -353,6 +409,7 @@ python -m twine upload dist/*
 ## Research
 
 - [research/livestats-endpoints.md](research/livestats-endpoints.md) — the live stats endpoints: what they return, how fresh, how trustworthy, the measurement behind the finding above, and the capacity gate design it led to.
+- [research/token-overhead.md](research/token-overhead.md) — BharatCode CLI's fixed token overhead per step, measured: system prompt, built-in tool schemas, MCP tools and project context, with a script to reproduce it.
 - [research/bharatcode-cli-scheduling-check.md](research/bharatcode-cli-scheduling-check.md) — whether BharatCode's own CLI and Desktop app already have a scheduling feature (checked so spare-gpu doesn't duplicate one that exists). Short answer: no.
 - [scripts/livestats_log.py](scripts/livestats_log.py) — logs the live stats once a minute (Qwen and DeepSeek API lanes, plus totals) to CSV, to build a dataset of when BharatCode actually has spare capacity.
 - [scripts/gate_vs_send.py](scripts/gate_vs_send.py) — the gate-vs-send experiment: every 20 minutes it records what the gate would decide, then sends one tiny request anyway and records BharatCode's reported queue wait. Results will be in `research/gate-vs-send-experiment.md`.
