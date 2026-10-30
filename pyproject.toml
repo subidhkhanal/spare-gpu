@@ -42,7 +42,6 @@ dev = [
 build = [
   "build>=1.2",
   "twine>=5",
-  "pyinstaller>=6",
 ]
 
 [project.scripts]

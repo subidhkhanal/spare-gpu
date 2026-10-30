@@ -1,4 +1,4 @@
-"""`gtu demo`: see the tool work within a minute of installing it.
+"""`gtu demo`: see the tool work a minute or two after installing it.
 
 Picks a small source file, sends one short review straight away (no gate, no git
 branch, no clean-repo requirement) and shows the answer. Real jobs are the same
@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from .client import BharatCodeClient, ChatResult, RetryPolicy
 from .jobs import SKIP_DIRS, numbered_listing, review_messages
 
-# Short and impatient on purpose: a demo should answer within a minute or say why not.
-DEMO_TIMEOUT = 90.0
+# Impatient on purpose: a demo should answer or say why not. Not shorter than the normal
+# timeout, though: a real morning demo spent 60 s of 73 s in BharatCode's queue.
+DEMO_TIMEOUT = 180.0
 DEMO_RETRY = RetryPolicy(max_retries=1, base_delay=5.0, max_delay=10.0)
 
 SOURCE_SUFFIXES = {
@@ -49,16 +50,20 @@ def _candidates(root: Path) -> list[Path]:
 
 
 def pick_file(root: Path) -> Path | None:
-    """The small source file closest to IDEAL_BYTES, or None if there isn't one."""
+    """The small source file closest to IDEAL_BYTES, or None if there isn't one.
+
+    Files under MIN_BYTES are used only when nothing bigger fits, so a brand-new repo with
+    one tiny file still gets a demo.
+    """
     sized = []
     for path in _candidates(root):
         try:
             size = path.stat().st_size
-            if MIN_BYTES <= size <= MAX_BYTES and b"\0" not in path.read_bytes()[:4096]:
-                sized.append((abs(size - IDEAL_BYTES), str(path), path))
+            if 0 < size <= MAX_BYTES and b"\0" not in path.read_bytes()[:4096]:
+                sized.append((size < MIN_BYTES, abs(size - IDEAL_BYTES), str(path), path))
         except OSError:
             continue
-    return min(sized)[2] if sized else None
+    return min(sized)[-1] if sized else None
 
 
 @dataclass
@@ -74,7 +79,7 @@ def run_demo(root: Path, file: Path, client: BharatCodeClient) -> DemoResult:
     listing, _ = numbered_listing(root, rel, max_chars=MAX_BYTES * 3)
     result = client.chat(review_messages(listing), max_tokens=DEMO_MAX_TOKENS, reasoning_effort="none",
                          gate={"gate_source": "demo"})
-    out = root / ".gtu" / "demo" / f"review-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.md"
+    out = root / ".gtu" / "demo" / f"review-{datetime.now():%Y%m%d-%H%M%S}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     gitignore = root / ".gtu" / ".gitignore"
     if not gitignore.exists():

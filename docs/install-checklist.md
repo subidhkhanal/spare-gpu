@@ -19,30 +19,24 @@ You need a BharatCode API key from <https://bharatcode.ai/account>.
 1. [ ] `python -m pip install spare-gpu` (inside a virtual environment, or with `--user`).
 2. [ ] `gtu --version` works. If "not recognized": the scripts folder isn't on PATH; use pipx instead.
 
-## C. Standalone binary (no Python needed)
+There is no standalone `gtu.exe`: Windows Smart App Control blocks an unsigned executable
+("An Application Control policy has blocked this file"), so it isn't shipped.
 
-1. [ ] Download `gtu-windows-x64.exe` from the GitHub release, rename it to `gtu.exe`, and put it
-   in a folder on PATH.
-2. [ ] `gtu --version` runs.
-3. [ ] If it says *"An Application Control policy has blocked this file"* or SmartScreen warns
-   about an unknown publisher, that's Windows blocking an unsigned program. It happened in our
-   own test on Windows 11. Note it, and use route A instead.
-
-## D. First run (whichever install route worked)
+## C. First run (whichever install route worked)
 
 In a folder with a small git repo of your own:
 
 1. [ ] Set the key: `$env:BHARATCODE_API_KEY = "..."`.
 2. [ ] `gtu check` lists the models and says "API key accepted".
-3. [ ] `gtu demo` picks a file, prints a short review within about a minute, and tells you what to
-   do next.
+3. [ ] `gtu demo` picks a file, prints a short review, and tells you what to do next. It usually takes
+   under a minute; a real morning run (08:00–11:00 IST) took 73 s, 60 s of it in BharatCode's queue.
 4. [ ] `gtu add review <that file>` then `gtu start --dry-run` shows the job and a token estimate,
    and sends nothing.
 5. [ ] `gtu start --now` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
    own branch and files are unchanged (`git status` is clean).
 6. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
 
-## E. Tests and docs jobs (need BharatCode's own CLI)
+## D. Tests and docs jobs (need BharatCode's own CLI)
 
 1. [ ] Node.js is installed, then `npm install -g bharatcode` and `bharatcode auth login`.
 2. [ ] `gtu add tests <a small source file>`, `gtu start --now`: the job finishes and its branch
@@ -56,4 +50,3 @@ In a folder with a small git repo of your own:
 |---|---|---|---|
 | pipx |  |  |  |
 | pip |  |  |  |
-| binary |  |  |  |

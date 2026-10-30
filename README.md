@@ -10,7 +10,7 @@ spare-gpu runs on Windows (PowerShell).
 pipx install spare-gpu                     # or: pip install spare-gpu
 $env:BHARATCODE_API_KEY = "bc_live_..."
 cd your-repo
-gtu demo                                # a short code review of one of your files, in under a minute
+gtu demo                                # a short code review of one of your files, in a minute or two
 ```
 
 Then queue real work, which runs when BharatCode has capacity:
@@ -20,7 +20,7 @@ gtu add review src/app.py    # or: tests, docs
 gtu start                    # gtu why — what it's waiting for;  gtu report — what got done
 ```
 
-Get a key at [bharatcode.ai/account](https://bharatcode.ai/account). No Python? Download a standalone `gtu.exe` from the [releases page](https://github.com/subidhkhanal/spare-gpu/releases).
+Get a key at [bharatcode.ai/account](https://bharatcode.ai/account). You need Python 3.11+ and pipx; see [Install and try it](#install-and-try-it).
 
 ---
 
@@ -81,7 +81,7 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 - Three job types — `tests`, `docs`, `review` — each working in its own git worktree on branch `gtu/<job-id>` (see below).
 - Per-job and per-night token budgets that pause work when reached.
 - A BharatCode API client with exponential backoff on busy responses, truncation detection (a cut-off reply is kept but never auto-retried with a half-written tool call), and a full request log (tokens, latency, `x-request-id`, BharatCode's reported queue wait, and what the gate saw when each request was sent).
-- `gtu demo` (see it work in a minute), `gtu start --now` (skip the wait), `gtu start --dry-run` (what would run and roughly what it would cost), `gtu stop` (halt cleanly; jobs pause), and `gtu report` (the morning summary).
+- `gtu demo` (see it work in a minute or two), `gtu start --now` (skip the wait), `gtu start --dry-run` (what would run and roughly what it would cost), `gtu stop` (halt cleanly; jobs pause), and `gtu report` (the morning summary).
 - Progress output while it waits: why the gate is closed, when it checks next, and every retry wait.
 - Tests against in-process fakes of the BharatCode API and CLI — no test ever calls the real service.
 
@@ -94,10 +94,20 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 |---|---|---|
 | pipx (recommended) | `pipx install spare-gpu` | Python 3.11+ |
 | pip | `pip install spare-gpu` | Python 3.11+ |
-| Standalone binary | download `gtu-windows-x64.exe` from the [releases page](https://github.com/subidhkhanal/spare-gpu/releases) | nothing |
 | From source | `python -m pip install -e ".[dev]"` | Python 3.11+ |
 
-Windows only (10 and 11); macOS and Linux aren't supported. Every route needs `git`; `tests` and `docs` jobs also need BharatCode's own CLI (`npm install -g bharatcode`, then `bharatcode auth login`). The binary is unsigned: Windows Smart App Control or SmartScreen may block `gtu.exe`. If that happens, use pipx. Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
+Windows only (10 and 11); macOS and Linux aren't supported. Every route needs `git`; `tests` and `docs` jobs also need BharatCode's own CLI (`npm install -g bharatcode`, then `bharatcode auth login`).
+
+**Installing with pipx on Windows**, from PowerShell:
+
+1. Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH"), or `winget install Python.Python.3.12`.
+2. `python -m pip install --user pipx`, then `python -m pipx ensurepath`.
+3. Close and reopen PowerShell so the new PATH takes effect.
+4. `pipx install spare-gpu`, then `gtu --version`.
+
+If `gtu` is "not recognized" after step 4, PATH wasn't refreshed: open a new terminal, or run `python -m pipx ensurepath` again.
+
+There is no standalone `gtu.exe`: an unsigned executable is blocked by Windows Smart App Control, so pipx is the supported route. Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
 
 ```powershell
 gtu demo [file]   # one short review, sent straight away, to see it work
@@ -217,6 +227,7 @@ No test calls the real BharatCode API or CLI; they use in-process fakes of both,
 
 - The finding above is a single-user, single-night measurement, not a study of BharatCode's aggregate load. It shows the premise can be false; it doesn't show how often.
 - The live stats endpoints (`/api/serving/usage`, `/api/serving/history`) are undocumented, unversioned, and could change or disappear without notice. The gate is built to fall back to our own signals when that happens.
+- Measured queue waits vary a lot by time of day. BharatCode's reported wait (`x-bharatcode-queue-wait-ms`) was 0.3–12 s overnight on 30–31 Oct, but 31–72 s between 08:10 and 08:50 IST the next morning. These are early numbers: the full 24-hour gate-vs-send experiment is still running, and its results may change how the gate works.
 - We assume the API lane's queue is the one our requests join. A free slot does not guarantee a prompt start: under pacing, BharatCode can hold a request for several seconds either way, and once answered busy (503) after holding it for 5.6 s.
 - Two assumptions in the client are unconfirmed: that HTTP 429 should be treated like 503 (BharatCode's docs only mention 503), and that `Retry-After` is honoured when sent — it was never observed in testing.
 - `gtu start` stops when the queue is empty; it does not wait for new jobs.

@@ -66,7 +66,14 @@ def test_in_a_git_repo_only_tracked_files_are_considered(tmp_path):
 
 def test_nothing_suitable_returns_none(tmp_path):
     (tmp_path / "README.md").write_text("hello")
+    (tmp_path / "empty.py").write_text("")
     assert pick_file(tmp_path) is None
+
+
+def test_a_repo_with_only_a_tiny_file_still_gets_a_demo(tmp_path):
+    # found on a clean-machine run: a new repo's only file was ~70 bytes and the demo gave up
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    assert pick_file(tmp_path) == tmp_path / "calc.py"
 
 
 # --- the command -------------------------------------------------------------------------
@@ -122,6 +129,16 @@ def test_demo_without_a_key_says_where_to_get_one(project, monkeypatch):
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == 1 and "BHARATCODE_API_KEY is not set" in result.output
     assert "bharatcode.ai/account" in result.output
+    assert '$env:BHARATCODE_API_KEY = "<your key>"' in result.output
+
+
+def test_demo_without_a_key_says_so_before_looking_for_a_file(tmp_path, monkeypatch):
+    # found on a clean-machine run: with no key and no suitable file, it complained about the file
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("BHARATCODE_API_KEY", raising=False)
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == 1 and "BHARATCODE_API_KEY is not set" in result.output
+    assert "path/to/file.py" not in result.output
 
 
 @respx.mock

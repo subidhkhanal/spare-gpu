@@ -19,6 +19,8 @@ from . import dryrun, runstate, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
+SET_KEY = f'Set it in PowerShell with `$env:{API_KEY_ENV} = "<your key>"`'
+
 app = typer.Typer(
     help="Queue repo chores (tests, docs, code review) and run them on BharatCode's spare capacity. "
          "New here? Run `gtu demo`.",
@@ -46,7 +48,7 @@ def check() -> None:
     try:
         result = list_models()
     except ApiKeyMissing:
-        typer.echo(f"error: {API_KEY_ENV} is not set. Export it and try again.", err=True)
+        typer.echo(f"error: {API_KEY_ENV} is not set. {SET_KEY} and try again.", err=True)
         raise typer.Exit(1)
     except ApiError as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -150,7 +152,12 @@ def status(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
 def demo(
     file: Path = typer.Argument(None, help="File to review. Default: a small source file picked for you."),
 ) -> None:
-    """See it work in under a minute: one short code review, sent straight away."""
+    """See it work in a minute or two: one short code review, sent straight away."""
+    try:
+        get_api_key()
+    except ApiKeyMissing:
+        _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account. "
+              f"{SET_KEY}, then run `gtu demo` again.")
     try:
         root = worktree.repo_root(Path.cwd()).resolve()
     except worktree.GitError:
@@ -164,19 +171,13 @@ def demo(
         rel = target.relative_to(root).as_posix()
     except ValueError:
         _fail(f"{file} is outside {root}")
-    try:
-        get_api_key()
-    except ApiKeyMissing:
-        _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account, export it, and run `gtu demo` again.")
 
     typer.echo(f"Reviewing {rel} ({target.stat().st_size} bytes) with BharatCode's {DEFAULT_MODEL}.")
-    typer.echo("The demo skips the capacity gate and sends one request now; this usually takes 10-30 s.\n")
+    typer.echo("The demo skips the capacity gate and sends one request now. This usually takes "
+               "under a minute, but can take two or more when BharatCode is busy.\n")
     with Store.open_default() as store:
-        try:
-            client = BharatCodeClient(store=store, timeout=DEMO_TIMEOUT, retry=DEMO_RETRY,
-                                      on_retry=lambda message: typer.echo(message))
-        except ApiKeyMissing:
-            _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account, export it, and run `gtu demo` again.")
+        client = BharatCodeClient(store=store, timeout=DEMO_TIMEOUT, retry=DEMO_RETRY,
+                                  on_retry=lambda message: typer.echo(message))
         try:
             outcome = run_demo(root, target, client)
         except AuthError:
@@ -272,7 +273,7 @@ def start(
             client = BharatCodeClient(store=store, retry=RetryPolicy.from_env() if now else RetryPolicy(max_retries=0),
                                       on_retry=lambda message: log(f"  {message}"))
         except ApiKeyMissing:
-            _fail(f"{API_KEY_ENV} is not set. Export it and try again.")
+            _fail(f"{API_KEY_ENV} is not set. {SET_KEY} and try again.")
         config = GateConfig.from_env()
         if quiet_readings is not None:
             config.quiet_needed = quiet_readings
