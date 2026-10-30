@@ -167,7 +167,7 @@ def test_work_status_with_nothing_yet(tools):
     with Store(db_path(tools.base)) as store:
         store.conn.execute("DELETE FROM jobs")
         store.conn.commit()
-    assert tools.work_status() == "Nothing queued, running or finished yet."
+    assert tools.work_status().startswith("Nothing queued, running or finished yet in ")
 
 
 # --- spare_last_night -------------------------------------------------------------------------

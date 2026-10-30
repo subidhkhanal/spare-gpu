@@ -139,8 +139,9 @@ class SpareTools:
         except NoStore as exc:
             return str(exc)
         if not jobs and not commands:
-            return "Nothing queued, running or finished yet."
-        lines = []
+            return f"Nothing queued, running or finished yet in {self._root()}."
+        # Named so a wrong folder is obvious (BharatCode can start the server outside the repo).
+        lines = [f"spare-gpu's work in {self._root()}:"]
         for title, statuses in (("Running", ("running",)), ("Waiting", ("queued", "paused")),
                                 ("Finished", FINAL_STATUSES)):
             chosen = [j for j in jobs if j.status in statuses]
