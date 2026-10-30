@@ -561,6 +561,45 @@ def report(
 
 
 @app.command()
+def cost(scope: str = typer.Argument(None, help="A job id, a number of hours (default 24), or 'all'.")) -> None:
+    """What work cost in tokens, including BharatCode CLI overhead."""
+    from . import costs
+
+    with Store.open_default() as store:
+        typer.echo(costs.describe(store, scope))
+
+
+@app.command()
+def advice() -> None:
+    """Is now a good time for heavy work on BharatCode, and if not, when?"""
+    from .mcp_server import SpareTools
+
+    typer.echo(SpareTools(Path.cwd()).capacity_advice())
+
+
+@app.command("run-when-free")
+def run_when_free(command: str = typer.Argument(..., help="The command line, quoted.")) -> None:
+    """Run any command in this repo as soon as BharatCode has spare capacity, in the background."""
+    from . import freerun
+
+    try:
+        cmd = freerun.queue(lambda repo: Store.open_default(), Path.cwd(), command)
+    except freerun.FreeRunError as exc:
+        _fail(str(exc))
+    typer.echo(f"Waiting for spare capacity, then running `{cmd.command}` (command {cmd.id}).")
+    typer.echo(f"Output: {cmd.log_path}. Check with `gtu list`; cancel with `gtu cancel {cmd.id}`.")
+
+
+@app.command("_run-when-free", hidden=True)
+def _run_when_free(command_id: str) -> None:
+    """The background waiter started by run-when-free."""
+    from . import freerun
+
+    with Store.open_default() as store:
+        freerun.wait_and_run(store, command_id, say=lambda message: typer.echo(message))
+
+
+@app.command()
 def mcp(
     folder: Path = typer.Option(None, "--dir", help="Project folder to serve. Default: the current folder."),
 ) -> None:
@@ -573,8 +612,21 @@ def mcp(
 
 @app.command()
 def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) -> None:
-    """Cancel a job that has not finished."""
+    """Cancel a job (or a run-when-free command) that has not finished."""
+    from . import freerun
+
     with Store.open_default() as store:
+        try:
+            store.get_command(job_id)
+        except StoreError:
+            pass
+        else:
+            try:
+                cmd = freerun.cancel(store, job_id)
+            except StoreError as exc:
+                _fail(str(exc))
+            typer.echo(f"Cancelled command {cmd.id} (`{cmd.command}`).")
+            return
         try:
             outcome = actions.cancel_job(store, job_id)
         except actions.ActionError as exc:

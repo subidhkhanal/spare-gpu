@@ -39,16 +39,21 @@ def _popen(args: list[str], repo: Path, log) -> subprocess.Popen:
         return subprocess.Popen(args, creationflags=flags, **common)
 
 
+def spawn(args: list[str], cwd: Path, log_path: Path) -> subprocess.Popen:
+    """Start `args` detached in `cwd`, appending its output to `log_path`."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab") as log:
+        log.write(f"\n--- started by spare-gpu at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n".encode())
+        log.flush()
+        return _popen(args, Path(cwd), log)
+
+
 def launch(repo: Path, args: list[str] | None = None, wait: float = 15.0) -> int:
     """Start the runner for `repo` and return its pid once it has registered itself."""
     repo = Path(repo)
     folder = repo / ".gtu"
-    folder.mkdir(parents=True, exist_ok=True)
     log_path = folder / LOG_NAME
-    with open(log_path, "ab") as log:
-        log.write(f"\n--- started by spare-gpu at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n".encode())
-        log.flush()
-        proc = _popen(args or command(), repo, log)
+    proc = spawn(args or command(), repo, log_path)
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         # The pid that registers can differ from proc.pid: a venv's python.exe on Windows is a

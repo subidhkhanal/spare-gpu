@@ -1,5 +1,6 @@
-"""spare-gpu's MCP server: each tool's text, missing-store handling, the real protocol (in memory
-and over stdio, the way BharatCode's CLI runs it), and sharing the store between processes."""
+"""spare-gpu's MCP server: each of the seven tools against fakes (BharatCode's API, live stats and
+history, and the background processes), missing-store handling, the real protocol (in memory and
+over stdio, the way BharatCode's CLI runs it), and sharing the store between processes."""
 
 import json
 import subprocess
@@ -12,13 +13,16 @@ import httpx
 import mcp
 import pytest
 
+from gpu_token_utilization import freerun
 from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 from conftest import git
 
-TOOLS = {"spare_add_job", "spare_list_jobs", "spare_report", "spare_why", "spare_cancel", "spare_start", "spare_stop"}
+TOOLS = {"spare_queue_work", "spare_work_status", "spare_last_night", "spare_cancel_work",
+         "spare_capacity_advice", "spare_token_cost", "spare_run_when_free"}
+KEY = "bc_live_test_key_not_real"
 
 
 @pytest.fixture(autouse=True)
@@ -27,214 +31,330 @@ def no_db_override(monkeypatch):
 
 
 @pytest.fixture
-def launched():
-    """Repos the tools asked to start a runner for (no real runner is ever started here)."""
-    return []
+def started():
+    """What the tools asked to start in the background (nothing real is started here)."""
+    return {"runner": [], "commands": []}
+
+
+def history(hours_busy: dict[int, float]) -> httpx.Client:
+    """A fake /api/serving/history: one bucket per IST hour, at the given % busy."""
+    day = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    buckets = []
+    for ist_hour, busy in hours_busy.items():
+        start = day + timedelta(hours=ist_hour) - timedelta(hours=5, minutes=30)
+        buckets.append({"started_at": start.isoformat().replace("+00:00", "Z"), "avg_capacity_utilization_pct": busy,
+                        "avg_queue_depth": busy / 20, "avg_running_requests": 2, "sample_count": 60})
+    return httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"status": "ok", "buckets": buckets})))
 
 
 @pytest.fixture
-def tools(git_repo, fake, launched):
+def tools(git_repo, fake, started):
     def gate(store):
         return Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
                     http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
 
     def launch(repo):
-        launched.append(repo)
+        started["runner"].append(repo)
         return 4242
 
-    return SpareTools(git_repo, make_gate=gate, launch=launch)
+    def start_command(cmd):
+        started["commands"].append(cmd.command)
+        return None  # no real waiter
+
+    quiet_at_3am = {h: (10.0 if h == 3 else 95.0) for h in range(24)}
+    return SpareTools(git_repo, make_gate=gate, launch=launch, start_command=start_command,
+                      http=lambda: history(quiet_at_3am))
 
 
 def readable(text: str) -> bool:
     return bool(text.strip()) and not text.lstrip().startswith(("{", "[")) and "Traceback" not in text
 
 
-# --- each tool -------------------------------------------------------------------------------
+def finished_review(git_repo, tools, tokens=355, wait_ms=12500):
+    tools.queue_work("review", "src")
+    with Store(db_path(git_repo)) as store:
+        job = store.list_jobs()[-1]
+        step = store.add_step(job.id, "review")
+        store.set_step(step, "running")
+        store.set_step(step, "done", output="report written")
+        store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=200, prompt_tokens=300,
+                                     completion_tokens=tokens - 300, total_tokens=tokens, job_id=job.id,
+                                     step_id=step, queue_wait_ms=wait_ms))
+        store.set_status(job.id, "done")
+    return job
 
-def test_add_job_queues_into_the_same_store_as_the_cli(tools, git_repo):
-    text = tools.add_job("tests", "src", note="cover negative numbers")
+
+# --- spare_queue_work -------------------------------------------------------------------------
+
+def test_queue_work_writes_to_the_same_store_as_the_cli(tools, git_repo):
+    text = tools.queue_work("tests", "src", note="cover negative numbers")
     assert readable(text) and "Queued a tests job for src" in text and "gtu/" in text
     with Store(git_repo / ".gtu" / "gtu.db") as store:  # exactly where `gtu add` puts it
         (job,) = store.list_jobs()
     assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "queued")
-    assert job.id in text
 
 
-def test_add_job_starts_the_background_runner(tools, git_repo, launched, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    text = tools.add_job("review", "src")
-    assert launched == [git_repo.resolve()]
-    assert "Started the runner in the background (process 4242)" in text and "spare_stop" in text
+def test_queue_work_starts_the_background_runner_and_returns_at_once(tools, git_repo, started, monkeypatch):
+    monkeypatch.setenv("BHARATCODE_API_KEY", KEY)
+    text = tools.queue_work("review", "src")
+    assert started["runner"] == [git_repo.resolve()]
+    assert "Started spare-gpu's runner in the background (process 4242)" in text
 
 
-def test_add_job_without_a_key_queues_but_says_to_run_setup(tools, launched):
-    text = tools.add_job("review", "src")
+def test_queue_work_without_a_key_queues_and_says_to_run_setup(tools, started):
+    text = tools.queue_work("review", "src")
     assert "Queued a review job" in text and "no BharatCode API key" in text and "gtu setup" in text
-    assert launched == []
+    assert started["runner"] == []
 
 
-def test_add_job_when_the_runner_is_already_going_starts_nothing(tools, git_repo, launched, monkeypatch):
+def test_queue_work_when_the_runner_is_already_going_starts_nothing(tools, git_repo, started, monkeypatch):
     from gpu_token_utilization import runstate
 
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    tools.add_job("review", "src")
+    monkeypatch.setenv("BHARATCODE_API_KEY", KEY)
+    tools.queue_work("review", "src")
     runstate.write_run(git_repo / ".gtu")  # this test process plays the running runner
-    text = tools.add_job("docs", "src")
-    assert "already running" in text and len(launched) == 1
+    assert "already going" in tools.queue_work("docs", "src") and len(started["runner"]) == 1
 
 
-def test_start_and_stop(tools, git_repo, launched, monkeypatch):
-    assert "no jobs for this project yet" in tools.start()
-    tools.add_job("review", "src", start=False)
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    assert "1 job(s) waiting. Started the runner" in tools.start() and len(launched) == 1
-    assert tools.stop().startswith("Nothing is running")
-    with Store(db_path(git_repo)) as store:
-        (job,) = store.list_jobs()
-        store.cancel_job(job.id)
-    assert tools.start().startswith("Nothing is queued")
-
-
-def test_add_job_from_a_subfolder_resolves_the_repo_root(git_repo, fake):
-    text = SpareTools(git_repo / "src", launch=lambda repo: 1).add_job("review", "src/calc.py")
+def test_queue_work_from_a_subfolder_resolves_the_repo_root(git_repo):
+    text = SpareTools(git_repo / "src", launch=lambda repo: 1).queue_work("review", "src/calc.py")
     assert "Queued a review job for src/calc.py" in text
     assert (git_repo / ".gtu" / "gtu.db").exists() and not (git_repo / "src" / ".gtu").exists()
 
 
 @pytest.mark.parametrize("path, problem", [("src/nope.py", "does not exist"), ("../elsewhere", "outside this repo")])
-def test_add_job_refusals_are_explained(tools, git_repo, path, problem):
+def test_queue_work_refusals_are_explained(tools, git_repo, path, problem):
     (git_repo.parent / "elsewhere").mkdir()
-    text = tools.add_job("docs", path)
+    text = tools.queue_work("docs", path)
     assert text.startswith("Didn't queue it:") and problem in text
 
 
-def test_add_job_in_a_dirty_repo_says_what_to_do(tools, git_repo):
+def test_queue_work_in_a_dirty_repo_creates_nothing(tools, git_repo):
     (git_repo / "scratch.txt").write_text("wip")
-    text = tools.add_job("review", "src")
+    text = tools.queue_work("review", "src")
     assert "Didn't queue it" in text and "uncommitted changes" in text
-    assert not (git_repo / ".gtu").exists()  # refused before creating anything
+    assert not (git_repo / ".gtu").exists()
 
 
-def test_add_job_outside_any_git_repo(tmp_path):
-    text = SpareTools(tmp_path, launch=lambda repo: 1).add_job("review", ".")
+def test_queue_work_outside_any_git_repo(tmp_path):
+    text = SpareTools(tmp_path, launch=lambda repo: 1).queue_work("review", ".")
     assert "Didn't queue it" in text and "not inside a git repository" in text
 
 
-def test_list_jobs_groups_by_status_with_ids_and_tokens(tools, git_repo):
-    tools.add_job("review", "src")
-    tools.add_job("docs", "src/calc.py")
-    with Store(db_path(git_repo)) as store:
-        done, waiting = store.list_jobs()
-        store.set_status(done.id, "done")
-        store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=200,
-                                     total_tokens=355, job_id=done.id))
-    text = tools.list_jobs()
-    assert readable(text) and "2 job(s)" in text
-    assert text.index("Waiting:") < text.index("Finished:")
-    assert f"- {waiting.id}: docs src/calc.py, queued" in text
-    assert f"- {done.id}: review src, done" in text and "355 tokens" in text
+# --- spare_work_status ------------------------------------------------------------------------
+
+def test_work_status_merges_queue_results_and_why_it_waits(tools, git_repo, fake):
+    done = finished_review(git_repo, tools)
+    tools.queue_work("docs", "src/calc.py")
+    fake.usage_busy(1)
+    text = tools.work_status()
+    assert readable(text) and text.index("Waiting:") < text.index("Finished:")
+    assert "docs src/calc.py, queued" in text and f"- {done.id}: review src, done" in text and "355 tokens" in text
+    assert "runner isn't going" in text and "Why it isn't running yet: Gate closed" in text
 
 
-def test_report_says_what_ran_and_what_it_made(tools, git_repo):
-    tools.add_job("review", "src")
-    with Store(db_path(git_repo)) as store:
-        (job,) = store.list_jobs()
-        step = store.add_step(job.id, "review")
-        store.set_step(step, "running")
-        store.set_step(step, "done", output="report written")
-        store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=200, total_tokens=355,
-                                     job_id=job.id, step_id=step, queue_wait_ms=12500))
-        store.set_status(job.id, "done")
-    text = tools.report()
-    assert readable(text) and "1 job(s), 355 tokens" in text
-    assert f"review src (job {job.id}): done" in text and "12.5 s" in text
-    assert "| Job |" not in text  # plain text, not the Markdown table the CLI prints
+def test_work_status_lists_commands_waiting_for_capacity(tools):
+    tools.run_when_free("python build.py")
+    text = tools.work_status()
+    assert "Commands to run when there's capacity:" in text and "`python build.py`, waiting" in text
 
 
-def test_report_with_nothing_in_the_period(tools):
-    tools.add_job("review", "src")
+def test_work_status_with_nothing_yet(tools):
+    tools.queue_work("review", "src")
     with Store(db_path(tools.base)) as store:
-        (job,) = store.list_jobs()
-        store.conn.execute("UPDATE jobs SET updated_at = '2026-01-01T00:00:00+00:00'")
+        store.conn.execute("DELETE FROM jobs")
         store.conn.commit()
-    assert tools.report().startswith("Nothing ran since")
+    assert tools.work_status() == "Nothing queued, running or finished yet."
 
 
-def test_report_asked_at_midday_still_covers_last_night(tools, git_repo, monkeypatch):
+# --- spare_last_night -------------------------------------------------------------------------
+
+def test_last_night_says_what_ran_what_it_made_and_cost(tools, git_repo):
+    job = finished_review(git_repo, tools)
+    text = tools.last_night()
+    assert readable(text) and "1 job(s), 355 tokens" in text
+    assert f"review src (job {job.id}): done" in text and "12.5 s" in text and "| Job |" not in text
+
+
+def test_last_night_asked_at_midday_still_covers_the_night(tools, git_repo, monkeypatch):
     # found with BharatCode's agent at 13:05: "what did spare-gpu do last night?" answered
     # "Nothing ran since 30 Oct 12:00", because the default was the night that had just begun
-    tools.add_job("review", "src")
+    job = finished_review(git_repo, tools)
     with Store(db_path(git_repo)) as store:
-        (job,) = store.list_jobs()
-        store.set_status(job.id, "done")
         stamp = (datetime.now(timezone.utc) - timedelta(hours=10)).isoformat(timespec="seconds")
         store.conn.execute("UPDATE jobs SET updated_at = ?", (stamp,))
+        store.conn.execute("UPDATE job_steps SET started_at = ?, finished_at = ?", (stamp, stamp))
         store.conn.commit()
     monkeypatch.setenv("GTU_NIGHT_START", (datetime.now() - timedelta(hours=1)).strftime("%H:%M"))
-    assert f"review src (job {job.id}): done" in tools.report()
+    assert f"review src (job {job.id}): done" in tools.last_night()
 
 
-def test_why_gives_the_gates_decision_and_the_queue(tools, fake):
-    tools.add_job("review", "src")
-    fake.usage_busy(1)
-    text = tools.why()
-    assert readable(text) and text.startswith("Gate closed") and "busy" in text
-    assert "1 job(s) waiting" in text and "gtu start" in text
+def test_last_night_with_nothing_in_the_period(tools, git_repo):
+    tools.queue_work("review", "src")
+    with Store(db_path(git_repo)) as store:
+        store.conn.execute("UPDATE jobs SET updated_at = '2026-01-01T00:00:00+00:00'")
+        store.conn.commit()
+    assert tools.last_night().startswith("Nothing ran since")
 
 
-def test_cancel_by_id_and_unknown_ids(tools, git_repo):
-    tools.add_job("docs", "src")
+# --- spare_cancel_work ------------------------------------------------------------------------
+
+def test_cancel_work_jobs_and_unknown_ids(tools, git_repo):
+    tools.queue_work("docs", "src")
     with Store(db_path(git_repo)) as store:
         (job,) = store.list_jobs()
-    text = tools.cancel(f" {job.id} ")
-    assert text.startswith(f"Cancelled job {job.id} (docs src)") and f"gtu/{job.id}" in text
-    again = tools.cancel(job.id)
+    assert tools.cancel_work(f" {job.id} ").startswith(f"Cancelled job {job.id} (docs src)")
+    again = tools.cancel_work(job.id)
     assert "Didn't cancel it" in again and "already cancelled" in again
-    assert "no job with id 'zzzz'" in tools.cancel("zzzz") and "spare_list_jobs" in tools.cancel("zzzz")
+    unknown = tools.cancel_work("zzzz")
+    assert "no job with id 'zzzz'" in unknown and "spare_work_status" in unknown
 
 
-@pytest.mark.parametrize("call", [lambda t: t.list_jobs(), lambda t: t.report(), lambda t: t.why(),
-                                  lambda t: t.cancel("1234abcd")])
-def test_without_a_store_every_reading_tool_explains_and_creates_nothing(call, git_repo, tools):
+def test_cancel_work_cancels_a_waiting_command(tools, git_repo):
+    tools.run_when_free("python build.py")
+    with Store(db_path(git_repo)) as store:
+        (cmd,) = store.list_commands()
+    assert tools.cancel_work(cmd.id) == f"Cancelled command {cmd.id} (`python build.py`)."
+    with Store(db_path(git_repo)) as store:
+        assert store.get_command(cmd.id).status == "cancelled"
+
+
+# --- spare_capacity_advice --------------------------------------------------------------------
+
+def test_capacity_advice_when_busy_points_at_the_quietest_hour(tools, git_repo, fake):
+    finished_review(git_repo, tools, wait_ms=31000)
+    fake.usage_busy(1)
+    text = tools.capacity_advice()
+    assert readable(text) and text.startswith("Not right now:")
+    assert "quietest around 03:00 (10% busy" in text and "Best bet: around 03:00 IST" in text
+    assert "Your own requests waited a median 31.0 s" in text and "spare_run_when_free" in text
+
+
+def test_capacity_advice_when_quiet_says_go_at_once(tools, fake):
+    # one quiet reading is enough for advice; the gate's several-readings rule is for sending jobs
+    fake.usage(times=5, active=1, queued=0)
+    text = tools.capacity_advice()
+    assert text.startswith("Yes, now is a good time") and "Best bet" not in text
+
+
+def test_capacity_advice_without_history_or_a_store(git_repo, fake):
+    gate = lambda store: Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
+                              http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
+    broken = lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    text = SpareTools(git_repo, make_gate=gate, http=broken).capacity_advice()
+    assert "history wasn't available" in text
+    assert not (git_repo / ".gtu").exists()  # advice needs no store and creates none
+
+
+# --- spare_token_cost -------------------------------------------------------------------------
+
+def test_token_cost_splits_cli_overhead_from_the_work(tools, git_repo):
+    review = finished_review(git_repo, tools, tokens=500)
+    tools.queue_work("tests", "src")
+    with Store(db_path(git_repo)) as store:
+        tests = store.list_jobs()[-1]
+        for _ in range(2):
+            store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, status_code=None, prompt_tokens=11500,
+                                         completion_tokens=300, total_tokens=11800, job_id=tests.id))
+    text = tools.token_cost()
+    assert readable(text) and "Tokens used in the last 24 hours: 24,100." in text
+    assert "BharatCode CLI (tests and docs jobs): 23,600 over 2 step(s)" in text and "about 11,500 per step" in text
+    assert "Direct requests (reviews, checks): 500 over 1 request(s)" in text
+    assert f"{tests.id} 23,600" in text
+    assert tools.token_cost(review.id).startswith(f"Tokens used in job {review.id} (review src): 500.")
+    assert "Tokens used in all time" in tools.token_cost("all")
+    assert "Give a job id" in tools.token_cost("nope1234")
+
+
+# --- spare_run_when_free ----------------------------------------------------------------------
+
+def test_run_when_free_queues_and_returns_at_once(tools, git_repo, started):
+    text = tools.run_when_free("  python scripts/refactor.py  ")
+    assert started["commands"] == ["python scripts/refactor.py"]
+    assert "Will run `python scripts/refactor.py`" in text and "spare_cancel_work" in text
+    assert "Didn't queue it: no command given" in tools.run_when_free("   ")
+
+
+def test_the_waiter_runs_the_command_once_the_gate_opens(tools, git_repo, fake):
+    tools.run_when_free(f'"{sys.executable}" -c "open(\'ran.txt\', \'w\').write(\'yes\')"')
+    with Store(db_path(git_repo)) as store:
+        (cmd,) = store.list_commands()
+        fake.usage_busy(2)  # busy for a while, then quiet
+        said = []
+        gate = lambda s: Gate(s, GateConfig(window=(time(0, 0), time(0, 0))),
+                              http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
+        code = freerun.wait_and_run(store, cmd.id, make_gate=gate, sleep=fake.clock.sleep, say=said.append)
+        assert code == 0 and (git_repo / "ran.txt").read_text() == "yes"
+        assert any(line.startswith("Gate closed") for line in said)
+        done = store.get_command(cmd.id)
+        assert done.status == "done" and done.exit_code == 0 and done.started_at and done.finished_at
+
+
+def test_a_command_cancelled_while_waiting_never_runs(tools, git_repo, fake):
+    tools.run_when_free("echo should-not-run > ran.txt")
+    with Store(db_path(git_repo)) as store:
+        (cmd,) = store.list_commands()
+        store.cancel_command(cmd.id)
+        assert freerun.wait_and_run(store, cmd.id, sleep=fake.clock.sleep, say=lambda m: None) is None
+    assert not (git_repo / "ran.txt").exists()
+
+
+# --- missing store ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("call", [lambda t: t.work_status(), lambda t: t.last_night(),
+                                  lambda t: t.cancel_work("1234abcd"), lambda t: t.token_cost()])
+def test_without_a_store_tools_explain_and_create_nothing(call, git_repo, tools):
     text = call(tools)
-    assert "no jobs for this project yet" in text and "spare_add_job" in text
+    assert "hasn't been used in this project yet" in text and "spare_queue_work" in text
     assert not (git_repo / ".gtu").exists()
 
 
 # --- the real protocol -----------------------------------------------------------------------
 
-def test_protocol_lists_five_tools_with_descriptions_an_agent_can_choose_from(tools, git_repo):
+def test_protocol_offers_exactly_seven_task_shaped_tools(tools, git_repo):
     async def go():
         async with mcp.Client(build_server(git_repo, tools)) as client:
             return (await client.list_tools()).tools
 
     listed = {t.name: t for t in anyio.run(go)}
     assert set(listed) == TOOLS
-    add = listed["spare_add_job"]
-    assert "tonight" in add.description and "later" in add.description.lower()
-    assert set(add.input_schema["properties"]["type"]["enum"]) == {"tests", "docs", "review"}
-    assert add.input_schema["required"] == ["type", "path"]
-    assert "last night" in listed["spare_report"].description
-    assert "why hasn't my job started" in listed["spare_why"].description
-    assert listed["spare_list_jobs"].annotations.read_only_hint is True
-    assert listed["spare_cancel"].annotations.destructive_hint is True
+    queue = listed["spare_queue_work"]
+    assert set(queue.input_schema["properties"]["type"]["enum"]) == {"tests", "docs", "review"}
+    assert queue.input_schema["required"] == ["type", "path"]
+    # each description names its example phrasings and steers away from its nearest neighbour
+    for name, phrase, neighbour in [
+        ("spare_queue_work", "queue tests for the payments module", "spare_run_when_free"),
+        ("spare_work_status", "why hasn't my job started?", "spare_last_night"),
+        ("spare_last_night", "what did spare-gpu do last night?", "spare_token_cost"),
+        ("spare_cancel_work", "cancel the docs job", "spare_work_status"),
+        ("spare_capacity_advice", "is now a good time to run a big refactor?", "spare_run_when_free"),
+        ("spare_token_cost", "how much of it was CLI overhead?", None),
+        ("spare_run_when_free", "run the big refactor script when BharatCode is free", "spare_queue_work"),
+    ]:
+        description = " ".join(listed[name].description.split())
+        assert phrase in description, name
+        assert neighbour is None or neighbour in description, name
+    assert listed["spare_work_status"].annotations.read_only_hint is True
+    assert listed["spare_cancel_work"].annotations.destructive_hint is True
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):
     async def go():
         async with mcp.Client(build_server(git_repo, tools)) as client:
-            added = await client.call_tool("spare_add_job", {"type": "review", "path": "src"})
-            listed = await client.call_tool("spare_list_jobs", {})
-            return added, listed
+            queued = await client.call_tool("spare_queue_work", {"type": "review", "path": "src"})
+            status = await client.call_tool("spare_work_status", {})
+            return queued, status
 
-    added, listed = anyio.run(go)
-    assert not added.is_error and readable(added.content[0].text) and "Queued a review job" in added.content[0].text
-    assert "review src, queued" in listed.content[0].text
+    queued, status = anyio.run(go)
+    assert not queued.is_error and readable(queued.content[0].text) and "Queued a review job" in queued.content[0].text
+    assert "review src, queued" in status.content[0].text
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode's CLI uses on Windows")
 def test_gtu_mcp_over_stdio_like_bharatcode_runs_it(git_repo):
     # A real `gtu mcp` subprocess: nothing but protocol may reach stdout, on Windows too.
+    # (No API key here, so queueing can't start a real runner.)
     params = mcp.StdioServerParameters(
         command=sys.executable,
         args=["-c", "from gpu_token_utilization.cli import app; app()", "mcp", "--dir", str(git_repo)],
@@ -244,8 +364,8 @@ def test_gtu_mcp_over_stdio_like_bharatcode_runs_it(git_repo):
         with anyio.fail_after(60):
             async with mcp.Client(params) as client:
                 names = {t.name for t in (await client.list_tools()).tools}
-                added = await client.call_tool("spare_add_job", {"type": "docs", "path": "src/calc.py"})
-                return names, added.content[0].text
+                queued = await client.call_tool("spare_queue_work", {"type": "docs", "path": "src/calc.py"})
+                return names, queued.content[0].text
 
     names, text = anyio.run(go)
     assert names == TOOLS and "Queued a docs job for src/calc.py" in text

@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS gate_readings (
     busy_streak   INTEGER NOT NULL,
     reason        TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS commands (
+    id           TEXT PRIMARY KEY,
+    command      TEXT NOT NULL,
+    repo         TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'waiting'
+                 CHECK (status IN ('waiting', 'running', 'done', 'failed', 'cancelled')),
+    pid          INTEGER,
+    exit_code    INTEGER,
+    log_path     TEXT,
+    created_at   TEXT NOT NULL,
+    started_at   TEXT,
+    finished_at  TEXT
+);
 """
 
 # Columns added after Phase 1; older databases get them on open.
@@ -116,6 +130,24 @@ class Job:
     created_at: str
     updated_at: str
     base_commit: str | None = None  # the commit the job's branch started from
+
+
+@dataclass
+class Command:
+    """A command to run once BharatCode has spare capacity (`spare_run_when_free`)."""
+    id: str
+    command: str
+    repo: str
+    status: str
+    pid: int | None
+    exit_code: int | None
+    log_path: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+
+
+COMMAND_FINAL = ("done", "failed", "cancelled")
 
 
 @dataclass
@@ -165,11 +197,12 @@ class GateReading:
 class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Keep the store out of whatever repo it is created in.
-        marker = self.path.parent / ".gitignore"
-        if not marker.exists():
-            marker.write_text("*\n", encoding="utf-8")
+        if str(path) != ":memory:":  # ":memory:": a throwaway store, e.g. for advice in a fresh folder
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            # Keep the store out of whatever repo it is created in.
+            marker = self.path.parent / ".gitignore"
+            if not marker.exists():
+                marker.write_text("*\n", encoding="utf-8")
         # Several processes share this file: `gtu start`, other gtu commands, and the MCP server.
         # Wait up to 30 s for another writer instead of failing at once, and use WAL so readers
         # never block the writer (or the other way round).
@@ -353,6 +386,49 @@ class Store:
             (limit,),
         ).fetchall()
         return [r[0] for r in rows]
+
+    # commands run when there's capacity
+
+    def add_command(self, command: str, repo: str) -> Command:
+        command_id = "c" + secrets.token_hex(4)[1:]  # 8 characters like a job id, but starts with c
+        with self.conn:
+            self.conn.execute("INSERT INTO commands (id, command, repo, created_at) VALUES (?, ?, ?, ?)",
+                              (command_id, command, repo, utc_now()))
+        return self.get_command(command_id)
+
+    def get_command(self, command_id: str) -> Command:
+        row = self.conn.execute("SELECT * FROM commands WHERE id = ?", (command_id,)).fetchone()
+        if row is None:
+            raise StoreError(f"no command with id {command_id!r}")
+        return Command(**dict(row))
+
+    def list_commands(self) -> list[Command]:
+        rows = self.conn.execute("SELECT * FROM commands ORDER BY created_at, rowid").fetchall()
+        return [Command(**dict(r)) for r in rows]
+
+    def update_command(self, command_id: str, **fields) -> Command:
+        """Set fields; a cancelled command stays cancelled whatever a runner reports later."""
+        allowed = {"status", "pid", "exit_code", "log_path", "started_at", "finished_at"}
+        if not fields or set(fields) - allowed:
+            raise StoreError(f"can't update command fields {sorted(set(fields) - allowed)}")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        with self.conn:
+            self.conn.execute(f"UPDATE commands SET {sets} WHERE id = ? AND status != 'cancelled'",
+                              (*fields.values(), command_id))
+        return self.get_command(command_id)
+
+    def cancel_command(self, command_id: str) -> Command:
+        self.get_command(command_id)
+        marks = ", ".join("?" for _ in COMMAND_FINAL)
+        with self.conn:
+            changed = self.conn.execute(
+                f"UPDATE commands SET status = 'cancelled', finished_at = ? WHERE id = ? AND status NOT IN ({marks})",
+                (utc_now(), command_id, *COMMAND_FINAL),
+            ).rowcount
+        found = self.get_command(command_id)
+        if not changed:
+            raise StoreError(f"command {command_id} is already {found.status}")
+        return found
 
     # gate readings
 
