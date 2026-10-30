@@ -23,6 +23,7 @@ from .budget import BudgetExceeded, Budgets
 from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult
 from .gate import Decision, Gate
 from .jobs import PLANS, JobConfig
+from .runstate import StopRequested
 from .store import Job, RequestLog, Store
 
 # Files jobs may create for their own tooling that must never be committed.
@@ -43,14 +44,22 @@ class StepContext:
     config: JobConfig
     cli: BharatCodeCli | None
     budget_remaining: Callable[[], int]
+    should_stop: Callable[[], bool] = lambda: False
+    log: Callable[[str], None] = lambda message: None
 
     def chat(self, messages: list[dict], **kwargs) -> ChatResult:
-        return self.client.chat(
+        self.log("  Sending request to BharatCode...")
+        result = self.client.chat(
             messages, job_id=self.job.id, step_id=self.step_id, gate=self.decision.gate_info, **kwargs
         )
+        waited = f", {result.queue_wait_ms / 1000:.1f} s of it in BharatCode's queue" if result.queue_wait_ms else ""
+        self.log(f"  Answer received in {result.elapsed_ms / 1000:.1f} s ({result.usage.total_tokens:,} tokens{waited}).")
+        return result
 
     def log_cli_step(self, step: CliStep) -> None:
         """Record one BharatCode CLI step like a request, so budgets and reports include it."""
+        took = f" in {step.elapsed_ms / 1000:.0f} s" if step.elapsed_ms else ""
+        self.log(f"  BharatCode CLI finished a step{took} ({step.total_tokens:,} tokens).")
         self.store.log_request(
             RequestLog(
                 endpoint=CLI_ENDPOINT, model=self.cli.model if self.cli else None, attempt=1, status_code=None,
@@ -85,6 +94,8 @@ class Scheduler:
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         log: Callable[[str], None] = lambda message: None,
         isolate: bool = True,
+        ignore_gate: bool = False,
+        should_stop: Callable[[], bool] | None = None,
     ):
         self.store = store
         self.gate = gate
@@ -97,6 +108,22 @@ class Scheduler:
         self._now = now
         self._log = log
         self.isolate = isolate
+        self.ignore_gate = ignore_gate  # `gtu start --now`
+        # `gtu stop`: checked between steps, about once a second while waiting, and by the CLI.
+        self._interruptible = should_stop is not None
+        self.should_stop = should_stop or (lambda: False)
+        self.stopped = False
+
+    def _wait(self, seconds: float) -> None:
+        """Sleep, waking about once a second to notice `gtu stop`."""
+        if not self._interruptible:
+            self._sleep(seconds)
+            return
+        left = seconds
+        while left > 0 and not self.should_stop():
+            chunk = min(1.0, left)
+            self._sleep(chunk)
+            left -= chunk
 
     def pending_jobs(self) -> list[Job]:
         jobs = self.store.list_jobs(include_finished=False)
@@ -115,7 +142,15 @@ class Scheduler:
         """Work through the queue until it is empty or every job left is over budget."""
         completed = 0
         paused_for_budget: set[str] = set()
+        queued = self.pending_jobs()
+        if queued:
+            self._log(f"{len(queued)} job(s) to run. "
+                      + ("Starting now (--now)." if self.ignore_gate else "Checking BharatCode's capacity first."))
+        gate_was_open = False
         while not stop():
+            if self.should_stop():
+                self._stop_now()
+                return completed
             runnable = []
             for job in self.pending_jobs():
                 reason = self._over_budget(job)
@@ -129,14 +164,22 @@ class Scheduler:
                 self._log("Queue empty." if not paused_for_budget else "Nothing left that fits the token budgets.")
                 return completed
             job = runnable[0]
-            decision = self.gate.check()
+            decision = self.gate.check_bypassed() if self.ignore_gate else self.gate.check()
             if not decision.open:
+                gate_was_open = False
                 if job.status == "running":
                     self.store.set_status(job.id, "paused")
                 self._log(decision.describe())
-                self._sleep(decision.next_check)
+                self._wait(decision.next_check)
                 continue
-            if self.run_step(job, decision) == "done":
+            if not gate_was_open:
+                self._log(decision.describe())
+                gate_was_open = True
+            outcome = self.run_step(job, decision)
+            if outcome == "stopped":
+                self._stop_now()
+                return completed
+            if outcome == "done":
                 completed += 1
                 if max_steps is not None and completed >= max_steps:
                     return completed
@@ -152,6 +195,8 @@ class Scheduler:
         if self.isolate:
             try:
                 workdir = worktree.create(Path(job.repo), job.id)
+                if not job.base_commit:  # first run: remember where the branch started, for reports
+                    self.store.set_base_commit(job.id, worktree._git(workdir, "rev-parse", "HEAD").stdout.strip())
             except worktree.GitError as exc:
                 self.store.set_status(job.id, "failed")
                 self._log(f"Job {job.id}: cannot start: {exc}")
@@ -181,10 +226,18 @@ class Scheduler:
         ctx = StepContext(
             job, step["id"], step["name"], self.store, self.client, decision, workdir, state_dir,
             self.config, self.cli, lambda: self.budgets.remaining(self.store, job.id, self._now()),
+            self.should_stop, self._log,
         )
+        doing = "the BharatCode CLI is working on it; this can take several minutes" \
+            if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one request"
+        self._log(f"Job {job.id}: step {step['seq']} of {len(steps)} ({step['name']}) started: {doing}.")
         main_before = self._main_state(job)
         try:
             output = fn(ctx)
+        except StopRequested:
+            self._undo_step(job, workdir)
+            self.store.set_status(job.id, "paused")
+            return "stopped"
         except BusyError as exc:
             self._undo_step(job, workdir)
             self.gate.force_busy(f"BharatCode answered busy ({exc})")
@@ -199,6 +252,10 @@ class Scheduler:
             self._undo_step(job, workdir)
             raise
         except (BharatCodeError, worktree.GitError, CliNotFound) as exc:
+            if self.should_stop():  # failed because we were being stopped: that's a pause, not a failure
+                self._undo_step(job, workdir)
+                self.store.set_status(job.id, "paused")
+                return "stopped"
             self.store.set_step(step["id"], "failed", str(exc))
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
@@ -226,6 +283,14 @@ class Scheduler:
             self._finish(job, "done")
             self._log(f"Job {job.id}: finished; results are on branch {worktree.branch_name(job.id)}.")
         return "done"
+
+    def _stop_now(self) -> None:
+        """`gtu stop` was requested: leave every started job paused and resumable."""
+        self.stopped = True
+        for job in self.store.list_jobs(include_finished=False):
+            if job.status == "running":
+                self.store.set_status(job.id, "paused")
+        self._log("Stopped by `gtu stop`. Progress is saved; run `gtu start` to resume.")
 
     def _main_state(self, job: Job) -> tuple[str, str] | None:
         """HEAD and status of the user's checkout, to prove a step left it alone."""

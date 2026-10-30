@@ -186,8 +186,20 @@ def test_returns_to_live_stats_when_they_recover(fake, make_gate):
 def test_describe_explains_a_pause(fake, make_gate):
     fake.usage(active=4, queued=2)
     text = make_gate().check().describe()
-    assert text.startswith("Paused (live stats): qwen-3.8-27b api lane 4/4 slots busy, 2 queued.")
-    assert "Need 3 quiet readings in a row; have 0. Next check in 60 s." in text
+    assert text == ("Gate closed: qwen-3.8-27b api lane 4/4 slots busy, 2 queued. Next check in 60s "
+                    "(opens after 3 quiet readings in a row; 0 so far).")
+
+
+def test_describe_names_the_fallback_and_an_open_gate(fake, make_gate):
+    fake.usage(status=500)
+    assert make_gate(probe=False).check().describe().startswith("Gate closed (fallback probes): live stats returned HTTP 500")
+    fake.clock.advance(60)
+    fake.usage_quiet(3)
+    gate = make_gate()
+    for _ in range(3):
+        decision = gate.check()
+        fake.clock.advance(60)
+    assert decision.describe() == "Gate open: qwen-3.8-27b api lane 0/4 slots busy, 0 queued."
 
 
 def test_window_helpers():

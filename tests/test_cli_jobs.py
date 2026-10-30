@@ -113,7 +113,7 @@ def test_why_explains_the_gate(repo):
     )
     result = runner.invoke(app, ["why"])
     assert result.exit_code == 0, result.output
-    assert "Paused (live stats): qwen-3.8-27b api lane 4/4 slots busy, 6 queued (tolerance 5)." in result.output
+    assert "Gate closed: qwen-3.8-27b api lane 4/4 slots busy, 6 queued (tolerance 5). Next check in" in result.output
 
 
 def test_start_without_key_fails(repo, monkeypatch):

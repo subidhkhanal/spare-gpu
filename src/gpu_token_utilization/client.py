@@ -143,6 +143,7 @@ class BharatCodeClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.perf_counter,
         rng: Callable[[], float] = random.random,
+        on_retry: Callable[[str], None] | None = None,
     ):
         self._key = api_key or get_api_key()
         self.timeout = request_timeout() if timeout is None else timeout
@@ -153,6 +154,8 @@ class BharatCodeClient:
         self._clock = clock
         self._rng = rng
         self._lock = threading.Lock()
+        # Told about every wait before a retry, so a long backoff never looks like a hang.
+        self.on_retry = on_retry or (lambda message: None)
 
     def __repr__(self) -> str:
         return f"BharatCodeClient(base_url={str(self._http.base_url)!r})"
@@ -268,7 +271,9 @@ class BharatCodeClient:
     def _wait_or_give_up(self, attempt: int, retry_after: float | None, what: str) -> None:
         if attempt > self.retry.max_retries:
             raise BusyError(f"BharatCode {what}; gave up after {attempt} attempts")
-        self._sleep(self.retry.delay(attempt, retry_after, self._rng))
+        wait = self.retry.delay(attempt, retry_after, self._rng)
+        self.on_retry(f"BharatCode {what}. Waiting {wait:.0f}s before retry {attempt} of {self.retry.max_retries}.")
+        self._sleep(wait)
 
     @staticmethod
     def _parse(body: dict, request_id: str | None, elapsed_ms: float, attempts: int) -> ChatResult:

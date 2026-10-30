@@ -90,7 +90,9 @@ ADDED_COLUMNS = {
     "requests": {
         "gate_source": "TEXT", "queue_at_send": "INTEGER", "active_at_send": "INTEGER",
         "queue_wait_ms": "INTEGER", "scheduler_requested_at_ms": "INTEGER", "scheduler_admitted_at_ms": "INTEGER",
+        "slots_at_send": "INTEGER",
     },
+    "jobs": {"base_commit": "TEXT"},
 }
 
 
@@ -112,6 +114,7 @@ class Job:
     note: str | None
     created_at: str
     updated_at: str
+    base_commit: str | None = None  # the commit the job's branch started from
 
 
 @dataclass
@@ -134,6 +137,7 @@ class RequestLog:
     gate_source: str | None = None
     queue_at_send: int | None = None
     active_at_send: int | None = None
+    slots_at_send: int | None = None
     # When the request left us; defaults to the time the row is written.
     sent_at: str | None = None
     queue_wait_ms: int | None = None
@@ -227,6 +231,10 @@ class Store:
             self.conn.execute("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?", (status, utc_now(), job_id))
         return self.get_job(job_id)
 
+    def set_base_commit(self, job_id: str, commit: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE jobs SET base_commit = ? WHERE id = ?", (commit, job_id))
+
     def cancel_job(self, job_id: str) -> Job:
         job = self.get_job(job_id)
         if job.status in FINAL_STATUSES:
@@ -277,8 +285,8 @@ class Store:
                 """INSERT INTO requests (job_id, step_id, sent_at, endpoint, model, attempt, status_code,
                        elapsed_ms, request_id, prompt_tokens, completion_tokens, reasoning_tokens,
                        total_tokens, finish_reason, truncated, error, gate_source, queue_at_send, active_at_send,
-                       queue_wait_ms, scheduler_requested_at_ms, scheduler_admitted_at_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       queue_wait_ms, scheduler_requested_at_ms, scheduler_admitted_at_ms, slots_at_send)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     entry.job_id, entry.step_id, entry.sent_at or utc_now(), entry.endpoint, entry.model,
                     entry.attempt, entry.status_code, entry.elapsed_ms, entry.request_id, entry.prompt_tokens,
@@ -286,6 +294,7 @@ class Store:
                     entry.finish_reason, int(entry.truncated), entry.error,
                     entry.gate_source, entry.queue_at_send, entry.active_at_send,
                     entry.queue_wait_ms, entry.scheduler_requested_at_ms, entry.scheduler_admitted_at_ms,
+                    entry.slots_at_send,
                 ),
             )
         return cur.lastrowid
@@ -298,6 +307,17 @@ class Store:
     def recent_requests(self, limit: int) -> list[sqlite3.Row]:
         """Most recent request attempts, newest first."""
         return self.conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+    def step_token_history(self, kind: str, step_name: str) -> list[int]:
+        """Tokens each finished step of this kind and name used in earlier jobs."""
+        rows = self.conn.execute(
+            """SELECT SUM(r.total_tokens) FROM requests r
+               JOIN job_steps s ON r.step_id = s.id JOIN jobs j ON s.job_id = j.id
+               WHERE j.kind = ? AND s.name = ? AND s.status = 'done'
+               GROUP BY s.id""",
+            (kind, step_name),
+        ).fetchall()
+        return [r[0] for r in rows]
 
     def tokens_since(self, since_utc_iso: str) -> int:
         """Tokens used by requests sent at or after `since_utc_iso` (an ISO UTC timestamp)."""

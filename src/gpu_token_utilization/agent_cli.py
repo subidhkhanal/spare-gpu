@@ -85,7 +85,7 @@ class CliResult:
     steps: list[CliStep] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     error: str | None = None
-    stopped: str | None = None  # "timeout" or "budget" when we killed it
+    stopped: str | None = None  # "timeout", "budget" or "stop" when we killed it
 
     @property
     def tokens(self) -> int:
@@ -129,6 +129,7 @@ class BharatCodeCli:
         commands: tuple[str, ...] = (),
         token_budget: int | None = None,
         on_step: Callable[[CliStep], None] = lambda step: None,
+        should_stop: Callable[[], bool] = lambda: False,
     ) -> CliResult:
         workdir = Path(workdir)
         command = self.command or resolve_command()
@@ -158,6 +159,9 @@ class BharatCodeCli:
                 left = deadline - time.monotonic()
                 if left <= 0:
                     result.stopped = "timeout"
+                    break
+                if should_stop():
+                    result.stopped = "stop"  # `gtu stop`
                     break
                 try:
                     line = lines.get(timeout=min(left, 1.0))

@@ -1,24 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
 import typer
 
 from . import __version__
-from .api import API_KEY_ENV, ApiError, ApiKeyMissing, list_models, verify_key
-from .client import AuthError, BharatCodeClient, RetryPolicy
+from .api import API_KEY_ENV, ApiError, ApiKeyMissing, get_api_key, list_models, verify_key
+from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
+from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .gate import Gate, GateConfig
 from .agent_cli import BharatCodeCli
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import worktree
+from . import dryrun, runstate, worktree
+from . import report as reporting
 from .store import Store, StoreError
 
 app = typer.Typer(
-    help="Queue repo work and run it overnight on BharatCode's spare capacity.",
+    help="Queue repo chores (tests, docs, code review) and run them on BharatCode's spare capacity. "
+         "New here? Run `gtu demo`.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -144,6 +147,71 @@ def status(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
 
 
 @app.command()
+def demo(
+    file: Path = typer.Argument(None, help="File to review. Default: a small source file picked for you."),
+) -> None:
+    """See it work in under a minute: one short code review, sent straight away."""
+    try:
+        root = worktree.repo_root(Path.cwd()).resolve()
+    except worktree.GitError:
+        root = Path.cwd().resolve()
+    target = (Path.cwd() / file).resolve() if file else pick_file(root)
+    if target is None:
+        _fail("found no small source file here to review; try `gtu demo path/to/file.py`")
+    if not target.is_file():
+        _fail(f"{file} is not a file")
+    try:
+        rel = target.relative_to(root).as_posix()
+    except ValueError:
+        _fail(f"{file} is outside {root}")
+    try:
+        get_api_key()
+    except ApiKeyMissing:
+        _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account, export it, and run `gtu demo` again.")
+
+    typer.echo(f"Reviewing {rel} ({target.stat().st_size} bytes) with BharatCode's {DEFAULT_MODEL}.")
+    typer.echo("The demo skips the capacity gate and sends one request now; this usually takes 10-30 s.\n")
+    with Store.open_default() as store:
+        try:
+            client = BharatCodeClient(store=store, timeout=DEMO_TIMEOUT, retry=DEMO_RETRY,
+                                      on_retry=lambda message: typer.echo(message))
+        except ApiKeyMissing:
+            _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account, export it, and run `gtu demo` again.")
+        try:
+            outcome = run_demo(root, target, client)
+        except AuthError:
+            _fail(f"BharatCode rejected the key in {API_KEY_ENV}. Check it at https://bharatcode.ai/account.")
+        except BusyError:
+            _fail("BharatCode is busy right now. Try `gtu demo` again in a minute.")
+        except BharatCodeError as exc:
+            _fail(str(exc))
+        finally:
+            client.close()
+
+    result = outcome.result
+    rule = "-" * 72
+    typer.echo(rule)
+    typer.echo(result.content.strip())
+    typer.echo(rule)
+    stats = f"{result.usage.total_tokens} tokens, {result.elapsed_ms / 1000:.1f} s"
+    if result.queue_wait_ms is not None:
+        stats += f" (of which {result.queue_wait_ms / 1000:.1f} s waiting in BharatCode's queue)"
+    typer.echo(stats + (f", request {result.request_id}" if result.request_id else "") + ".")
+    if result.truncated:
+        typer.echo("The answer was cut off at the demo's short limit; real review jobs allow much longer answers.")
+    typer.echo(f"Saved to {outcome.saved_to}\n")
+    typer.echo(
+        "That was one request, sent immediately. Real jobs run on their own git branch and are sent\n"
+        "only when BharatCode has spare capacity, so they may not start straight away:\n\n"
+        f"  gtu add review {rel}   # a full review, saved as gtu-review-<id>.md\n"
+        f"  gtu add tests {rel}    # tests for it; only ones that pass are kept\n"
+        f"  gtu add docs {rel}     # docstrings and README additions\n"
+        "  gtu start                # runs them when there is capacity\n"
+        "  gtu why                  # what it's waiting for, if anything"
+    )
+
+
+@app.command()
 def why() -> None:
     """Show whether the capacity gate would send work now, and why."""
     with Store.open_default() as store:
@@ -164,16 +232,45 @@ def start(
     max_queued: int = typer.Option(
         None, "--max-queued", min=0, help="Override: queue length still counted as quiet (default GTU_MAX_QUEUED or 5)."
     ),
+    now: bool = typer.Option(
+        False, "--now", help="Ignore the capacity gate and run queued jobs immediately."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show which jobs and steps would run and roughly what they'd cost; send nothing."
+    ),
 ) -> None:
-    """Run queued jobs one step at a time while BharatCode has spare capacity."""
+    """Run queued jobs one step at a time while BharatCode has spare capacity (or right away with --now)."""
 
     def log(message: str) -> None:
         typer.echo(f"[{datetime.now():%H:%M:%S}] {message}")
 
-    with Store.open_default() as store:
+    if dry_run:
         try:
-            # No client-side retries: a busy answer closes the gate, which decides when to try again.
-            client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0))
+            job_config = JobConfig.from_env()
+        except ValueError as exc:
+            _fail(str(exc))
+        with Store.open_default() as store:
+            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc), now))
+        return
+
+    if now:
+        typer.echo(
+            "--now: running queued jobs immediately, without waiting for spare capacity.\n"
+            "Normally `gtu start` sends work only when BharatCode has a free slot, so your jobs use\n"
+            "capacity nobody else needs. With --now they compete with everyone else's requests and may\n"
+            "wait in BharatCode's queue. Busy answers are still retried politely (up to ~15 min), and\n"
+            "token budgets still apply.\n"
+        )
+    with Store.open_default() as store:
+        folder = store.path.parent
+        other = runstate.running_pid(folder)
+        if other:
+            _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
+        try:
+            # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
+            # again. --now: no gate to do that, so the client's patient retry ladder takes over.
+            client = BharatCodeClient(store=store, retry=RetryPolicy.from_env() if now else RetryPolicy(max_retries=0),
+                                      on_retry=lambda message: log(f"  {message}"))
         except ApiKeyMissing:
             _fail(f"{API_KEY_ENV} is not set. Export it and try again.")
         config = GateConfig.from_env()
@@ -182,22 +279,93 @@ def start(
         if max_queued is not None:
             config.max_queued = max_queued
         gate = Gate(store, config, client=client)
+        runstate.clear(folder)  # a stop request left over from an earlier run doesn't apply to this one
+        runstate.write_run(folder)
         try:
             job_config = JobConfig.from_env()
             scheduler = Scheduler(
                 store, gate, client, cli=BharatCodeCli(timeout=job_config.cli_timeout),
-                budgets=Budgets.from_env(), config=job_config, log=log,
+                budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=now,
+                should_stop=lambda: runstate.stop_requested(folder),
             )
             steps = scheduler.run(max_steps=max_steps)
         except AuthError as exc:
             _fail(str(exc))
         except KeyboardInterrupt:
-            typer.echo("\nStopped. Progress is saved; run `gtu start` again to resume.")
+            paused = runstate.tidy(store)
+            typer.echo("\nStopped." + (f" Paused job(s) {', '.join(paused)}." if paused else "")
+                       + " Progress is saved; run `gtu start` again to resume.")
             raise typer.Exit(130)
         finally:
+            runstate.clear(folder)
             gate.close()
             client.close()
+    if scheduler.stopped:
+        return
     log(f"Completed {steps} step(s).")
+
+
+@app.command()
+def stop(
+    wait: float = typer.Option(10.0, "--wait", min=0, help="Seconds to wait for a clean stop before killing it."),
+) -> None:
+    """Stop a running `gtu start` now. Jobs are paused, not failed; `gtu start` resumes them."""
+    with Store.open_default() as store:
+        folder = store.path.parent
+        pid = runstate.running_pid(folder)
+        if pid is None:
+            runstate.clear(folder)
+            paused = runstate.tidy(store)  # e.g. after a crash: don't leave jobs marked running
+            typer.echo("Nothing is running." + (f" Paused interrupted job(s): {', '.join(paused)}." if paused else ""))
+            return
+        runstate.request_stop(folder)
+        typer.echo(f"Asked `gtu start` (process {pid}) to stop...")
+        if runstate.wait_for_exit(pid, wait):
+            typer.echo("It stopped cleanly.")
+        elif runstate.kill_tree(pid):
+            typer.echo(f"It didn't stop within {wait:g} s, so it and its BharatCode CLI process were killed.")
+        else:
+            _fail(f"process {pid} doesn't look like gtu, so it was not killed; stop it yourself.")
+        runstate.clear(folder)
+        paused = runstate.tidy(store)
+        jobs = store.list_jobs(include_finished=False)
+    held = [j.id for j in jobs if j.status == "paused"]
+    if paused or held:
+        typer.echo(f"Paused job(s): {', '.join(sorted(set(paused + held)))}. "
+                   "Unfinished edits were discarded; finished steps are kept on each job's branch.")
+    typer.echo("Run `gtu start` to resume.")
+
+
+@app.command()
+def report(
+    since: float = typer.Option(None, "--since", help="Hours to look back. Default: since tonight began (12:00 IST)."),
+    job: str = typer.Option(None, "--job", help="Report on one job only."),
+    all_jobs: bool = typer.Option(False, "--all", help="Every job ever run."),
+) -> None:
+    """Morning summary: what ran, tokens, what it produced, and the capacity it was sent into."""
+    now = datetime.now(timezone.utc)
+    budgets = Budgets.from_env()
+    if all_jobs or job:
+        start_from = None
+    else:
+        start_from = now - timedelta(hours=since) if since else budgets.night_began(now)
+    with Store.open_default() as store:
+        try:
+            reports = [reporting.build_job(store, j) for j in reporting.select_jobs(store, start_from, job)]
+        except StoreError as exc:
+            _fail(str(exc))
+        written: dict[str, str | None] = {}
+        for r in reports:
+            try:
+                written[r.job.id] = reporting.write_to_branch(r)
+            except worktree.GitError as exc:
+                typer.echo(f"warning: could not write the report to {worktree.branch_name(r.job.id)}: {exc}", err=True)
+        text = reporting.summary_markdown(reports, store, budgets, now, start_from, written)
+        out = store.path.parent / "reports" / f"report-{now.astimezone(reporting.IST):%Y%m%d-%H%M}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"Saved to {out}")
 
 
 @app.command()

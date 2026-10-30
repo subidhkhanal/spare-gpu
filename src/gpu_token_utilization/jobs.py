@@ -30,14 +30,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import worktree
 from .agent_cli import CONFIG_FILE, CliNotFound, CliResult
 from .budget import BudgetExceeded
 from .client import BharatCodeError, BusyError
+from .runstate import StopRequested
 
 if TYPE_CHECKING:
     from .scheduler import StepContext
 
 DEFAULT_ALLOWED = ("python -m pytest", "pytest", "npm test", "go test")
+def _test_env() -> dict:
+    """Test runs shouldn't leave bytecode caches in the job's worktree."""
+    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 SKIP_DIRS = {".git", ".gtu", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
 MAX_FILE_BYTES = 200_000
 
@@ -85,13 +90,18 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def changed_files(workdir: Path) -> list[tuple[str, str]]:
-    """(git status code, path) for every change in the worktree, except our CLI config."""
+    """(git status code, path) for every change in the worktree, except our CLI config and caches."""
     out = []
     for line in _git(workdir, "status", "--porcelain", "-uall").splitlines():
         code, path = line[:2], line[3:].strip().strip('"')
-        if path != CONFIG_FILE:
+        if path != CONFIG_FILE and not _generated(path):
             out.append((code, path))
     return out
+
+
+def _generated(path: str) -> bool:
+    parts = path.split("/")
+    return "__pycache__" in parts or ".pytest_cache" in parts or path.endswith(".pyc")
 
 
 def save_candidate(workdir: Path, patch: Path) -> list[str]:
@@ -101,7 +111,8 @@ def save_candidate(workdir: Path, patch: Path) -> list[str]:
     if not paths:
         patch.write_bytes(b"")
         return []
-    _git(workdir, "add", "-A", "--", ".", f":(exclude){CONFIG_FILE}")
+    _git(workdir, "add", "-A", "--", ".", f":(exclude){CONFIG_FILE}",
+         *(f":(exclude,glob){g}" for g in worktree.GENERATED))
     # Raw bytes: a text-mode write would turn line endings into CRLF on Windows and break the patch.
     diff = subprocess.run(["git", "diff", "--cached", "--binary", "HEAD"], cwd=workdir, capture_output=True, check=True)
     patch.write_bytes(diff.stdout)
@@ -138,7 +149,10 @@ def run_cli(ctx: StepContext, prompt: str, *, edit: bool, commands: tuple[str, .
     budget = ctx.budget_remaining()
     if budget <= 0:
         raise BudgetExceeded("token budget used up before the CLI could start")
-    result = ctx.cli.run(ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget, on_step=ctx.log_cli_step)
+    result = ctx.cli.run(ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget,
+                         on_step=ctx.log_cli_step, should_stop=ctx.should_stop)
+    if result.stopped == "stop":
+        raise StopRequested("stopped by `gtu stop`")
     if result.stopped == "budget":
         raise BudgetExceeded(f"stopped the BharatCode CLI after {result.tokens} tokens: budget reached")
     if result.stopped == "timeout":
@@ -197,7 +211,8 @@ def _run_pytest(ctx: StepContext, path: str) -> tuple[str, set[str], set[str]]:
     command = [*ctx.config.test_command, path, "-q", "-p", "no:cacheprovider", f"--junitxml={xml}"]
     try:
         proc = subprocess.run(command, cwd=ctx.workdir, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL)
+                              errors="replace", timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL,
+                              env=_test_env())
     except subprocess.TimeoutExpired:
         return "broken", set(), set()
     if proc.returncode not in (0, 1) or not xml.exists():
@@ -246,7 +261,7 @@ def _keep_passing_other(ctx: StepContext, path: str) -> tuple[int, int, str]:
     """Non-Python test files: run the whole test command once; keep the file only if it passes."""
     try:
         proc = subprocess.run(list(ctx.config.test_command), cwd=ctx.workdir, capture_output=True,
-                              timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL)
+                              timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL, env=_test_env())
         ok = proc.returncode == 0
     except subprocess.TimeoutExpired:
         ok = False
@@ -382,6 +397,13 @@ If a section has nothing worth reporting, write "Nothing found." under it.{note}
 {listing}"""
 
 
+def review_messages(listing: str, note: str | None = None) -> list[dict]:
+    return [
+        {"role": "system", "content": REVIEW_SYSTEM},
+        {"role": "user", "content": REVIEW_ASK.format(listing=listing, note=f"\nThe developer adds: {note}" if note else "")},
+    ]
+
+
 def _source_files(root: Path, target: Path) -> list[Path]:
     if target.is_file():
         return [target]
@@ -418,15 +440,7 @@ def review(ctx: StepContext) -> str:
     max_tokens = min(cfg.review_max_tokens, ctx.budget_remaining() - estimated_prompt)
     if max_tokens < 500:
         raise BudgetExceeded("not enough token budget left for the review")
-    result = ctx.chat(
-        [
-            {"role": "system", "content": REVIEW_SYSTEM},
-            {"role": "user", "content": REVIEW_ASK.format(
-                listing=listing, note=f"\nThe developer adds: {job.note}" if job.note else "")},
-        ],
-        max_tokens=max_tokens,
-        reasoning_effort="none",
-    )
+    result = ctx.chat(review_messages(listing, job.note), max_tokens=max_tokens, reasoning_effort="none")
     report = [
         f"# Code review: `{job.target}`",
         "",

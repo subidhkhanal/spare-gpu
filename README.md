@@ -1,10 +1,32 @@
 # spare-gpu
 
+Queue the repo chores you keep putting off — tests, docs, code review — and let them run on BharatCode's spare capacity, each on its own git branch.
+
+## Quickstart
+
+spare-gpu runs on Windows (PowerShell).
+
+```powershell
+pipx install spare-gpu                     # or: pip install spare-gpu
+$env:BHARATCODE_API_KEY = "bc_live_..."
+cd your-repo
+gtu demo                                # a short code review of one of your files, in under a minute
+```
+
+Then queue real work, which runs when BharatCode has capacity:
+
+```powershell
+gtu add review src/app.py    # or: tests, docs
+gtu start                    # gtu why — what it's waiting for;  gtu report — what got done
+```
+
+Get a key at [bharatcode.ai/account](https://bharatcode.ai/account). No Python? Download a standalone `gtu.exe` from the [releases page](https://github.com/subidhkhanal/spare-gpu/releases).
+
+---
+
 [![tests](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml/badge.svg)](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml)
 
-Queues repo chores (tests, docs, code review) and sends them to the BharatCode model API only when it has spare capacity, instead of on a fixed schedule or all at once.
-
-**Status: Phase 3 (real jobs).** Tests, docs and review jobs do real work on their own git branch, one step at a time while BharatCode has spare capacity, within token budgets, and survive being stopped. Tested end to end against fakes of BharatCode's API and CLI; not yet run end to end against the real service.
+**Status: v0.1.0.** Tests, docs and review jobs do real work on their own git branch, one step at a time while BharatCode has spare capacity, within token budgets, and survive being stopped. Tested end to end against fakes of BharatCode's API and CLI; not yet run end to end against the real service.
 
 ## The finding
 
@@ -59,27 +81,36 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 - Three job types — `tests`, `docs`, `review` — each working in its own git worktree on branch `gtu/<job-id>` (see below).
 - Per-job and per-night token budgets that pause work when reached.
 - A BharatCode API client with exponential backoff on busy responses, truncation detection (a cut-off reply is kept but never auto-retried with a half-written tool call), and a full request log (tokens, latency, `x-request-id`, BharatCode's reported queue wait, and what the gate saw when each request was sent).
+- `gtu demo` (see it work in a minute), `gtu start --now` (skip the wait), `gtu start --dry-run` (what would run and roughly what it would cost), `gtu stop` (halt cleanly; jobs pause), and `gtu report` (the morning summary).
+- Progress output while it waits: why the gate is closed, when it checks next, and every retry wait.
 - Tests against in-process fakes of the BharatCode API and CLI — no test ever calls the real service.
 
 **Coming:**
-- A morning report summarizing what ran overnight.
+- Real end-to-end runs against BharatCode, and the gate-vs-send experiment's results, which may change how the gate works.
 
 ## Install and try it
 
-```bash
-python -m pip install -e ".[dev]"
+| Route | Command | Needs |
+|---|---|---|
+| pipx (recommended) | `pipx install spare-gpu` | Python 3.11+ |
+| pip | `pip install spare-gpu` | Python 3.11+ |
+| Standalone binary | download `gtu-windows-x64.exe` from the [releases page](https://github.com/subidhkhanal/spare-gpu/releases) | nothing |
+| From source | `python -m pip install -e ".[dev]"` | Python 3.11+ |
+
+Windows only (10 and 11); macOS and Linux aren't supported. Every route needs `git`; `tests` and `docs` jobs also need BharatCode's own CLI (`npm install -g bharatcode`, then `bharatcode auth login`). The binary is unsigned: Windows Smart App Control or SmartScreen may block `gtu.exe`. If that happens, use pipx. Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
+
+```powershell
+gtu demo [file]   # one short review, sent straight away, to see it work
 ```
 
-Requires Python 3.11+. Works on Windows, macOS and Linux.
-
-```bash
-export BHARATCODE_API_KEY=...    # PowerShell: $env:BHARATCODE_API_KEY = "..."
+```powershell
+$env:BHARATCODE_API_KEY = "..."
 gtu check
 ```
 
 `gtu check` calls `GET /models`, then sends a 1-token `POST /chat/completions` to confirm the key is actually accepted (`/models` answers even with a wrong key). Exits non-zero if the key is missing, rejected, or BharatCode is busy.
 
-```bash
+```powershell
 gtu add tests src/calc.py --note "cover negative numbers"   # kinds: tests, docs, review
 gtu list            # all jobs (--active hides finished ones)
 gtu status <job-id> # job details, steps, requests and tokens used
@@ -90,10 +121,22 @@ Jobs live in `.gtu/gtu.db` inside the repo you run them from (`GTU_DB` to move i
 
 ### Run jobs
 
-```bash
+```powershell
 gtu why     # would it send work right now, and why
 gtu start   # work through the queue, one step at a time, until it is empty
+gtu start --now   # same, but don't wait for spare capacity
+gtu start --dry-run   # which jobs and steps would run, and roughly how many tokens; sends nothing
+gtu stop          # from another terminal: stop it now; jobs are paused, not failed
+gtu report        # morning summary; also committed to each finished job's branch
 ```
+
+While it waits, `gtu start` says why, for example `Gate closed: qwen-3.8-27b api lane 4/4 slots busy, 3 queued. Next check in 60s (opens after 3 quiet readings in a row; 0 so far).` and `BharatCode is busy (HTTP 503). Waiting 160s before retry 6 of 8.`
+
+`gtu report` covers everything since tonight began (12:00 IST; `--since <hours>`, `--job <id>` or `--all` to change that): what ran and when, how long it took, tokens per job and in total, the files each job added or changed, tests kept and discarded, and the capacity it met — queue depth and BharatCode's reported queue wait at send time, and the share of requests sent into a free slot.
+
+`gtu stop` asks the running `gtu start` to stop (it notices within about a second, even mid-step), and kills it if it hasn't stopped after 10 seconds. Either way, any running BharatCode CLI process is killed, the unfinished step's edits are discarded, finished steps stay committed on the job's branch, and the job is marked paused. `gtu start` picks up where it left off.
+
+`--now` sends work straight away, competing with everyone else's requests instead of using spare capacity. It still records the capacity each request was sent into, still retries busy answers politely (about 15 minutes, then a one-minute pause), and still respects token budgets.
 
 `gtu start` only sends a request while the **capacity gate** is open. Stop it any time (Ctrl+C, closing the terminal, a crash); run it again and it continues from the last finished step without redoing anything.
 
@@ -157,7 +200,7 @@ All of it is configurable:
 
 ## Running the tests
 
-```bash
+```powershell
 python -m pytest
 ```
 

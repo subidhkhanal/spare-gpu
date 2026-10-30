@@ -85,6 +85,7 @@ def test_tests_job_keeps_only_passing_tests(git_repo, store, scenario, run_jobs)
     assert store.get_job(job.id).status == "done"
     files = branch_files(git_repo, job.id)
     assert "tests/test_gtu_calc.py" in files and "tests/test_gtu_broken.py" not in files
+    assert not any("__pycache__" in f or f.endswith(".pyc") for f in files)  # test runs leave no caches behind
     kept = git(git_repo, "show", f"gtu/{job.id}:tests/test_gtu_calc.py")
     assert "test_adds_numbers" in kept and "test_adds_negatives" in kept
     assert "test_wrong_on_purpose" not in kept

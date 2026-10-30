@@ -11,6 +11,9 @@ import subprocess
 from pathlib import Path
 
 BRANCH_PREFIX = "gtu/"
+# Files that running code or tests leaves behind; never part of a job's output, even in repos
+# whose .gitignore doesn't cover them.
+GENERATED = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
 # Commits made by jobs are attributed to the tool, so they are easy to spot in review.
 AUTHOR = ("-c", "user.name=spare-gpu", "-c", "user.email=spare-gpu@localhost")
 
@@ -90,13 +93,47 @@ def discard_uncommitted(worktree: Path) -> None:
 
 
 def commit(worktree: Path, message: str, exclude: tuple[str, ...] = ()) -> str | None:
-    """Commit everything changed in the worktree except `exclude`. Returns the commit id, or None if nothing changed."""
-    pathspec = ["--", ".", *(f":(exclude){p}" for p in exclude)]
+    """Commit everything changed in the worktree except `exclude` and generated caches.
+    Returns the commit id, or None if nothing changed."""
+    pathspec = ["--", ".", *(f":(exclude){p}" for p in exclude), *(f":(exclude,glob){g}" for g in GENERATED)]
     _git(worktree, "add", "-A", *pathspec)
     if _git(worktree, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return None
     _git(worktree, *AUTHOR, "commit", "--quiet", "-m", message)
     return _git(worktree, "rev-parse", "HEAD").stdout.strip()
+
+
+def add_file_to_branch(repo: Path, branch: str, path: str, content: str, message: str) -> str | None:
+    """Commit one file onto `branch` without checking anything out.
+
+    Uses a throwaway index, so neither the user's checkout nor any working files are touched.
+    The branch only moves if it is still where we read it (no force). Returns the new commit,
+    or None if the file already has exactly this content.
+    """
+    import os
+    import tempfile
+
+    repo = Path(repo)
+    parent = _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}").stdout.strip()
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+
+        def run(*args: str, stdin: bytes | None = None) -> str:
+            # Bytes, not text: text-mode stdin would turn \n into \r\n on Windows.
+            proc = subprocess.run(["git", *args], cwd=repo, env=env, input=stdin, capture_output=True)
+            if proc.returncode != 0:
+                raise GitError(f"git {' '.join(args)} failed: {proc.stderr.decode('utf-8', 'replace').strip()[:300]}")
+            return proc.stdout.decode("utf-8", "replace").strip()
+
+        run("read-tree", parent)
+        blob = run("hash-object", "-w", "--stdin", stdin=content.encode("utf-8"))
+        run("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+        tree = run("write-tree")
+        if tree == run("rev-parse", f"{parent}^{{tree}}"):
+            return None
+        commit = run(*AUTHOR, "commit-tree", tree, "-p", parent, "-m", message)
+        run("update-ref", f"refs/heads/{branch}", commit, parent)
+    return commit
 
 
 def remove(repo: Path, job_id: str) -> None:

@@ -40,6 +40,17 @@ def test_excluded_files_are_never_committed(git_repo):
     assert committed == ["notes.md"]
 
 
+def test_generated_caches_are_never_committed(git_repo):
+    path = worktree.create(git_repo, "abc123")
+    (path / "src" / "__pycache__").mkdir()
+    (path / "src" / "__pycache__" / "calc.cpython-312.pyc").write_bytes(b"\0bytecode")
+    (path / ".pytest_cache").mkdir()
+    (path / ".pytest_cache" / "README.md").write_text("cache")
+    (path / "real.py").write_text("x = 1\n")
+    worktree.commit(path, "work")
+    assert git(path, "show", "--name-only", "--format=", "HEAD").splitlines() == ["real.py"]
+
+
 def test_commit_with_no_changes_returns_none(git_repo):
     path = worktree.create(git_repo, "abc123")
     assert worktree.commit(path, "nothing") is None
