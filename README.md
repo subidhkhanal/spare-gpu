@@ -100,12 +100,17 @@ Windows only (10 and 11); macOS and Linux aren't supported. Every route needs `g
 
 **Installing with pipx on Windows**, from PowerShell:
 
-1. Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH"), or `winget install Python.Python.3.12`.
-2. `python -m pip install --user pipx`, then `python -m pipx ensurepath`.
-3. Close and reopen PowerShell so the new PATH takes effect.
+1. Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/) and tick "Add python.exe to PATH" in the installer. If `python` later says *"Python was not found; run without arguments to install from the Microsoft Store"*, Python isn't installed (that message is a Windows shortcut, not Python).
+2. Install pipx, then let it add its folder to your PATH:
+   ```powershell
+   py -m pip install --user pipx
+   py -m pipx ensurepath
+   ```
+   The first command prints `WARNING: The script pipx.exe is installed in '...' which is not on PATH`. That's expected; the second command fixes it. (`py` is the Python launcher that python.org installs. If you installed Python from the Microsoft Store instead, use `python` in place of `py`.)
+3. **Close every terminal window and open a new one.** PATH changes only reach terminals opened afterwards. In VS Code's built-in terminal, restart VS Code itself.
 4. `pipx install spare-gpu`, then `gtu --version`.
 
-If `gtu` is "not recognized" after step 4, PATH wasn't refreshed: open a new terminal, or run `python -m pipx ensurepath` again.
+If `gtu` is "not recognized" after step 4, the terminal still has the old PATH: open a new one (step 3). If you skipped step 2, pipx's message suggests editing `~/.bashrc`; ignore that on Windows and run `py -m pipx ensurepath`. Until then you can run it by its full path: `& "$env:USERPROFILE\.local\bin\gtu.exe" --version`. gtu works the same in PowerShell, Windows Terminal and Command Prompt.
 
 There is no standalone `gtu.exe`: an unsigned executable is blocked by Windows Smart App Control, so pipx is the supported route. Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
 

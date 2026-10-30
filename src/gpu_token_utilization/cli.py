@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
@@ -20,6 +21,30 @@ from . import report as reporting
 from .store import Store, StoreError
 
 SET_KEY = f'Set it in PowerShell with `$env:{API_KEY_ENV} = "<your key>"`'
+
+
+def _utf8_when_redirected() -> None:
+    """On Windows, output sent to a file or pipe uses the ANSI code page (cp1252), which
+    can't encode the check marks and emoji models like to write: `gtu demo > out.txt`
+    would crash with UnicodeEncodeError. Consoles are fine (Python writes Unicode to them
+    directly), so only redirected streams switch to UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty() and stream.encoding.lower().replace("-", "") != "utf8":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass  # a replaced stream (tests, embedding) that can't be reconfigured
+
+
+_utf8_when_redirected()
+
+
+def _local(stamp: str) -> str:
+    """A stored UTC timestamp as the user's local time, e.g. '30 Oct 11:24'."""
+    try:
+        return datetime.fromisoformat(stamp).astimezone().strftime("%d %b %H:%M")
+    except ValueError:
+        return stamp
 
 app = typer.Typer(
     help="Queue repo chores (tests, docs, code review) and run them on BharatCode's spare capacity. "
@@ -117,9 +142,9 @@ def list_cmd(
     if not jobs:
         typer.echo("No jobs.")
         return
-    typer.echo(f"{'ID':<10}{'KIND':<8}{'STATUS':<11}{'CREATED':<27}TARGET")
+    typer.echo(f"{'ID':<10}{'KIND':<8}{'STATUS':<11}{'CREATED':<14}TARGET")
     for job in jobs:
-        typer.echo(f"{job.id:<10}{job.kind:<8}{job.status:<11}{job.created_at:<27}{job.target}")
+        typer.echo(f"{job.id:<10}{job.kind:<8}{job.status:<11}{_local(job.created_at):<14}{job.target}")
 
 
 @app.command()
@@ -134,7 +159,7 @@ def status(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
         summary = store.request_summary(job_id)
     typer.echo(f"Job {job.id}: {job.kind} {job.target}")
     typer.echo(f"  status:   {job.status}")
-    typer.echo(f"  created:  {job.created_at}   updated: {job.updated_at}")
+    typer.echo(f"  created:  {_local(job.created_at)}   updated: {_local(job.updated_at)}")
     if job.note:
         typer.echo(f"  note:     {job.note}")
     typer.echo(f"  steps:    {len(steps)}")

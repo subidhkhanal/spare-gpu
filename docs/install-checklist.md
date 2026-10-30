@@ -8,9 +8,12 @@ You need a BharatCode API key from <https://bharatcode.ai/account>.
 
 ## A. pipx (recommended)
 
-1. [ ] Python 3.11 or newer is installed (`python --version`).
-2. [ ] `python -m pip install --user pipx` then `python -m pipx ensurepath`. Open a **new** terminal.
-3. [ ] `pipx install spare-gpu` finishes without errors.
+1. [ ] Python 3.11 or newer is installed (`py --version`). On a machine without Python, `python`
+   prints "Python was not found; run without arguments to install from the Microsoft Store".
+2. [ ] `py -m pip install --user pipx` (a "not on PATH" warning is expected) then
+   `py -m pipx ensurepath`. Close every terminal and open a **new** one.
+3. [ ] `pipx install spare-gpu` finishes without errors, and `gtu` is found in the new terminal
+   without any further steps. Repeat steps 4-5 in Command Prompt as well as PowerShell.
 4. [ ] `gtu --version` prints the version you released (e.g. `0.1.0`).
 5. [ ] `gtu --help` lists `demo`, `add`, `start`, `stop`, `report`.
 
