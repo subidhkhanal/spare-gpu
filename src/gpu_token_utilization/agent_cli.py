@@ -98,7 +98,7 @@ def cli_status(timeout: float = 30.0) -> CliStatus:
     auth = run("auth", "status")
     signed_in = None
     if auth is not None:
-        text = auth.stdout.lower()
+        text = (auth.stdout + auth.stderr).lower()  # the CLI prints its status to stderr
         signed_in = auth.returncode == 0 and "signed in" in text and "not signed in" not in text
     return CliStatus(command, version=lines[-1].strip(), signed_in=signed_in)
 

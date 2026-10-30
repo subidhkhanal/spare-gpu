@@ -58,13 +58,14 @@ def config_file(folder: Path) -> Path:
 
 def server_command() -> list[str]:
     """How BharatCode should start our server: an absolute path, so it works even if BharatCode
-    was opened before PATH was updated. pipx's stable gtu.exe when there is one."""
-    found = shutil.which("gtu")
-    if found:
-        return [str(Path(found).resolve()), "mcp"]
+    was opened before PATH was updated. The gtu running this setup comes first: whatever `gtu`
+    is first on PATH could be an older install without the MCP server."""
     exe = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if exe and exe.suffix.lower() == ".exe" and exe.stem.lower() == "gtu" and exe.exists():
         return [str(exe.resolve()), "mcp"]
+    found = shutil.which("gtu")
+    if found and Path(found).resolve().parent == Path(sys.executable).resolve().parent:
+        return [str(Path(found).resolve()), "mcp"]  # the gtu of this very install
     return [sys.executable, "-m", "gpu_token_utilization", "mcp"]
 
 
