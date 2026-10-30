@@ -260,10 +260,11 @@ def test_token_cost_splits_cli_overhead_from_the_work(tools, git_repo):
             store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, status_code=None, prompt_tokens=11500,
                                          completion_tokens=300, total_tokens=11800, job_id=tests.id))
     text = tools.token_cost()
-    assert readable(text) and "Tokens used in the last 24 hours: 24,100." in text
-    assert "BharatCode CLI (tests and docs jobs): 23,600 over 2 step(s)" in text and "about 11,500 per step" in text
-    assert "Direct requests (reviews, checks): 500 over 1 request(s)" in text
-    assert f"{tests.id} 23,600" in text
+    assert readable(text) and "Tokens used in the last 24 hours: 24,100. Overhead 23,000, task 1,100" in text
+    assert "overhead multiplier 21.9x" in text  # 24,100 / 1,100
+    assert "BharatCode CLI (tests and docs jobs): 23,600 over 2 step(s)" in text and "~11,500 tokens per step" in text
+    assert "Direct requests (reviews, checks): 500 over 1 request(s)" in text and "about 1.0x" in text
+    assert f"{tests.id} 23,600 (39.3x)" in text and "Can't separate exactly" in text
     assert tools.token_cost(review.id).startswith(f"Tokens used in job {review.id} (review src): 500.")
     assert "Tokens used in all time" in tools.token_cost("all")
     assert "Give a job id" in tools.token_cost("nope1234")

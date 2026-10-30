@@ -63,6 +63,11 @@ def test_no_commands_means_no_shell_at_all():
     assert permission_config(edit=False, commands=())["permission"]["edit"] == "deny"
 
 
+def test_jobs_switch_spare_gpus_own_mcp_server_off():
+    # measured: its tool schemas add ~2.3k tokens to every CLI step, and a job shouldn't queue jobs
+    assert permission_config(edit=True, commands=())["mcp"]["spare-gpu"]["enabled"] is False
+
+
 def test_killed_when_the_token_budget_is_reached(tmp_path, scenario):
     scenario(steps=[{"tokens": 5000, "sleep": 0.3} for _ in range(10)])
     result = BharatCodeCli(command=FAKE_CLI).run(tmp_path, "x", token_budget=12000)

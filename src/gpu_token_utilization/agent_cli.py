@@ -113,6 +113,9 @@ def permission_config(edit: bool, commands: tuple[str, ...]) -> dict:
     return {
         "$schema": "https://opencode.ai/config.json",
         "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny"},
+        # spare-gpu's own MCP server is off inside jobs: its tool schemas cost ~2.3k tokens on
+        # every step (measured), and a job's agent has no business queueing more jobs.
+        "mcp": {"spare-gpu": {"type": "local", "command": ["gtu", "mcp"], "enabled": False}},
     }
 
 
