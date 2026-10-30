@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import worktree
-from .agent_cli import BharatCodeCli, CliNotFound, CliStep
+from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, CliStep
 from .budget import BudgetExceeded, Budgets
 from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult
 from .gate import Decision, Gate
@@ -96,8 +96,12 @@ class Scheduler:
         isolate: bool = True,
         ignore_gate: bool = False,
         should_stop: Callable[[], bool] | None = None,
+        cli_missing: str | None = None,
     ):
         self.store = store
+        # Why the BharatCode CLI can't be used, if it can't: tests and docs jobs then stay
+        # queued (not failed) and the run carries on with review jobs.
+        self.cli_missing = cli_missing
         self.gate = gate
         self.client = client
         self.plans = plans or DEFAULT_PLANS
@@ -142,6 +146,7 @@ class Scheduler:
         """Work through the queue until it is empty or every job left is over budget."""
         completed = 0
         paused_for_budget: set[str] = set()
+        waiting_for_cli: set[str] = set()
         queued = self.pending_jobs()
         if queued:
             self._log(f"{len(queued)} job(s) to run. "
@@ -153,6 +158,12 @@ class Scheduler:
                 return completed
             runnable = []
             for job in self.pending_jobs():
+                if self.cli_missing and job.kind in CLI_KINDS:
+                    if job.id not in waiting_for_cli:
+                        waiting_for_cli.add(job.id)
+                        self._log(f"Job {job.id} ({job.kind}): skipped, it needs BharatCode's CLI, which "
+                                  "isn't available. It stays queued for the next `gtu start`.")
+                    continue
                 reason = self._over_budget(job)
                 if reason is None:
                     runnable.append(job)
@@ -161,7 +172,12 @@ class Scheduler:
                     self.store.set_status(job.id, "paused")
                     self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
             if not runnable:
-                self._log("Queue empty." if not paused_for_budget else "Nothing left that fits the token budgets.")
+                if waiting_for_cli:
+                    self._log(f"{len(waiting_for_cli)} job(s) are waiting for BharatCode's CLI. {self.cli_missing}")
+                elif paused_for_budget:
+                    self._log("Nothing left that fits the token budgets.")
+                else:
+                    self._log("Queue empty.")
                 return completed
             job = runnable[0]
             decision = self.gate.check_bypassed() if self.ignore_gate else self.gate.check()

@@ -141,7 +141,7 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
                 out.append("  note: the high estimate is over what's left, so this job may pause partway")
             low, high = low + p.low, high + p.high
         for problem in p.problems:
-            out.append(f"  PROBLEM: {problem}")
+            out.append("  PROBLEM: " + problem.replace("\n", "\n    "))  # keep multi-line help under its job
         out.append("")
     night = store.tokens_since(budgets.night_began(now).isoformat())
     out.append(f"Total for jobs that would run: ~{_rough(low)}-{_rough(high)} tokens. "

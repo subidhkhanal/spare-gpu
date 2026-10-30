@@ -34,6 +34,15 @@ CMD_ENV = "GTU_BHARATCODE_CMD"
 CONFIG_FILE = "opencode.json"
 
 
+CLI_KINDS = ("tests", "docs")  # job kinds that run the CLI; review talks to the API directly
+INSTALL_HELP = (
+    "tests and docs jobs need BharatCode's CLI; review jobs don't. To install it:\n"
+    "  1. Install Node.js (the LTS version) from https://nodejs.org, then open a new terminal\n"
+    "  2. npm install -g bharatcode\n"
+    "  3. bharatcode auth login"
+)
+
+
 class CliNotFound(Exception):
     """BharatCode's CLI is not installed or cannot be run safely."""
 
@@ -45,7 +54,7 @@ def resolve_command() -> list[str]:
         return json.loads(override) if override.startswith("[") else shlex.split(override)
     found = shutil.which("bharatcode")
     if not found:
-        raise CliNotFound("BharatCode CLI not found; install it with `npm install -g bharatcode`")
+        raise CliNotFound(f"BharatCode's CLI isn't installed (no `bharatcode` command found).\n{INSTALL_HELP}")
     if found.lower().endswith((".cmd", ".bat")):
         # The npm shim runs through cmd.exe, which would reinterpret characters in the prompt
         # (& | > and friends). Run the script it wraps with node directly instead.
@@ -55,6 +64,43 @@ def resolve_command() -> list[str]:
             return [node, str(script)]
         raise CliNotFound(f"found {found} but not the script it wraps; set {CMD_ENV}")
     return [found]
+
+
+@dataclass
+class CliStatus:
+    command: list[str] | None
+    version: str | None = None
+    signed_in: bool | None = None  # None: couldn't tell
+    problem: str | None = None  # set when the CLI can't be used at all
+
+
+def cli_status(timeout: float = 30.0) -> CliStatus:
+    """Is the CLI installed, which version, and is it signed in? Runs `--version` and
+    `auth status` locally; prints nothing about the account itself."""
+    try:
+        command = resolve_command()
+    except CliNotFound as exc:
+        return CliStatus(None, problem=str(exc))
+
+    def run(*args: str) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run([*command, *args], capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=timeout, stdin=subprocess.DEVNULL,
+                                  env=env_without_key())
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+    shown = run("--version")
+    lines = shown.stdout.strip().splitlines() if shown and shown.returncode == 0 else []
+    if not lines:
+        return CliStatus(command, problem=f"found `bharatcode` ({command[-1]}) but `bharatcode --version` "
+                                          f"didn't run. Reinstall it:\n{INSTALL_HELP}")
+    auth = run("auth", "status")
+    signed_in = None
+    if auth is not None:
+        text = auth.stdout.lower()
+        signed_in = auth.returncode == 0 and "signed in" in text and "not signed in" not in text
+    return CliStatus(command, version=lines[-1].strip(), signed_in=signed_in)
 
 
 def permission_config(edit: bool, commands: tuple[str, ...]) -> dict:

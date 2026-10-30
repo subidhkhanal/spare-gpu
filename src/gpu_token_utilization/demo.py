@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .client import BharatCodeClient, ChatResult, RetryPolicy
 from .jobs import SKIP_DIRS, numbered_listing, review_messages
+from .worktree import GIT
 
 # Impatient on purpose: a demo should answer or say why not. Not shorter than the normal
 # timeout, though: a real morning demo spent 60 s of 73 s in BharatCode's queue.
@@ -31,9 +32,10 @@ DEMO_MAX_TOKENS = 700
 
 def _candidates(root: Path) -> list[Path]:
     """Tracked files in a git repo, otherwise everything under root not in a skipped folder."""
-    proc = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode == 0 and proc.stdout.strip():
-        paths = [root / line for line in proc.stdout.splitlines()]
+    proc = subprocess.run([*GIT, "ls-files", "-z"], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace")
+    if proc.returncode == 0 and proc.stdout.strip("\0"):
+        paths = [root / name for name in proc.stdout.split("\0") if name]
     else:
         paths = [p for p in root.rglob("*") if p.is_file()]
     out = []

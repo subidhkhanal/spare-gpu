@@ -1,3 +1,5 @@
+import json
+import sys
 import uuid
 from datetime import time
 
@@ -12,6 +14,12 @@ from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.store import Store
 
 KEY = "bc_live_fake_key"
+
+
+@pytest.fixture(autouse=True)
+def fake_bharatcode_cli(monkeypatch):
+    """No test ever starts the real BharatCode CLI; tests about a missing CLI delete this."""
+    monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))
 
 
 @pytest.fixture(autouse=True)

@@ -62,7 +62,8 @@ def _ts(text: str | None) -> datetime | None:
 
 
 def _git(repo: Path, *args: str) -> str | None:
-    proc = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    proc = subprocess.run([*worktree.GIT, *args], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace")
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 

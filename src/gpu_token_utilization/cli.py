@@ -15,7 +15,7 @@ from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .gate import Gate, GateConfig
-from .agent_cli import BharatCodeCli
+from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolve_command
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
@@ -88,10 +88,27 @@ def main(
     pass
 
 
+def _report_cli() -> None:
+    """One honest line (or a few) about BharatCode's CLI. Never fails `gtu check`: review
+    jobs work without it."""
+    status = cli_status()
+    if status.problem:
+        typer.echo(f"BharatCode CLI: not available. {status.problem}")
+    elif status.signed_in is False:
+        typer.echo(f"BharatCode CLI: installed ({status.version}) but not signed in. "
+                   "Run `bharatcode auth login`; tests and docs jobs need it.")
+    elif status.signed_in is None:
+        typer.echo(f"BharatCode CLI: installed ({status.version}); couldn't tell whether it's signed in "
+                   "(`bharatcode auth status` didn't answer).")
+    else:
+        typer.echo(f"BharatCode CLI: installed ({status.version}) and signed in; tests and docs jobs can run.")
+
+
 @app.command()
 def check() -> None:
-    """Check your setup: finds your API key, reaches BharatCode, and confirms the key works
-    with one 1-token request."""
+    """Check your setup: BharatCode's CLI, your API key, and that the key works (one
+    1-token request)."""
+    _report_cli()
     try:
         found = find_api_key()
     except ApiKeyMissing as exc:
@@ -221,6 +238,12 @@ def add(
     with Store.open_default() as store:
         job = store.add_job(kind.value, relative.as_posix() or ".", str(repo), note)
     typer.echo(f"Queued job {job.id}: {job.kind} {job.target}")
+    if job.kind in CLI_KINDS:
+        try:
+            resolve_command()
+        except CliNotFound as exc:
+            typer.echo(f"Note: this job won't run yet. {exc}\n"
+                       "It stays queued and runs on the first `gtu start` after that.")
 
 
 @app.command("list")
@@ -399,10 +422,15 @@ def start(
         runstate.write_run(folder)
         try:
             job_config = JobConfig.from_env()
+            try:
+                resolve_command()
+                cli_missing = None
+            except CliNotFound as exc:
+                cli_missing = str(exc)
             scheduler = Scheduler(
                 store, gate, client, cli=BharatCodeCli(timeout=job_config.cli_timeout),
                 budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=now,
-                should_stop=lambda: runstate.stop_requested(folder),
+                should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing,
             )
             steps = scheduler.run(max_steps=max_steps)
         except AuthError:

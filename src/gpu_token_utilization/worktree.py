@@ -7,7 +7,12 @@ repo look dirty. Commits go to the job's branch only; nothing is ever pushed.
 
 from __future__ import annotations
 
+import os
+import shutil
+import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 BRANCH_PREFIX = "gtu/"
@@ -16,6 +21,12 @@ BRANCH_PREFIX = "gtu/"
 GENERATED = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
 # Commits made by jobs are attributed to the tool, so they are easy to spot in review.
 AUTHOR = ("-c", "user.name=spare-gpu", "-c", "user.email=spare-gpu@localhost")
+# Every git call: worktrees add ".gtu/worktrees/<id>/" to each path, which can push a repo past
+# Windows' 260-character limit (core.longpaths; other platforms ignore it), and file names
+# come back as real UTF-8 rather than octal escapes (core.quotepath).
+GIT = ("git", "-c", "core.longpaths=true", "-c", "core.quotepath=false")
+WINDOWS_PATH_LIMIT = 259
+REMOVE_ATTEMPTS, REMOVE_RETRY_DELAY = 4, 1.5  # antivirus or an editor can hold files for a moment
 
 
 class GitError(Exception):
@@ -24,7 +35,7 @@ class GitError(Exception):
 
 def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     proc = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        [*GIT, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL,
     )
     if check and proc.returncode != 0:
@@ -69,6 +80,38 @@ def _ignore_gtu_folder(repo: Path) -> None:
         marker.write_text("*\n", encoding="utf-8")
 
 
+def _long_paths_enabled() -> bool:
+    """Windows' LongPathsEnabled switch. Git copes either way with core.longpaths, but Python,
+    pytest and the BharatCode CLI can only open longer paths when it is on."""
+    if sys.platform != "win32":
+        return True
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            return winreg.QueryValueEx(key, "LongPathsEnabled")[0] == 1
+    except OSError:
+        return False
+
+
+def _check_path_lengths(repo: Path, path: Path) -> None:
+    """Refuse up front, with a fix, rather than fail halfway when the worktree's paths would be
+    too long for Windows."""
+    if _long_paths_enabled():
+        return
+    files = _git(repo, "ls-files", "-z").stdout.split("\0")
+    longest = max((f for f in files if f), key=len, default="")
+    if len(str(path)) + 1 + len(longest) <= WINDOWS_PATH_LIMIT:
+        return
+    raise GitError(
+        f"the job's copy of this repo would have paths longer than Windows allows (260 characters), "
+        f"e.g. {path}\\{longest}.\nEither move the repo to a shorter folder (like C:\\code\\myrepo), or turn "
+        "on long paths once, in PowerShell run as Administrator:\n"
+        "  New-ItemProperty -Path HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem "
+        "-Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force"
+    )
+
+
 def create(repo: Path, job_id: str) -> Path:
     """The job's worktree, creating it (and its branch from the current HEAD) if needed."""
     repo = Path(repo)
@@ -77,6 +120,7 @@ def create(repo: Path, job_id: str) -> Path:
     if path.exists() and (path / ".git").exists():
         return path  # resuming
     ensure_clean(repo)
+    _check_path_lengths(repo, path)
     _ignore_gtu_folder(repo)
     _git(repo, "worktree", "prune")  # forget worktrees whose folders were deleted by hand
     if _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}", check=False).returncode == 0:
@@ -120,7 +164,7 @@ def add_file_to_branch(repo: Path, branch: str, path: str, content: str, message
 
         def run(*args: str, stdin: bytes | None = None) -> str:
             # Bytes, not text: text-mode stdin would turn \n into \r\n on Windows.
-            proc = subprocess.run(["git", *args], cwd=repo, env=env, input=stdin, capture_output=True)
+            proc = subprocess.run([*GIT, *args], cwd=repo, env=env, input=stdin, capture_output=True)
             if proc.returncode != 0:
                 raise GitError(f"git {' '.join(args)} failed: {proc.stderr.decode('utf-8', 'replace').strip()[:300]}")
             return proc.stdout.decode("utf-8", "replace").strip()
@@ -142,5 +186,29 @@ def remove(repo: Path, job_id: str) -> None:
     path = worktree_path(repo, job_id)
     if path.exists() and (path / ".git").exists():
         discard_uncommitted(path)
-        _git(repo, "worktree", "remove", str(path))
+        # Windows won't delete a file another program has open; antivirus scanners (Defender)
+        # and editors often hold one for a moment right after it was written.
+        # git unregisters the worktree before deleting files, so after a failed attempt what's
+        # left is a plain folder for us to delete.
+        for attempt in range(1, REMOVE_ATTEMPTS + 1):
+            try:
+                if (path / ".git").exists():
+                    _git(repo, "worktree", "remove", "--force", str(path))
+                else:
+                    if sys.version_info >= (3, 12):
+                        shutil.rmtree(path, onexc=_make_writable_and_retry)
+                    else:
+                        shutil.rmtree(path, onerror=_make_writable_and_retry)
+                break
+            except (GitError, OSError) as exc:
+                if attempt == REMOVE_ATTEMPTS:
+                    raise GitError(f"{exc}\nA program (often antivirus, or an editor) is holding a file in "
+                                   f"{path}. Close it and delete that folder; the branch is safe.") from None
+                time.sleep(REMOVE_RETRY_DELAY)
     _git(repo, "worktree", "prune")
+
+
+def _make_writable_and_retry(func, path, exc) -> None:
+    """shutil.rmtree helper: git marks object files read-only, which Windows won't delete."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)

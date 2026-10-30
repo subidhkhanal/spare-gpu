@@ -134,4 +134,4 @@ def test_problems_that_would_stop_a_job_are_flagged(repo, monkeypatch):
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     out = runner.invoke(app, ["start", "--dry-run"]).output
     assert "PROBLEM: the repo has uncommitted changes" in out
-    assert "PROBLEM: BharatCode CLI not found" in out
+    assert "PROBLEM: BharatCode's CLI isn't installed" in out

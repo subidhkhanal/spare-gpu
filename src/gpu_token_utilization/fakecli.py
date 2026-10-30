@@ -23,6 +23,15 @@ def emit(event: dict) -> None:
 
 
 def main(args: list[str]) -> int:
+    if args == ["--version"]:
+        print("0.0.0-fake")
+        return 0
+    if args[:2] == ["auth", "status"]:  # GTU_FAKE_CLI_SIGNED_IN=0 simulates a signed-out CLI
+        if os.environ.get("GTU_FAKE_CLI_SIGNED_IN", "1") == "1":
+            print("Signed in to BharatCode.")
+            return 0
+        print("Not signed in. Run `bharatcode auth login`.")
+        return 1
     workdir = Path(args[args.index("--dir") + 1])
     scenario = json.loads(Path(os.environ["GTU_FAKE_CLI_SCENARIO"]).read_text(encoding="utf-8"))
     if scenario.get("record"):
@@ -37,7 +46,8 @@ def main(args: list[str]) -> int:
         for path, content in (step.get("writes") or {}).items():
             target = workdir / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            # exactly as given, like a real editor tool: no \n -> \r\n translation on Windows
+            target.write_text(content, encoding="utf-8", newline="")
             emit({"type": "tool_use", "sessionID": session,
                   "part": {"tool": "edit", "state": {"status": "completed", "input": {"filePath": str(target)}}}})
         time.sleep(step.get("sleep", 0))

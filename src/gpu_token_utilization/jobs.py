@@ -84,20 +84,54 @@ def command_allowed(command: tuple[str, ...], allowed: tuple[str, ...]) -> bool:
 # --- git helpers on the job's worktree -------------------------------------------------
 
 def _git(cwd: Path, *args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    proc = subprocess.run([*worktree.GIT, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace")
     if proc.returncode != 0:
         raise BharatCodeError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:300]}")
     return proc.stdout
 
 
 def changed_files(workdir: Path) -> list[tuple[str, str]]:
-    """(git status code, path) for every change in the worktree, except our CLI config and caches."""
+    """(git status code, path) for every change in the worktree, except our CLI config and caches.
+    -z: names come back raw (spaces, quotes, non-ASCII) instead of quoted and escaped."""
     out = []
-    for line in _git(workdir, "status", "--porcelain", "-uall").splitlines():
-        code, path = line[:2], line[3:].strip().strip('"')
+    entries = _git(workdir, "status", "--porcelain", "-z", "-uall").split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        code, path = entry[:2], entry[3:]
+        if code[0] in "RC":
+            i += 1  # a rename or copy: the next entry is the old name
         if path != CONFIG_FILE and not _generated(path):
             out.append((code, path))
     return out
+
+
+# --- text as Windows files actually are: byte-order marks and CRLF -------------------------
+
+BOM = b"\xef\xbb\xbf"
+
+
+def source_text(data: bytes) -> str:
+    """Text for parsing and comparing: no byte-order mark (Python's parser rejects one in a
+    str), and \\n line endings, so CRLF vs LF never counts as a change."""
+    return data.removeprefix(BOM).decode("utf-8", "replace").replace("\r\n", "\n")
+
+
+def match_file_style(file: Path, original: bytes) -> None:
+    """Give a rewritten file the original's byte-order mark and line endings. The CLI (and
+    many editors) normalise both, which would make the branch's diff show every line changed."""
+    data = file.read_bytes()
+    body = data.removeprefix(BOM).replace(b"\r\n", b"\n")
+    if original.count(b"\r\n") * 2 > original.count(b"\n"):  # mostly CRLF
+        body = body.replace(b"\n", b"\r\n")
+    if original.startswith(BOM):
+        body = BOM + body
+    if body != data:
+        file.write_bytes(body)
 
 
 def _generated(path: str) -> bool:
@@ -115,7 +149,8 @@ def save_candidate(workdir: Path, patch: Path) -> list[str]:
     _git(workdir, "add", "-A", "--", ".", f":(exclude){CONFIG_FILE}",
          *(f":(exclude,glob){g}" for g in worktree.GENERATED))
     # Raw bytes: a text-mode write would turn line endings into CRLF on Windows and break the patch.
-    diff = subprocess.run(["git", "diff", "--cached", "--binary", "HEAD"], cwd=workdir, capture_output=True, check=True)
+    diff = subprocess.run([*worktree.GIT, "diff", "--cached", "--binary", "HEAD"], cwd=workdir,
+                          capture_output=True, check=True)
     patch.write_bytes(diff.stdout)
     _git(workdir, "reset", "--quiet", "--hard", "HEAD")
     _git(workdir, "clean", "-fdq")
@@ -136,10 +171,15 @@ def revert(workdir: Path, code: str, path: str) -> None:
         _git(workdir, "checkout", "HEAD", "--", path)
 
 
-def head_text(workdir: Path, path: str) -> str | None:
-    proc = subprocess.run(["git", "show", f"HEAD:{path}"], cwd=workdir, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+def head_bytes(workdir: Path, path: str) -> bytes | None:
+    """The file as committed on the job's branch, exactly (raw bytes, no decoding)."""
+    proc = subprocess.run([*worktree.GIT, "show", f"HEAD:{path}"], cwd=workdir, capture_output=True)
     return proc.stdout if proc.returncode == 0 else None
+
+
+def head_text(workdir: Path, path: str) -> str | None:
+    data = head_bytes(workdir, path)
+    return None if data is None else source_text(data)
 
 
 # --- the CLI step shared by tests and docs ---------------------------------------------
@@ -226,7 +266,8 @@ def _run_pytest(ctx: StepContext, path: str) -> tuple[str, set[str], set[str]]:
 
 def remove_test_functions(file: Path, names: set[str]) -> int:
     """Delete the named test functions (and their decorators) from a Python file."""
-    source = file.read_text(encoding="utf-8")
+    original = file.read_bytes()
+    source = source_text(original)
     tree = ast.parse(source)
     spans = []
     for node in ast.walk(tree):
@@ -236,7 +277,8 @@ def remove_test_functions(file: Path, names: set[str]) -> int:
     lines = source.splitlines(keepends=True)
     for start, end in sorted(spans, reverse=True):
         del lines[start - 1 : end]
-    file.write_text("".join(lines), encoding="utf-8")
+    file.write_bytes("".join(lines).encode("utf-8"))
+    match_file_style(file, original)  # same byte-order mark and line endings as the model wrote
     return len(spans)
 
 
@@ -364,8 +406,10 @@ def verify_docs(ctx: StepContext) -> str:
         return "No documentation changes were generated; nothing to keep."
     notes, kept = [], 0
     for code, path in changed_files(ctx.workdir):
-        new = (ctx.workdir / path).read_text(encoding="utf-8", errors="replace") if (ctx.workdir / path).exists() else ""
-        old = head_text(ctx.workdir, path)
+        file = ctx.workdir / path
+        new = source_text(file.read_bytes()) if file.exists() else ""
+        original = head_bytes(ctx.workdir, path)
+        old = None if original is None else source_text(original)
         if path.endswith(".py") and old is not None:
             ok, why = docs_only_change(old, new)
         elif path.lower().endswith(DOC_FILES):
@@ -373,6 +417,8 @@ def verify_docs(ctx: StepContext) -> str:
         else:
             ok, why = False, "docs jobs only change docstrings and documentation files"
         if ok:
+            if original is not None and file.exists():
+                match_file_style(file, original)
             kept += 1
             notes.append(f"kept {path}")
         else:
@@ -423,7 +469,7 @@ def numbered_listing(root: Path, target: str, max_chars: int) -> tuple[str, list
         if b"\0" in data:
             continue
         rel = file.relative_to(root).as_posix()
-        block = "".join(f"{rel}:{n}| {line}\n" for n, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1))
+        block = "".join(f"{rel}:{n}| {line}\n" for n, line in enumerate(source_text(data).splitlines(), 1))
         if used + len(block) > max_chars:
             omitted.append(rel)
             continue
