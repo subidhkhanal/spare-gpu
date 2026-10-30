@@ -2,31 +2,82 @@
 
 Queue the repo chores you keep putting off — tests, docs, code review — and let them run on BharatCode's spare capacity, each on its own git branch.
 
-## Quickstart
+## Windows quickstart
 
-spare-gpu runs on Windows (PowerShell).
+spare-gpu runs on Windows 10 and 11. These steps assume nothing is installed. Paste each block into **PowerShell** (Start menu → type "PowerShell" → Enter). If something goes wrong, see [Troubleshooting](#troubleshooting).
 
-```powershell
-pipx install spare-gpu                     # or: pip install spare-gpu
-gtu setkey                                 # paste your key once; every terminal finds it
-cd your-repo
-gtu demo                                # a short code review of one of your files, in a minute or two
-```
-
-Then queue real work, which runs when BharatCode has capacity:
+**1. Install Python and Git.** Download Python from [python.org/downloads](https://www.python.org/downloads/windows/) and tick **"Add python.exe to PATH"** in the installer, and Git from [git-scm.com](https://git-scm.com/download/win). Or install both from PowerShell:
 
 ```powershell
-gtu add review src/app.py    # or: tests, docs
-gtu start                    # gtu why — what it's waiting for;  gtu report — what got done
+winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-Get a key at [bharatcode.ai/account](https://bharatcode.ai/account). You need Python 3.11+ and pipx; see [Install and try it](#install-and-try-it).
+Then **close PowerShell and open a new one**, so it finds them.
+
+**2. Install pipx**, the tool that installs Python command-line programs, each in its own sealed-off space:
+
+```powershell
+py -m pip install --user pipx
+py -m pipx ensurepath
+```
+
+The first command warns that `pipx.exe` "is not on PATH"; the second fixes that. **Close PowerShell and open a new one again.** (Python from the Microsoft Store has no `py`; use `python` instead.)
+
+**3. Install spare-gpu:**
+
+```powershell
+pipx install spare-gpu
+```
+
+Until spare-gpu is published on PyPI, install it from GitHub instead: `pipx install git+https://github.com/subidhkhanal/spare-gpu`
+
+**4. Save your BharatCode API key** (get one at [bharatcode.ai/account](https://bharatcode.ai/account)):
+
+```powershell
+gtu setkey
+```
+
+Paste the key when asked; nothing shows while you paste, that's on purpose. It's checked with BharatCode and saved for your Windows account, so every terminal finds it from now on.
+
+**5. See it work.** Open PowerShell in a folder with some of your code (in File Explorer: click the address bar, type `powershell`, press Enter; or VS Code's Terminal → New Terminal), then:
+
+```powershell
+gtu demo
+```
+
+You get a short code review of one of your files, usually within a minute or two.
+
+**Then queue real work**, in a git repo with no uncommitted changes. It runs when BharatCode has spare capacity, on its own branch:
+
+```powershell
+gtu add review .
+gtu start
+```
+
+`gtu why` says what it's waiting for; `gtu report` shows what got done.
+
+**Optional: tests and docs jobs.** Review jobs need only the steps above. `tests` and `docs` jobs also need BharatCode's own CLI, which needs Node.js:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
+```
+
+Close PowerShell, open a new one, then:
+
+```powershell
+npm.cmd install -g bharatcode
+bharatcode.cmd auth login
+gtu check
+```
+
+(`npm.cmd` and `bharatcode.cmd` instead of `npm` and `bharatcode`: they work even where PowerShell blocks scripts, which it does by default on many PCs.) `gtu check` should end with `BharatCode CLI: installed (...) and signed in` and `OK: API key accepted`.
 
 ---
 
 [![tests](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml/badge.svg)](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml)
 
-**Status: v0.1.0.** Tests, docs and review jobs do real work on their own git branch, one step at a time while BharatCode has spare capacity, within token budgets, and survive being stopped. Tested end to end against fakes of BharatCode's API and CLI; not yet run end to end against the real service.
+**Status: v0.1.0.** Tests, docs and review jobs do real work on their own git branch, one step at a time while BharatCode has spare capacity, within token budgets, and survive being stopped. A review job has run end to end against the real service; tests and docs jobs are so far tested end to end only against fakes of BharatCode's API and CLI.
 
 ## The finding
 
@@ -90,29 +141,24 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 
 ## Install and try it
 
+The [Windows quickstart](#windows-quickstart) above is the whole install. In short:
+
 | Route | Command | Needs |
 |---|---|---|
-| pipx (recommended) | `pipx install spare-gpu` | Python 3.11+ |
-| pip | `pip install spare-gpu` | Python 3.11+ |
-| From source | `python -m pip install -e ".[dev]"` | Python 3.11+ |
+| pipx (recommended) | `pipx install spare-gpu` | Python 3.11+, Git |
+| pip | `py -m pip install spare-gpu` | Python 3.11+, Git |
+| From source | `py -m pip install -e ".[dev]"` | Python 3.11+, Git |
 
-Windows only (10 and 11); macOS and Linux aren't supported. Every route needs `git`; `tests` and `docs` jobs also need BharatCode's own CLI (`npm install -g bharatcode`, then `bharatcode auth login`).
+Windows only (10 and 11); macOS and Linux aren't supported. It works the same in PowerShell, Windows Terminal and Command Prompt. There is no standalone `gtu.exe` (see [Troubleshooting](#troubleshooting)). Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
 
-**Installing with pipx on Windows**, from PowerShell:
+**What each job needs:**
 
-1. Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/) and tick "Add python.exe to PATH" in the installer. If `python` later says *"Python was not found; run without arguments to install from the Microsoft Store"*, Python isn't installed (that message is a Windows shortcut, not Python).
-2. Install pipx, then let it add its folder to your PATH:
-   ```powershell
-   py -m pip install --user pipx
-   py -m pipx ensurepath
-   ```
-   The first command prints `WARNING: The script pipx.exe is installed in '...' which is not on PATH`. That's expected; the second command fixes it. (`py` is the Python launcher that python.org installs. If you installed Python from the Microsoft Store instead, use `python` in place of `py`.)
-3. **Close every terminal window and open a new one.** PATH changes only reach terminals opened afterwards. In VS Code's built-in terminal, restart VS Code itself.
-4. `pipx install spare-gpu`, then `gtu --version`.
+| | `review` | `tests` | `docs` |
+|---|---|---|---|
+| spare-gpu, Git, an API key | ✓ | ✓ | ✓ |
+| BharatCode's CLI (Node.js, `npm.cmd install -g bharatcode`, `bharatcode.cmd auth login`) | not needed | **needed** | **needed** |
 
-If `gtu` is "not recognized" after step 4, the terminal still has the old PATH: open a new one (step 3). If you skipped step 2, pipx's message suggests editing `~/.bashrc`; ignore that on Windows and run `py -m pipx ensurepath`. Until then you can run it by its full path: `& "$env:USERPROFILE\.local\bin\gtu.exe" --version`. gtu works the same in PowerShell, Windows Terminal and Command Prompt.
-
-There is no standalone `gtu.exe`: an unsigned executable is blocked by Windows Smart App Control, so pipx is the supported route. Step-by-step checks for a clean machine are in [docs/install-checklist.md](docs/install-checklist.md).
+If the CLI is missing, `gtu add tests` / `gtu add docs` say so straight away, `gtu check` reports it, and `gtu start` leaves those jobs queued (not failed) and still runs review jobs.
 
 ```powershell
 gtu demo [file]   # one short review, sent straight away, to see it work
@@ -129,7 +175,7 @@ gtu check    # says where it found the key and confirms BharatCode accepts it
 
 Setting `$env:BHARATCODE_API_KEY = "..."` still works, but only lasts for that terminal; when it's set, it takes priority over the saved key.
 
-`gtu check` reports where the key came from, calls `GET /models`, then sends a 1-token `POST /chat/completions` to confirm the key is actually accepted (`/models` answers even with a wrong key). Exits non-zero if the key is missing, rejected, or BharatCode is busy.
+`gtu check` reports whether BharatCode's CLI is installed and signed in, and where the key came from; then it calls `GET /models` and sends a 1-token `POST /chat/completions` to confirm the key is actually accepted (`/models` answers even with a wrong key). Exits non-zero if the key is missing, rejected, or BharatCode is busy; a missing CLI is reported but doesn't fail it, since review jobs don't need it.
 
 ```powershell
 gtu add tests src/calc.py --note "cover negative numbers"   # kinds: tests, docs, review
@@ -219,6 +265,32 @@ All of it is configurable:
 - If an answer is cut off (`finish_reason: length`), the partial text is kept, any half-written tool call is thrown away rather than run, and it is not retried automatically.
 - Every attempt is logged with when it was sent, tokens (including reasoning tokens), response time, `x-request-id`, BharatCode's reported queue wait (`x-bharatcode-queue-wait-ms`), and whether it was cut off.
 
+## Troubleshooting
+
+**`gtu` is "not recognized" after installing.** The terminal still has the PATH from before you installed. Close **every** PowerShell or Command Prompt window and open a new one (in VS Code, restart VS Code itself; its terminals keep the old PATH). If it still isn't found, run `py -m pipx ensurepath`, then open a new terminal again. pipx may suggest editing `~/.bashrc`; that's for Linux, ignore it. You can always run it by its full path: `& "$env:USERPROFILE\.local\bin\gtu.exe" --version`.
+
+**"Python was not found; run without arguments to install from the Microsoft Store".** Python isn't installed; that message is a Windows shortcut, not Python. Do step 1 of the [quickstart](#windows-quickstart), then open a new terminal. If you installed Python but forgot "Add python.exe to PATH", use `py` instead of `python`; it works either way.
+
+**"running scripts is disabled on this system" (for `npm` or `bharatcode`).** PowerShell blocks `.ps1` scripts by default on many PCs, and npm installs its commands as scripts. Use `npm.cmd` and `bharatcode.cmd` instead; they do the same thing and aren't blocked. gtu itself isn't affected.
+
+**The API key doesn't stick between terminals.** `$env:BHARATCODE_API_KEY = "..."` only lasts for the window you typed it in. Run `gtu setkey` once instead: it saves the key in Windows Credential Manager for your account. `gtu check` shows where the key it's using came from. If `BHARATCODE_API_KEY` is set, it wins over the saved key; close that window or run `Remove-Item Env:BHARATCODE_API_KEY`.
+
+**"BharatCode rejected your API key".** The key was mistyped, revoked or expired. Copy it again from [bharatcode.ai/account](https://bharatcode.ai/account) and run `gtu setkey`.
+
+**"BharatCode's CLI isn't installed" or "not signed in".** Only `tests` and `docs` jobs need it. Install Node.js, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login` (see the end of the [quickstart](#windows-quickstart)), and open a new terminal. Queued tests and docs jobs wait for it and run on the next `gtu start`.
+
+**Why is there no `gtu.exe` to download?** We built one, and Windows 11's Smart App Control blocked it on our own test machine ("An Application Control policy has blocked this file"), as it does with any program that isn't code-signed. SmartScreen warns about the same thing on Windows 10. A download most people can't open is worse than none, so pipx is the supported route until there's a signed build.
+
+**`gtu start` seems to hang.** It's almost always waiting for spare capacity, on purpose. It prints why, e.g. `Gate closed: ... 2/2 slots busy, 7 queued. Next check in 60s`. To see the reason at any time, run `gtu why` in another terminal. To run now anyway, competing with everyone else's requests, stop it with Ctrl+C and run `gtu start --now`. `gtu stop` stops it from another terminal; jobs are paused, not lost.
+
+**"the repo has uncommitted changes".** Jobs start from your last commit, so `gtu add` refuses a repo with uncommitted or untracked files, and a queued job can't start while there are some. Commit them (`git add -A` then `git commit -m "wip"`) or stash them (`git stash -u`).
+
+**"paths longer than Windows allows".** A job works in a copy of your repo under `.gtu\worktrees\`, which makes every path about 25 characters longer. Move the repo to a shorter folder such as `C:\code\myrepo`, or turn on Windows long paths once (the error message shows the exact command, to run as Administrator).
+
+**"could not remove its worktree ... holding a file".** Antivirus (usually Microsoft Defender) or an editor had a file in the job's folder open. gtu retries for a few seconds first. The job's results are already safe on its `gtu/<job-id>` branch; delete the folder it names when the program lets go.
+
+**Saving output to a file.** `gtu report` already saves a copy under `.gtu\reports\` (UTF-8); use that. In Command Prompt, `gtu report > report.md` also writes clean UTF-8. Windows PowerShell 5.1 re-encodes anything you redirect or pipe (`>` saves UTF-16, and characters outside English can come out garbled), so prefer the saved copy there.
+
 ## Running the tests
 
 ```powershell
@@ -253,7 +325,7 @@ python -m twine upload dist/*
 - We assume the API lane's queue is the one our requests join. A free slot does not guarantee a prompt start: under pacing, BharatCode can hold a request for several seconds either way, and once answered busy (503) after holding it for 5.6 s.
 - Two assumptions in the client are unconfirmed: that HTTP 429 should be treated like 503 (BharatCode's docs only mention 503), and that `Retry-After` is honoured when sent — it was never observed in testing.
 - `gtu start` stops when the queue is empty; it does not wait for new jobs.
-- The job types are tested against fakes of BharatCode's API and CLI, not yet end to end against the real service.
+- Only the review job has run against the real service so far; tests and docs jobs are tested against fakes of BharatCode's API and CLI.
 - Failing generated tests are dropped per test for Python (pytest); for other languages a whole test file is kept or discarded.
 - A tests job only accepts new test files; it never edits your existing tests.
 - A CLI step that times out is retried after the gate reopens; a task that always times out will keep retrying until its budget runs out.

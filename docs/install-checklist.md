@@ -6,10 +6,14 @@ by hand. Run the commands in PowerShell. Tick each line; if one fails, note the 
 
 You need a BharatCode API key from <https://bharatcode.ai/account>.
 
+Follow the README's **Windows quickstart** word for word, pasting each command unchanged; this
+checklist records whether each step did what it promises.
+
 ## A. pipx (recommended)
 
-1. [ ] Python 3.11 or newer is installed (`py --version`). On a machine without Python, `python`
-   prints "Python was not found; run without arguments to install from the Microsoft Store".
+1. [ ] Python 3.11 or newer and Git are installed (`py --version`, `git --version` in a new
+   terminal). Before that, `python` prints "Python was not found; run without arguments to
+   install from the Microsoft Store".
 2. [ ] `py -m pip install --user pipx` (a "not on PATH" warning is expected) then
    `py -m pipx ensurepath`. Close every terminal and open a **new** one.
 3. [ ] `pipx install spare-gpu` finishes without errors, and `gtu` is found in the new terminal
@@ -19,7 +23,7 @@ You need a BharatCode API key from <https://bharatcode.ai/account>.
 
 ## B. pip
 
-1. [ ] `python -m pip install spare-gpu` (inside a virtual environment, or with `--user`).
+1. [ ] `py -m pip install spare-gpu` (inside a virtual environment, or with `--user`).
 2. [ ] `gtu --version` works. If "not recognized": the scripts folder isn't on PATH; use pipx instead.
 
 There is no standalone `gtu.exe`: Windows Smart App Control blocks an unsigned executable
@@ -44,11 +48,23 @@ In a folder with a small git repo of your own:
 
 ## D. Tests and docs jobs (need BharatCode's own CLI)
 
-1. [ ] Node.js is installed, then `npm install -g bharatcode` and `bharatcode auth login`.
-2. [ ] `gtu add tests <a small source file>`, `gtu start --now`: the job finishes and its branch
-   contains only passing tests (`git show gtu/<job-id> --stat`).
-3. [ ] In another terminal while a job runs: `gtu stop` says it stopped, and `gtu list` shows the
+1. [ ] Before installing the CLI: `gtu add tests <file>` queues the job and says it won't run yet,
+   with the install steps; `gtu check` says "BharatCode CLI: not available"; `gtu start --now`
+   runs any review jobs and leaves the tests job **queued** (`gtu list`), not failed.
+2. [ ] Node.js is installed, then (new terminal) `npm.cmd install -g bharatcode` and
+   `bharatcode.cmd auth login`. Note whether plain `npm` says "running scripts is disabled".
+3. [ ] `gtu check` says "BharatCode CLI: installed (...) and signed in".
+4. [ ] `gtu start --now`: the queued tests job finishes and its branch contains only passing
+   tests (`git show gtu/<job-id> --stat`).
+5. [ ] In another terminal while a job runs: `gtu stop` says it stopped, and `gtu list` shows the
    job as paused, not failed.
+
+## E. Windows specifics
+
+1. [ ] Everything above also works for a repo in a folder with spaces (e.g.
+   `C:\Users\<you>\Documents\my project`) and a file name with spaces.
+2. [ ] A docs job on a `.py` file saved by Notepad or `Set-Content -Encoding utf8` (byte-order
+   mark, CRLF): `git diff main gtu/<job-id>` shows only added lines.
 
 ## Record
 
