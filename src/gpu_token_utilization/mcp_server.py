@@ -262,14 +262,17 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
         Use it when the user wants tests, docs or a review done later, tonight, overnight or
         "when there's capacity". Examples: "queue tests for the payments module", "write tests for
-        src/payments tonight", "get docs written for utils overnight", "review app/api.py later".
+        src/payments tonight", "get docs written for utils overnight", "queue a code review of
+        app/api.py", "review app/api.py later". Call it straight away: it is the whole job, and it
+        checks the path itself.
         For any other command (a build, a migration, a big refactor script) use spare_run_when_free.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
                 changing code; "review" writes a code review (bugs, risky code, suggestions).
-            path: File or folder relative to the repo root, e.g. "src/payments". If the user names a
-                module loosely, find its real path first.
+            path: File or folder relative to the repo root, e.g. "src/payments". If the user gave a
+                path, pass it exactly as given without searching; spare-gpu says if it doesn't exist.
+                Only search when the user named a module loosely ("the payments module").
             note: Optional extra instructions in the user's words, e.g. "cover refunds".
         """
         return tools.queue_work(type, path, note)
