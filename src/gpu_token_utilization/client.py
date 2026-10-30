@@ -6,6 +6,7 @@ token accounting and a log row for every attempt (including the x-request-id).
 
 from __future__ import annotations
 
+import json
 import random
 import threading
 import time
@@ -75,6 +76,8 @@ class Usage:
     completion_tokens: int = 0
     reasoning_tokens: int = 0
     total_tokens: int = 0
+    # The whole usage block as sent, including fields not parsed above (cached tokens, say).
+    raw: dict = field(default_factory=dict)
 
     @classmethod
     def from_body(cls, body: dict) -> Usage:
@@ -85,6 +88,7 @@ class Usage:
             completion_tokens=usage.get("completion_tokens") or 0,
             reasoning_tokens=details.get("reasoning_tokens") or 0,
             total_tokens=usage.get("total_tokens") or 0,
+            raw=usage if isinstance(usage, dict) else {},
         )
 
 
@@ -263,6 +267,7 @@ class BharatCodeClient:
                     completion_tokens=u.completion_tokens,
                     reasoning_tokens=u.reasoning_tokens,
                     total_tokens=u.total_tokens,
+                    usage_json=json.dumps(u.raw) if u.raw else None,
                     finish_reason=result.finish_reason,
                     truncated=result.truncated,
                 )

@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS requests (
     active_at_send     INTEGER,
     queue_wait_ms      INTEGER,
     scheduler_requested_at_ms INTEGER,
-    scheduler_admitted_at_ms  INTEGER
+    scheduler_admitted_at_ms  INTEGER,
+    usage_json         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS gate_readings (
@@ -105,7 +106,7 @@ ADDED_COLUMNS = {
     "requests": {
         "gate_source": "TEXT", "queue_at_send": "INTEGER", "active_at_send": "INTEGER",
         "queue_wait_ms": "INTEGER", "scheduler_requested_at_ms": "INTEGER", "scheduler_admitted_at_ms": "INTEGER",
-        "slots_at_send": "INTEGER",
+        "slots_at_send": "INTEGER", "usage_json": "TEXT",
     },
     "jobs": {"base_commit": "TEXT"},
 }
@@ -176,6 +177,8 @@ class RequestLog:
     queue_wait_ms: int | None = None
     scheduler_requested_at_ms: int | None = None
     scheduler_admitted_at_ms: int | None = None
+    # The reply's whole `usage` block as JSON, so fields we don't parse (cached tokens, say) are kept.
+    usage_json: str | None = None
 
 
 @dataclass
@@ -338,8 +341,8 @@ class Store:
                 """INSERT INTO requests (job_id, step_id, sent_at, endpoint, model, attempt, status_code,
                        elapsed_ms, request_id, prompt_tokens, completion_tokens, reasoning_tokens,
                        total_tokens, finish_reason, truncated, error, gate_source, queue_at_send, active_at_send,
-                       queue_wait_ms, scheduler_requested_at_ms, scheduler_admitted_at_ms, slots_at_send)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       queue_wait_ms, scheduler_requested_at_ms, scheduler_admitted_at_ms, slots_at_send, usage_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     entry.job_id, entry.step_id, entry.sent_at or utc_now(), entry.endpoint, entry.model,
                     entry.attempt, entry.status_code, entry.elapsed_ms, entry.request_id, entry.prompt_tokens,
@@ -347,7 +350,7 @@ class Store:
                     entry.finish_reason, int(entry.truncated), entry.error,
                     entry.gate_source, entry.queue_at_send, entry.active_at_send,
                     entry.queue_wait_ms, entry.scheduler_requested_at_ms, entry.scheduler_admitted_at_ms,
-                    entry.slots_at_send,
+                    entry.slots_at_send, entry.usage_json,
                 ),
             )
         return cur.lastrowid

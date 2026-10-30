@@ -50,6 +50,14 @@ def test_success_is_logged_with_request_id_and_tokens(fake, store):
     assert row["truncated"] == 0 and row["error"] is None
 
 
+def test_the_whole_usage_block_is_kept_including_fields_we_dont_parse(fake, store):
+    fake.ok("hi", prompt_tokens=100, completion_tokens=5, usage_extra={"prompt_tokens_details": {"cached_tokens": 64}})
+    result = make_client(fake, store).chat(MESSAGES)
+    assert result.usage.raw["prompt_tokens_details"] == {"cached_tokens": 64}
+    (row,) = store.requests()
+    assert json.loads(row["usage_json"])["prompt_tokens_details"]["cached_tokens"] == 64
+
+
 def test_request_body_follows_api_rules(fake, store):
     make_client(fake, store).chat(MESSAGES, max_tokens=50)
     body = json.loads(fake.requests[-1].content)

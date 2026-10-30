@@ -118,7 +118,7 @@ Every request a coding agent sends carries its own system prompt and the descrip
 
 That's paid again on **every agent step**. spare-gpu's own tests and docs jobs switch its MCP tools off inside the CLI, so they don't pay the extra 2.3k.
 
-**For comparison, published benchmarks** (not our measurements): the Systima Applied Research team (July 2026) measured about **7,000** tokens of system prompt, tool schemas and scaffolding for OpenCode, which BharatCode's CLI is built on, and about **33,000** for Claude Code, before reading the user's prompt.
+**For comparison, published benchmarks** (not our measurements): the Systima Applied Research team (July 2026) measured about **7,000** tokens of system prompt, tool schemas and scaffolding for OpenCode, which BharatCode's CLI is built on, and about **33,000** for Claude Code, before reading the user's prompt. (Figures as reported in [this write-up of the Systima benchmark](https://www.kunalganglani.com/blog/opencode-vs-claude-code-token-overhead); we couldn't find Systima's original report.)
 
 **See your own numbers:**
 

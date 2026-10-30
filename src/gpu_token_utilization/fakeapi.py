@@ -53,6 +53,7 @@ class Reply:
     retry_after: float | None = None
     headers: dict = field(default_factory=dict)
     queue_wait_ms: int | None = None  # sent as BharatCode's scheduler headers when set
+    usage_extra: dict = field(default_factory=dict)  # more fields in the usage block (cached tokens, say)
 
 
 @dataclass
@@ -191,6 +192,7 @@ class FakeBharatCode:
                 "completion_tokens": reply.completion_tokens,
                 "total_tokens": reply.prompt_tokens + reply.completion_tokens,
                 "completion_tokens_details": {"reasoning_tokens": reply.reasoning_tokens},
+                **reply.usage_extra,
             },
         }
         return httpx.Response(200, headers=headers, json=body)
