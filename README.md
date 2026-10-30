@@ -4,76 +4,69 @@ Queue the repo chores you keep putting off — tests, docs, code review — and 
 
 > **Windows-first.** spare-gpu is built and tested for Windows 10 and 11, and CI runs on Windows only. It may work on macOS or Linux, but it isn't supported or tested there: stopping a running job, in particular, is known to fail on both.
 
-## Windows quickstart
+## Get started
 
-spare-gpu runs on Windows 10 and 11. These steps assume nothing is installed. Paste each block into **PowerShell** (Start menu → type "PowerShell" → Enter). If something goes wrong, see [Troubleshooting](#troubleshooting).
+You'll talk to spare-gpu from inside **BharatCode's CLI**: ask it to queue a chore, and spare-gpu does the work in the background when BharatCode has spare capacity. Three steps, all in **PowerShell** (Start menu → type "PowerShell" → Enter). If anything goes wrong, see [Troubleshooting](#troubleshooting).
 
-**1. Install Python and Git.** Download Python from [python.org/downloads](https://www.python.org/downloads/windows/) and tick **"Add python.exe to PATH"** in the installer, and Git from [git-scm.com](https://git-scm.com/download/win). Or install both from PowerShell:
+**1. Install the tools spare-gpu runs on** (skip any you already have): Python, Git, Node.js and BharatCode's CLI.
 
 ```powershell
 winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
 winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-Then **close PowerShell and open a new one**, so it finds them.
+**Close PowerShell and open a new one**, then:
 
-**2. Install pipx**, the tool that installs Python command-line programs, each in its own sealed-off space:
+```powershell
+npm.cmd install -g bharatcode
+bharatcode.cmd auth login
+```
+
+(`npm.cmd` and `bharatcode.cmd`, not `npm` and `bharatcode`: they work even where PowerShell blocks scripts, which it does by default on many PCs. No winget? Download [Python](https://www.python.org/downloads/windows/) (tick "Add python.exe to PATH"), [Git](https://git-scm.com/download/win) and [Node.js LTS](https://nodejs.org) by hand.)
+
+**2. Install spare-gpu:**
 
 ```powershell
 py -m pip install --user pipx
 py -m pipx ensurepath
 ```
 
-The first command warns that `pipx.exe` "is not on PATH"; the second fixes that. **Close PowerShell and open a new one again.** (Python from the Microsoft Store has no `py`; use `python` instead.)
-
-**3. Install spare-gpu:**
+**Close PowerShell and open a new one again**, then:
 
 ```powershell
 pipx install spare-gpu
 ```
 
-Until spare-gpu is published on PyPI, install it from GitHub instead: `pipx install git+https://github.com/subidhkhanal/spare-gpu`
+Until spare-gpu is published on PyPI, use `pipx install git+https://github.com/subidhkhanal/spare-gpu` instead.
 
-**4. Save your BharatCode API key** (get one at [bharatcode.ai/account](https://bharatcode.ai/account)):
-
-```powershell
-gtu setkey
-```
-
-Paste the key when asked; nothing shows while you paste, that's on purpose. It's checked with BharatCode and saved for your Windows account, so every terminal finds it from now on.
-
-**5. See it work.** Open PowerShell in a folder with some of your code (in File Explorer: click the address bar, type `powershell`, press Enter; or VS Code's Terminal → New Terminal), then:
+**3. Set it up:**
 
 ```powershell
-gtu demo
+gtu setup
 ```
 
-You get a short code review of one of your files, usually within a minute or two.
+It asks for your BharatCode API key once (get one at [bharatcode.ai/account](https://bharatcode.ai/account); nothing shows while you paste, that's on purpose), checks it, saves it for your Windows account, and registers spare-gpu with BharatCode's CLI. It finishes with `BharatCode reports: spare-gpu connected`. Safe to run again any time.
 
-**Then queue real work**, in a git repo with no uncommitted changes. It runs when BharatCode has spare capacity, on its own branch:
+### Now just ask
 
-```powershell
-gtu add review .
-gtu start
-```
+Open BharatCode in one of your git repos (`bharatcode.cmd` in the repo's folder) and talk to it:
 
-`gtu why` says what it's waiting for; `gtu report` shows what got done.
+| You say | What spare-gpu does |
+|---|---|
+| "queue tests for src/payments tonight" | Queues a **tests** job and starts its background runner. Only tests that pass are kept. |
+| "get docs written for src/utils overnight" | Queues a **docs** job: docstrings and README text, never code changes. |
+| "review app/api.py when there's capacity" | Queues a **review**: likely bugs, risky code, suggestions, as a report file. |
+| "what's queued?" / "is my tests job done?" | Lists jobs by status, with ids and tokens used. |
+| "what did spare-gpu do last night?" | What ran in the last 24 hours, what each job produced, tokens used. |
+| "why hasn't my job started?" | BharatCode's live load and the capacity gate's decision. |
+| "cancel the docs job" / "stop spare-gpu" | Cancels a job, or pauses the runner (jobs are kept). |
 
-**Optional: tests and docs jobs.** Review jobs need only the steps above. `tests` and `docs` jobs also need BharatCode's own CLI, which needs Node.js:
+Every job works on its own git branch, `gtu/<job-id>`; your own branch and files are never touched. When it's done, look at the work with `git diff HEAD...gtu/<job-id>` and merge what you like. The runner keeps going after you close BharatCode, sends work only while BharatCode has spare capacity, and stops by itself when the queue is empty.
 
-```powershell
-winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
-```
+Name the folder or file when you can ("src/payments", not "the payments module"), and commit your work first: jobs start from your last commit, so a repo with uncommitted changes is refused.
 
-Close PowerShell, open a new one, then:
-
-```powershell
-npm.cmd install -g bharatcode
-bharatcode.cmd auth login
-gtu check
-```
-
-(`npm.cmd` and `bharatcode.cmd` instead of `npm` and `bharatcode`: they work even where PowerShell blocks scripts, which it does by default on many PCs.) `gtu check` should end with `BharatCode CLI: installed (...) and signed in` and `OK: API key accepted`.
+**Prefer the terminal?** Everything also works as plain commands: `gtu add tests src/payments`, `gtu start`, `gtu report`. See [Command-line reference](#command-line-reference).
 
 ---
 
@@ -128,6 +121,7 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 ## What works today vs. what's coming
 
 **Today:**
+- An MCP server inside BharatCode's CLI: queue, check, report and cancel jobs by asking in plain words; `gtu setup` registers it in one step, and queueing a job starts a background runner that outlives the BharatCode session.
 - A SQLite job store (`gtu add`, `gtu list`, `gtu status`, `gtu cancel`) — jobs can be queued, listed and cancelled.
 - A capacity gate (`gtu why`, `gtu start`) that polls BharatCode's live stats, falls back to our own request history when that's unusable, and only sends work while it's genuinely quiet.
 - A runner (`gtu start`) that works through the queue one step at a time, survives being stopped (Ctrl+C, a crash, closing the terminal) and resumes without redoing finished steps.
@@ -141,9 +135,11 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 **Coming:**
 - Real end-to-end runs against BharatCode, and the gate-vs-send experiment's results, which may change how the gate works.
 
-## Install and try it
+## Command-line reference
 
-The [Windows quickstart](#windows-quickstart) above is the whole install. In short:
+### Install and try it
+
+The [Get started](#get-started) steps above are the whole install. In short:
 
 | Route | Command | Needs |
 |---|---|---|
@@ -267,58 +263,28 @@ All of it is configurable:
 - If an answer is cut off (`finish_reason: length`), the partial text is kept, any half-written tool call is thrown away rather than run, and it is not retried automatically.
 - Every attempt is logged with when it was sent, tokens (including reasoning tokens), response time, `x-request-id`, BharatCode's reported queue wait (`x-bharatcode-queue-wait-ms`), and whether it was cut off.
 
-## Use it from BharatCode's CLI (MCP)
+## How the BharatCode integration works
 
-For people who already work inside BharatCode's CLI: spare-gpu includes an [MCP](https://modelcontextprotocol.io) server, so you can queue and check jobs by asking the agent in plain words instead of typing `gtu` commands. It comes with `pipx install spare-gpu`; there's nothing extra to install. Start with the [quickstart](#windows-quickstart) first: the MCP server uses the same setup, API key and job queue.
-
-**Register it once.** Open BharatCode's global config file:
-
-```powershell
-notepad "$env:APPDATA\BharatCode\Config\opencode.jsonc"
-```
-
-and add the `"mcp"` block, so the file looks like this (keep anything else that's already in it):
+`gtu setup` adds spare-gpu as an [MCP](https://modelcontextprotocol.io) server to BharatCode's global config, `%APPDATA%\BharatCode\Config\opencode.jsonc`, keeping anything already in it (the old file is saved next to it). If you'd rather do it by hand, add this and run `bharatcode.cmd mcp list` to check for `✓ spare-gpu connected`:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "spare-gpu": {
-      "type": "local",
-      "command": ["gtu", "mcp"],
-      "enabled": true
-    }
+    "spare-gpu": { "type": "local", "command": ["gtu", "mcp"], "enabled": true }
   }
 }
 ```
 
-Save, then check it from a new terminal:
+A project-level `opencode.json` in a repo's root works too (commit it; an uncommitted file makes jobs refuse the repo). BharatCode ignores a file named `bharatcode.json`. `gtu setup --remove` unregisters spare-gpu.
 
-```powershell
-bharatcode.cmd mcp list
-```
-
-It should show `✓ spare-gpu connected`. It's now available in every project you open with BharatCode. (A project-level `opencode.json` in a repo's root works too, but commit it: an uncommitted file makes `gtu add` refuse the repo. BharatCode ignores a file named `bharatcode.json`.)
-
-**What you can ask.** The agent picks the tool itself:
-
-| You say | Tool it uses | What happens |
-|---|---|---|
-| "queue tests for src/payments tonight", "get docs written for utils overnight", "review app/api.py later" | `spare_add_job` | Queues a tests, docs or review job; it runs on its own branch when `gtu start` is running. |
-| "what's queued?", "is my tests job done?" | `spare_list_jobs` | Jobs by status, with ids and tokens used. |
-| "what did spare-gpu do last night?", "how many tokens did it use?" | `spare_report` | What ran in the last 24 hours, what each job produced, tokens. |
-| "why hasn't my job started?", "is BharatCode busy?" | `spare_why` | The capacity gate's current decision and the queue. |
-| "cancel the docs job", "drop job 1a2b3c4d" | `spare_cancel` | Cancels it; anything already committed stays on its branch. |
-
-Name the folder or file when you can ("src/payments" rather than "the payments module"); the agent otherwise has to search for it first.
-
-**It queues; `gtu start` runs.** The MCP server never runs jobs itself, so closing BharatCode doesn't stop anything. Leave `gtu start` running in a terminal (overnight, say), and the tools tell you whether it's going. The server and `gtu start` share the same `.gtu\gtu.db` in the repo; it's safe for both to use it at once.
+The agent gets seven tools: `spare_add_job`, `spare_list_jobs`, `spare_report`, `spare_why`, `spare_cancel`, `spare_start` and `spare_stop`. Each is a thin wrapper over the same code as the matching `gtu` command, and they share the repo's `.gtu\gtu.db` safely with a running `gtu start`. Queueing a job starts the background runner (`gtu start`, with no window, output in `.gtu\runner.log`) if it isn't already running.
 
 ## Troubleshooting
 
 **`gtu` is "not recognized" after installing.** The terminal still has the PATH from before you installed. Close **every** PowerShell or Command Prompt window and open a new one (in VS Code, restart VS Code itself; its terminals keep the old PATH). If it still isn't found, run `py -m pipx ensurepath`, then open a new terminal again. pipx may suggest editing `~/.bashrc`; that's for Linux, ignore it. You can always run it by its full path: `& "$env:USERPROFILE\.local\bin\gtu.exe" --version`.
 
-**"Python was not found; run without arguments to install from the Microsoft Store".** Python isn't installed; that message is a Windows shortcut, not Python. Do step 1 of the [quickstart](#windows-quickstart), then open a new terminal. If you installed Python but forgot "Add python.exe to PATH", use `py` instead of `python`; it works either way.
+**"Python was not found; run without arguments to install from the Microsoft Store".** Python isn't installed; that message is a Windows shortcut, not Python. Do step 1 of [Get started](#get-started), then open a new terminal. If you installed Python but forgot "Add python.exe to PATH", use `py` instead of `python`; it works either way.
 
 **"running scripts is disabled on this system" (for `npm` or `bharatcode`).** PowerShell blocks `.ps1` scripts by default on many PCs, and npm installs its commands as scripts. Use `npm.cmd` and `bharatcode.cmd` instead; they do the same thing and aren't blocked. gtu itself isn't affected.
 
@@ -326,7 +292,7 @@ Name the folder or file when you can ("src/payments" rather than "the payments m
 
 **"BharatCode rejected your API key".** The key was mistyped, revoked or expired. Copy it again from [bharatcode.ai/account](https://bharatcode.ai/account) and run `gtu setkey`.
 
-**"BharatCode's CLI isn't installed" or "not signed in".** Only `tests` and `docs` jobs need it. Install Node.js, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login` (see the end of the [quickstart](#windows-quickstart)), and open a new terminal. Queued tests and docs jobs wait for it and run on the next `gtu start`.
+**"BharatCode's CLI isn't installed" or "not signed in".** Only `tests` and `docs` jobs need it. Install Node.js, then `npm.cmd install -g bharatcode` and `bharatcode.cmd auth login` (see [Get started](#get-started)), and open a new terminal. Queued tests and docs jobs wait for it and run on the next `gtu start`.
 
 **"Credential store permissions or access could not be verified".** This error comes from BharatCode's own CLI, not from spare-gpu. On our test machine (CLI 1.15.46) it appeared, with or without spare-gpu, whenever the agent needed a second step, so tests and docs jobs and multi-step MCP requests stop there. `bharatcode.cmd auth status` still said "Signed in". We haven't found a fix yet; `bharatcode.cmd auth reconnect`, or `auth logout` then `auth login`, are the first things to try, and BharatCode's support should hear about it. Review jobs, `gtu demo` and `gtu check` don't use the CLI and aren't affected.
 

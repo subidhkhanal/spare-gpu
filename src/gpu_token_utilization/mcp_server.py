@@ -13,17 +13,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-from . import __version__, actions, runstate, worktree
+from . import __version__, actions, runner, runstate, worktree
 from . import report as reporting
+from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
 from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store
 
 INSTRUCTIONS = (
     "spare-gpu queues coding chores (writing tests, adding docs, code review) for a git repo and "
-    "runs them later on BharatCode's spare capacity, each on its own git branch gtu/<job-id>. "
-    "Queueing a job doesn't do the work: the `gtu start` command runs queued jobs when there is "
-    "capacity. Relay the tools' answers to the user as they are."
+    "does them in the background when BharatCode has spare capacity, each on its own git branch "
+    "gtu/<job-id>, never touching the user's branch. Queueing a job starts the background runner "
+    "if needed; it keeps going after BharatCode closes. Relay the tools' answers to the user as "
+    "they are."
 )
 
 
@@ -50,10 +52,13 @@ def db_path(root: Path) -> Path:
 class SpareTools:
     """The five tools as plain functions returning text, for one project folder."""
 
-    def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None):
+    def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
+                 launch: Callable[[Path], int] | None = None):
         self.base = Path(base)
         # The gate reads BharatCode's public live stats; tests pass one wired to a fake.
         self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
+        # Starting the background runner; tests pass a stand-in.
+        self._launch = launch or runner.launch
 
     # --- helpers -------------------------------------------------------------------------
 
@@ -73,9 +78,28 @@ class SpareTools:
     def _runner(store: Store) -> str:
         pid = runstate.running_pid(store.path.parent)
         if pid:
-            return f"The runner (`gtu start`, process {pid}) is running and will pick queued jobs up when there's capacity."
-        return ("Nothing is running jobs right now. To run them, start `gtu start` in a terminal in this repo "
-                "and leave it running; it waits for spare capacity by itself.")
+            return f"The runner (process {pid}) is running and will pick queued jobs up when there's capacity."
+        return "The runner isn't running; spare_start starts it (or `gtu start` in a terminal)."
+
+    def _ensure_runner(self, store: Store, repo: Path) -> str:
+        """Start the background runner unless it's already going. Returns what to tell the user."""
+        pid = runstate.running_pid(store.path.parent)
+        if pid:
+            return (f"The runner (process {pid}) is already running; it picks this up when BharatCode has "
+                    "spare capacity.")
+        try:
+            if find_api_key() is None:
+                return ("It can't run yet: no BharatCode API key is set up. Run `gtu setup` in a terminal, "
+                        "then ask me to start spare-gpu.")
+        except ApiKeyMissing as exc:
+            return f"It can't run yet: {exc}. Run `gtu setup` in a terminal, then ask me to start spare-gpu."
+        try:
+            pid = self._launch(repo)
+        except (runner.RunnerError, OSError) as exc:
+            return f"Couldn't start the runner: {exc}"
+        return (f"Started the runner in the background (process {pid}). It sends work only when BharatCode has "
+                "spare capacity, keeps going after you close BharatCode, and stops by itself when the queue is "
+                "empty. To stop it sooner: spare_stop, or `gtu stop` in a terminal.")
 
     @staticmethod
     def _when(stamp: str | None) -> str:
@@ -85,7 +109,7 @@ class SpareTools:
 
     # --- tools -----------------------------------------------------------------------------
 
-    def add_job(self, kind: str, path: str, note: str | None = None) -> str:
+    def add_job(self, kind: str, path: str, note: str | None = None, start: bool = True) -> str:
         try:
             outcome = actions.queue_job(lambda repo: Store(db_path(repo)), self._root(), kind, path, note)
         except actions.ActionError as exc:
@@ -96,7 +120,29 @@ class SpareTools:
         if outcome.note:
             lines.append(outcome.note)
         with Store(db_path(Path(job.repo))) as store:
-            lines.append(self._runner(store))
+            lines.append(self._ensure_runner(store, Path(job.repo)) if start else self._runner(store))
+        return "\n".join(lines)
+
+    def start(self) -> str:
+        try:
+            with self._open() as store:
+                waiting = store.list_jobs(include_finished=False)
+                if not waiting:
+                    return "Nothing is queued, so there's nothing to start. Queue a job with spare_add_job."
+                return f"{len(waiting)} job(s) waiting. " + self._ensure_runner(store, self._root())
+        except NoStore as exc:
+            return str(exc)
+
+    def stop(self) -> str:
+        try:
+            with self._open() as store:
+                lines = actions.stop_runner(store)
+        except NoStore as exc:
+            return str(exc)
+        except actions.ActionError as exc:
+            return f"Couldn't stop it: {exc}"
+        if not lines[0].startswith("Nothing is running"):
+            lines.append("Queued jobs stay queued; spare_start (or queueing another job) starts the runner again.")
         return "\n".join(lines)
 
     def list_jobs(self) -> str:
@@ -199,12 +245,13 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False))
     def spare_add_job(type: Literal["tests", "docs", "review"], path: str, note: str | None = None) -> str:
-        """Queue a coding chore for spare-gpu to do LATER on BharatCode's spare capacity: write tests,
-        add documentation (docstrings, README), or write a code review, for a file or folder in this
-        git repo. Use it when the user wants something done later, tonight, overnight or "when there's
-        capacity", e.g. "queue tests for the payments module tonight", "get docs written for utils
-        overnight", "review src/api later". It does not do the work now: the job runs when the
-        `gtu start` runner is going, on its own git branch gtu/<job-id>.
+        """Queue a coding chore for spare-gpu to do in the background on BharatCode's spare capacity:
+        write tests, add documentation (docstrings, README), or write a code review, for a file or
+        folder in this git repo. Use it when the user wants something done later, tonight, overnight
+        or "when there's capacity", e.g. "queue tests for the payments module tonight", "get docs
+        written for utils overnight", "review src/api later". It doesn't do the work in this chat: it
+        queues the job and starts spare-gpu's background runner if it isn't running, which does the
+        work on its own git branch gtu/<job-id> when BharatCode has a free slot.
 
         Args:
             type: "tests" to write new passing tests, "docs" to add docstrings/README text,
@@ -254,6 +301,21 @@ def build_server(base: Path, tools: SpareTools | None = None):
                 spare_list_jobs first to find it.
         """
         return tools.cancel(job_id)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True))
+    def spare_start() -> str:
+        """Start spare-gpu's background runner so queued jobs get done: it waits for BharatCode's
+        spare capacity, works through the queue, keeps going after BharatCode closes, and stops by
+        itself when the queue is empty. Use it for "start spare-gpu", "run my queued jobs", "resume".
+        Queueing a job with spare_add_job already does this, so it's only needed after spare_stop."""
+        return tools.start()
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False))
+    def spare_stop() -> str:
+        """Stop spare-gpu's background runner now. Jobs in progress are paused, not lost: finished
+        steps stay on their branches and spare_start resumes them. Use it for "stop spare-gpu",
+        "pause the queue", "don't use any more tokens tonight"."""
+        return tools.stop()
 
     return server
 

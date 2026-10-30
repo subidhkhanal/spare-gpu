@@ -19,7 +19,7 @@ from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolv
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, dryrun, runstate, worktree
+from . import actions, bc_config, dryrun, runstate, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -86,6 +86,78 @@ def main(
     version: bool = typer.Option(False, "--version", callback=_version, is_eager=True, help="Show version."),
 ) -> None:
     pass
+
+
+@app.command()
+def setup(
+    remove: bool = typer.Option(False, "--remove", help="Unregister spare-gpu from BharatCode's CLI."),
+    check_key: bool = typer.Option(True, "--check/--no-check",
+                                   help="Test a newly entered key with one 1-token request."),
+) -> None:
+    """Set everything up in one go: your API key, and spare-gpu's MCP server in BharatCode's CLI.
+    Safe to run again."""
+    try:
+        path = bc_config.config_file(bc_config.config_dir())
+    except OSError as exc:
+        _fail(f"couldn't find BharatCode's config folder ({exc})")
+    if remove:
+        try:
+            removed = bc_config.unregister(path)
+        except bc_config.ConfigError as exc:
+            _fail(str(exc))
+        typer.echo(f"Removed spare-gpu from {path}." if removed else f"spare-gpu wasn't registered in {path}.")
+        return
+
+    typer.echo("Setting up spare-gpu.\n")
+    typer.echo("1/3  Your BharatCode API key")
+    try:
+        found = find_api_key()
+    except ApiKeyMissing:
+        found = None
+    if found:
+        typer.echo(f"     Found in {found[1]}.")
+    elif not keystore.supported():
+        _fail(f"set the {API_KEY_ENV} environment variable, then run `gtu setup` again.")
+    else:
+        _read_check_save_key(check_key)
+
+    typer.echo("\n2/3  BharatCode's CLI (where you'll talk to spare-gpu)")
+    status = cli_status()
+    if status.problem:
+        typer.echo("     Not installed yet. spare-gpu is registered anyway, so it's there once you install it:")
+        typer.echo("     " + status.problem.split("\n", 1)[-1].replace("\n", "\n     "))
+    elif status.signed_in is False:
+        typer.echo(f"     Installed ({status.version}) but not signed in. Run: bharatcode.cmd auth login")
+    else:
+        typer.echo(f"     Installed ({status.version})" + (" and signed in." if status.signed_in else "."))
+
+    typer.echo("\n3/3  spare-gpu's MCP server in BharatCode")
+    try:
+        outcome = bc_config.register(path, bc_config.server_command())
+    except bc_config.ConfigError as exc:
+        _fail(str(exc))
+    typer.echo({"added": f"     Registered in {path}.",
+                "updated": f"     Updated in {path} (the previous file is saved next to it as "
+                           f"{path.name}{bc_config.BACKUP_SUFFIX}).",
+                "unchanged": f"     Already registered in {path}."}[outcome])
+    if not status.problem:
+        ok = bc_config.connected(path)
+        if ok:
+            typer.echo("     BharatCode reports: spare-gpu connected.")
+        elif ok is False:
+            typer.echo("     BharatCode doesn't list it as connected yet. Run `bharatcode.cmd mcp list` to see why.")
+
+    typer.echo("\nDone. Open BharatCode in one of your git repos and ask, for example:")
+    for phrase in EXAMPLE_PHRASES:
+        typer.echo(f'  "{phrase}"')
+    typer.echo("Already-open BharatCode windows need a restart to see spare-gpu.")
+
+
+EXAMPLE_PHRASES = (
+    "queue tests for src/utils tonight",
+    "what did spare-gpu do last night?",
+    "why hasn't my job started?",
+)
 
 
 def _report_cli() -> None:
@@ -162,7 +234,13 @@ def setkey(
         if env_note:
             typer.echo(env_note)
         return
+    _read_check_save_key(check_key)
+    if env_note:
+        typer.echo(env_note)
 
+
+def _read_check_save_key(check_key: bool) -> None:
+    """Ask for the key (or read it from a pipe), test it, save it in Credential Manager."""
     if sys.stdin is not None and not sys.stdin.isatty():
         # Piped in (`Get-Content key.txt | gtu setkey`). Hidden prompts on Windows read the
         # console directly and ignore a pipe, so they would wait forever. Read bytes: the
@@ -197,8 +275,6 @@ def setkey(
     typer.echo("Only your Windows account can read it. It stays after you close the terminal or restart,")
     typer.echo("and gtu finds it in every terminal from now on. Nothing else on your system was changed.")
     typer.echo("Replace it: gtu setkey    Remove it: gtu setkey --remove")
-    if env_note:
-        typer.echo(env_note)
 
 
 def find_api_key_in_env() -> bool:
@@ -441,28 +517,14 @@ def stop(
 ) -> None:
     """Stop a running `gtu start` now. Jobs are paused, not failed; `gtu start` resumes them."""
     with Store.open_default() as store:
-        folder = store.path.parent
-        pid = runstate.running_pid(folder)
-        if pid is None:
-            runstate.clear(folder)
-            paused = runstate.tidy(store)  # e.g. after a crash: don't leave jobs marked running
-            typer.echo("Nothing is running." + (f" Paused interrupted job(s): {', '.join(paused)}." if paused else ""))
-            return
-        runstate.request_stop(folder)
-        typer.echo(f"Asked `gtu start` (process {pid}) to stop...")
-        if runstate.wait_for_exit(pid, wait):
-            typer.echo("It stopped cleanly.")
-        elif runstate.kill_tree(pid):
-            typer.echo(f"It didn't stop within {wait:g} s, so it and its BharatCode CLI process were killed.")
-        else:
-            _fail(f"process {pid} doesn't look like gtu, so it was not killed; stop it yourself.")
-        runstate.clear(folder)
-        paused = runstate.tidy(store)
-        jobs = store.list_jobs(include_finished=False)
-    held = [j.id for j in jobs if j.status == "paused"]
-    if paused or held:
-        typer.echo(f"Paused job(s): {', '.join(sorted(set(paused + held)))}. "
-                   "Unfinished edits were discarded; finished steps are kept on each job's branch.")
+        try:
+            lines = actions.stop_runner(store, wait)
+        except actions.ActionError as exc:
+            _fail(str(exc))
+    for line in lines:
+        typer.echo(line)
+    if lines[0].startswith("Nothing is running"):
+        return
     typer.echo("Run `gtu start` to resume.")
 
 

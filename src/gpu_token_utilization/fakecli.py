@@ -26,6 +26,13 @@ def main(args: list[str]) -> int:
     if args == ["--version"]:
         print("0.0.0-fake")
         return 0
+    if args[:2] == ["mcp", "list"]:  # connected if the config BharatCode was pointed at registers us
+        config = os.environ.get("OPENCODE_CONFIG", "")
+        if config and Path(config).exists() and '"spare-gpu"' in Path(config).read_text(encoding="utf-8"):
+            print("\x1b[32m✓\x1b[0m spare-gpu connected")
+        else:
+            print("No MCP servers configured")
+        return 0
     if args[:2] == ["auth", "status"]:  # GTU_FAKE_CLI_SIGNED_IN=0 simulates a signed-out CLI
         if os.environ.get("GTU_FAKE_CLI_SIGNED_IN", "1") == "1":
             print("Signed in to BharatCode.")

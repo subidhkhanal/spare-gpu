@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import worktree
+from . import runstate, worktree
 from .agent_cli import CLI_KINDS, CliNotFound, resolve_command
 from .store import Job, Store, StoreError
 
@@ -51,6 +51,33 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
         except CliNotFound as exc:
             warning = f"This job won't run yet. {exc}\nIt stays queued and runs on the first `gtu start` after that."
     return Outcome(job, warning)
+
+
+def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
+    """Stop a running `gtu start`: ask first, kill after `wait` seconds. Jobs are paused, not
+    failed. Returns what happened, line by line, for the user."""
+    folder = store.path.parent
+    lines = []
+    pid = runstate.running_pid(folder)
+    if pid is None:
+        runstate.clear(folder)
+        paused = runstate.tidy(store)  # e.g. after a crash: don't leave jobs marked running
+        return ["Nothing is running." + (f" Paused interrupted job(s): {', '.join(paused)}." if paused else "")]
+    runstate.request_stop(folder)
+    lines.append(f"Asked `gtu start` (process {pid}) to stop...")
+    if runstate.wait_for_exit(pid, wait):
+        lines.append("It stopped cleanly.")
+    elif runstate.kill_tree(pid):
+        lines.append(f"It didn't stop within {wait:g} s, so it and its BharatCode CLI process were killed.")
+    else:
+        raise ActionError(f"process {pid} doesn't look like gtu, so it was not killed; stop it yourself.")
+    runstate.clear(folder)
+    paused = runstate.tidy(store)
+    held = [j.id for j in store.list_jobs(include_finished=False) if j.status == "paused"]
+    if paused or held:
+        lines.append(f"Paused job(s): {', '.join(sorted(set(paused + held)))}. "
+                     "Unfinished edits were discarded; finished steps are kept on each job's branch.")
+    return lines
 
 
 def cancel_job(store: Store, job_id: str) -> Outcome:

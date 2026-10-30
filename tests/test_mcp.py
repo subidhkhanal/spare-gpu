@@ -18,7 +18,7 @@ from gpu_token_utilization.store import RequestLog, Store
 
 from conftest import git
 
-TOOLS = {"spare_add_job", "spare_list_jobs", "spare_report", "spare_why", "spare_cancel"}
+TOOLS = {"spare_add_job", "spare_list_jobs", "spare_report", "spare_why", "spare_cancel", "spare_start", "spare_stop"}
 
 
 @pytest.fixture(autouse=True)
@@ -27,11 +27,22 @@ def no_db_override(monkeypatch):
 
 
 @pytest.fixture
-def tools(git_repo, fake):
+def launched():
+    """Repos the tools asked to start a runner for (no real runner is ever started here)."""
+    return []
+
+
+@pytest.fixture
+def tools(git_repo, fake, launched):
     def gate(store):
         return Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
                     http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
-    return SpareTools(git_repo, make_gate=gate)
+
+    def launch(repo):
+        launched.append(repo)
+        return 4242
+
+    return SpareTools(git_repo, make_gate=gate, launch=launch)
 
 
 def readable(text: str) -> bool:
@@ -43,15 +54,49 @@ def readable(text: str) -> bool:
 def test_add_job_queues_into_the_same_store_as_the_cli(tools, git_repo):
     text = tools.add_job("tests", "src", note="cover negative numbers")
     assert readable(text) and "Queued a tests job for src" in text and "gtu/" in text
-    assert "Nothing is running jobs right now" in text and "gtu start" in text
     with Store(git_repo / ".gtu" / "gtu.db") as store:  # exactly where `gtu add` puts it
         (job,) = store.list_jobs()
     assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "queued")
     assert job.id in text
 
 
+def test_add_job_starts_the_background_runner(tools, git_repo, launched, monkeypatch):
+    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
+    text = tools.add_job("review", "src")
+    assert launched == [git_repo.resolve()]
+    assert "Started the runner in the background (process 4242)" in text and "spare_stop" in text
+
+
+def test_add_job_without_a_key_queues_but_says_to_run_setup(tools, launched):
+    text = tools.add_job("review", "src")
+    assert "Queued a review job" in text and "no BharatCode API key" in text and "gtu setup" in text
+    assert launched == []
+
+
+def test_add_job_when_the_runner_is_already_going_starts_nothing(tools, git_repo, launched, monkeypatch):
+    from gpu_token_utilization import runstate
+
+    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
+    tools.add_job("review", "src")
+    runstate.write_run(git_repo / ".gtu")  # this test process plays the running runner
+    text = tools.add_job("docs", "src")
+    assert "already running" in text and len(launched) == 1
+
+
+def test_start_and_stop(tools, git_repo, launched, monkeypatch):
+    assert "no jobs for this project yet" in tools.start()
+    tools.add_job("review", "src", start=False)
+    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
+    assert "1 job(s) waiting. Started the runner" in tools.start() and len(launched) == 1
+    assert tools.stop().startswith("Nothing is running")
+    with Store(db_path(git_repo)) as store:
+        (job,) = store.list_jobs()
+        store.cancel_job(job.id)
+    assert tools.start().startswith("Nothing is queued")
+
+
 def test_add_job_from_a_subfolder_resolves_the_repo_root(git_repo, fake):
-    text = SpareTools(git_repo / "src").add_job("review", "src/calc.py")
+    text = SpareTools(git_repo / "src", launch=lambda repo: 1).add_job("review", "src/calc.py")
     assert "Queued a review job for src/calc.py" in text
     assert (git_repo / ".gtu" / "gtu.db").exists() and not (git_repo / "src" / ".gtu").exists()
 
@@ -71,7 +116,7 @@ def test_add_job_in_a_dirty_repo_says_what_to_do(tools, git_repo):
 
 
 def test_add_job_outside_any_git_repo(tmp_path):
-    text = SpareTools(tmp_path).add_job("review", ".")
+    text = SpareTools(tmp_path, launch=lambda repo: 1).add_job("review", ".")
     assert "Didn't queue it" in text and "not inside a git repository" in text
 
 

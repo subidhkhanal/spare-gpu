@@ -17,6 +17,13 @@ KEY = "bc_live_fake_key"
 
 
 @pytest.fixture(autouse=True)
+def no_real_api_key(monkeypatch):
+    """No test may find the user's real key (and so reach the real API, or let a background
+    runner do it). Tests that need a key set a fake one."""
+    monkeypatch.delenv("BHARATCODE_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def fake_bharatcode_cli(monkeypatch):
     """No test ever starts the real BharatCode CLI; tests about a missing CLI delete this."""
     monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))
