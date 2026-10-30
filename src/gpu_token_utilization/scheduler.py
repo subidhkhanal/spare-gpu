@@ -5,22 +5,29 @@ is never modified. Progress is saved after every step: the step is committed on 
 job's branch and marked done. A step left 'running' by a killed process never
 finished, so on restart its partial edits are discarded and it runs again; finished
 steps never do.
+
+Token budgets (per job and per night) pause work when reached; they never fail a job.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from . import worktree
+from .agent_cli import BharatCodeCli, CliNotFound, CliStep
+from .budget import BudgetExceeded, Budgets
 from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult
 from .gate import Decision, Gate
-from .store import JOB_KINDS, Job, Store
+from .jobs import PLANS, JobConfig
+from .store import Job, RequestLog, Store
 
 # Files jobs may create for their own tooling that must never be committed.
 NEVER_COMMIT = ("opencode.json",)
+CLI_ENDPOINT = "bharatcode-cli"
 
 
 @dataclass
@@ -32,68 +39,33 @@ class StepContext:
     client: BharatCodeClient
     decision: Decision
     workdir: Path  # the job's worktree (or the repo itself when isolation is off, in tests)
+    state_dir: Path  # per-job scratch space outside the worktree (.gtu/jobs/<id>), never committed
+    config: JobConfig
+    cli: BharatCodeCli | None
+    budget_remaining: Callable[[], int]
 
     def chat(self, messages: list[dict], **kwargs) -> ChatResult:
         return self.client.chat(
             messages, job_id=self.job.id, step_id=self.step_id, gate=self.decision.gate_info, **kwargs
         )
 
+    def log_cli_step(self, step: CliStep) -> None:
+        """Record one BharatCode CLI step like a request, so budgets and reports include it."""
+        self.store.log_request(
+            RequestLog(
+                endpoint=CLI_ENDPOINT, model=self.cli.model if self.cli else None, attempt=1, status_code=None,
+                elapsed_ms=step.elapsed_ms, prompt_tokens=step.input_tokens + step.cache_read_tokens,
+                completion_tokens=step.output_tokens, reasoning_tokens=step.reasoning_tokens,
+                total_tokens=step.total_tokens, job_id=self.job.id, step_id=self.step_id,
+                **self.decision.gate_info,
+            )
+        )
+
 
 StepFn = Callable[[StepContext], str]
 Plan = list[tuple[str, StepFn]]
 
-MAX_SURVEY_CHARS = 12_000
-MAX_FILE_BYTES = 200_000
-SKIP_DIRS = {".git", ".gtu", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
-
-SURVEY_ASKS = {
-    "tests": "List the functions or behaviours in this code that most need tests, and the cases each test should cover.",
-    "docs": "List what documentation is missing or unclear in this code: docstrings, comments and README sections.",
-    "review": "List the riskiest spots, likely bugs and concrete suggested fixes in this code.",
-}
-
-
-def _read_target(target: Path) -> str:
-    """The target's text, capped. For a folder: its file list, then file contents until the cap."""
-    if target.is_file():
-        return target.read_text(encoding="utf-8", errors="replace")[:MAX_SURVEY_CHARS]
-    files = sorted(
-        p for p in target.rglob("*")
-        if p.is_file() and not any(part in SKIP_DIRS or part.startswith(".") for part in p.relative_to(target).parts)
-    )
-    parts = ["Files:\n" + "\n".join(p.relative_to(target).as_posix() for p in files[:200])]
-    budget = MAX_SURVEY_CHARS - len(parts[0])
-    for path in files:
-        if budget <= 0 or path.stat().st_size > MAX_FILE_BYTES:
-            continue
-        data = path.read_bytes()
-        if b"\0" in data:
-            continue  # binary
-        chunk = f"\n--- {path.relative_to(target).as_posix()} ---\n" + data.decode("utf-8", errors="replace")
-        parts.append(chunk[:budget])
-        budget -= len(chunk)
-    return "".join(parts)
-
-
-def survey_step(ctx: StepContext) -> str:
-    """Phase 2 placeholder work: ask for a short plan of what the job should do. Phase 3 replaces this."""
-    job = ctx.job
-    text = _read_target(ctx.workdir / job.target)
-    ask = SURVEY_ASKS[job.kind] + " At most 8 bullet points."
-    if job.note:
-        ask += f" The developer adds: {job.note}"
-    result = ctx.chat(
-        [
-            {"role": "system", "content": "You help a developer with work on their own repository. Be concise."},
-            {"role": "user", "content": f"{ask}\n\nTarget: {job.target}\n\n{text}"},
-        ],
-        max_tokens=800,
-        reasoning_effort="none",
-    )
-    return result.content + ("\n\n[cut off at the output token limit]" if result.truncated else "")
-
-
-DEFAULT_PLANS: dict[str, Plan] = {kind: [("survey", survey_step)] for kind in JOB_KINDS}
+DEFAULT_PLANS: dict[str, Plan] = PLANS
 
 _STATUS_ORDER = {"running": 0, "paused": 1, "queued": 2}
 
@@ -106,7 +78,11 @@ class Scheduler:
         client: BharatCodeClient,
         *,
         plans: dict[str, Plan] | None = None,
+        cli: BharatCodeCli | None = None,
+        budgets: Budgets | None = None,
+        config: JobConfig | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         log: Callable[[str], None] = lambda message: None,
         isolate: bool = True,
     ):
@@ -114,7 +90,11 @@ class Scheduler:
         self.gate = gate
         self.client = client
         self.plans = plans or DEFAULT_PLANS
+        self.cli = cli
+        self.budgets = budgets or Budgets()
+        self.config = config or JobConfig()
         self._sleep = sleep
+        self._now = now
         self._log = log
         self.isolate = isolate
 
@@ -122,15 +102,33 @@ class Scheduler:
         jobs = self.store.list_jobs(include_finished=False)
         return sorted(jobs, key=lambda j: _STATUS_ORDER.get(j.status, 3))
 
+    def _over_budget(self, job: Job) -> str | None:
+        """Why this job can't run now because of a budget, or None."""
+        job_used, night_used = self.budgets.used(self.store, job.id, self._now())
+        if night_used >= self.budgets.per_night:
+            return f"tonight's token budget is used up ({night_used} of {self.budgets.per_night})"
+        if job_used >= self.budgets.per_job:
+            return f"its token budget is used up ({job_used} of {self.budgets.per_job})"
+        return None
+
     def run(self, stop: Callable[[], bool] = lambda: False, max_steps: int | None = None) -> int:
-        """Work through the queue until it is empty. Returns the number of steps completed."""
+        """Work through the queue until it is empty or every job left is over budget."""
         completed = 0
+        paused_for_budget: set[str] = set()
         while not stop():
-            jobs = self.pending_jobs()
-            if not jobs:
-                self._log("Queue empty.")
+            runnable = []
+            for job in self.pending_jobs():
+                reason = self._over_budget(job)
+                if reason is None:
+                    runnable.append(job)
+                elif job.id not in paused_for_budget:
+                    paused_for_budget.add(job.id)
+                    self.store.set_status(job.id, "paused")
+                    self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
+            if not runnable:
+                self._log("Queue empty." if not paused_for_budget else "Nothing left that fits the token budgets.")
                 return completed
-            job = jobs[0]
+            job = runnable[0]
             decision = self.gate.check()
             if not decision.open:
                 if job.status == "running":
@@ -145,7 +143,7 @@ class Scheduler:
         return completed
 
     def run_step(self, job: Job, decision: Decision) -> str:
-        """Run the job's next unfinished step. Returns done, busy, failed or finished."""
+        """Run the job's next unfinished step. Returns done, busy, budget, failed or finished."""
         plan = self.plans[job.kind]
         if not self.store.steps(job.id):
             for name, _ in plan:
@@ -160,6 +158,8 @@ class Scheduler:
                 return "failed"
         else:
             workdir = Path(job.repo)
+        state_dir = Path(job.repo) / ".gtu" / "jobs" / job.id
+        state_dir.mkdir(parents=True, exist_ok=True)
 
         if self.store.reset_interrupted_steps(job.id):
             self._log(f"Job {job.id}: resuming an interrupted step; discarding its unfinished edits.")
@@ -178,21 +178,37 @@ class Scheduler:
             self._finish(job, "failed")
             return "failed"
         self.store.set_step(step["id"], "running")
-        ctx = StepContext(job, step["id"], step["name"], self.store, self.client, decision, workdir)
+        ctx = StepContext(
+            job, step["id"], step["name"], self.store, self.client, decision, workdir, state_dir,
+            self.config, self.cli, lambda: self.budgets.remaining(self.store, job.id, self._now()),
+        )
+        main_before = self._main_state(job)
         try:
             output = fn(ctx)
         except BusyError as exc:
-            self.store.reset_interrupted_steps(job.id)
+            self._undo_step(job, workdir)
             self.gate.force_busy(f"BharatCode answered busy ({exc})")
             self._log(f"Job {job.id}: BharatCode is busy; pausing.")
             return "busy"
+        except BudgetExceeded as exc:
+            self._undo_step(job, workdir)
+            self.store.set_status(job.id, "paused")
+            self._log(f"Job {job.id}: paused, {exc}.")
+            return "budget"
         except AuthError:
-            self.store.reset_interrupted_steps(job.id)
+            self._undo_step(job, workdir)
             raise
-        except (BharatCodeError, worktree.GitError) as exc:
+        except (BharatCodeError, worktree.GitError, CliNotFound) as exc:
             self.store.set_step(step["id"], "failed", str(exc))
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
+            return "failed"
+
+        if main_before is not None and self._main_state(job) != main_before:
+            message = "your main checkout changed while this step ran; stopping the job to be safe"
+            self.store.set_step(step["id"], "failed", message)
+            self._finish(job, "failed")
+            self._log(f"Job {job.id}: {message}. Check `git status` in {job.repo}.")
             return "failed"
 
         if self.isolate:
@@ -210,6 +226,19 @@ class Scheduler:
             self._finish(job, "done")
             self._log(f"Job {job.id}: finished; results are on branch {worktree.branch_name(job.id)}.")
         return "done"
+
+    def _main_state(self, job: Job) -> tuple[str, str] | None:
+        """HEAD and status of the user's checkout, to prove a step left it alone."""
+        if not self.isolate:
+            return None
+        repo = Path(job.repo)
+        return worktree._git(repo, "rev-parse", "HEAD").stdout, worktree._git(repo, "status", "--porcelain").stdout
+
+    def _undo_step(self, job: Job, workdir: Path) -> None:
+        """Put an unfinished step back to pending and drop its edits, so it reruns cleanly."""
+        self.store.reset_interrupted_steps(job.id)
+        if self.isolate:
+            worktree.discard_uncommitted(workdir)
 
     def _finish(self, job: Job, status: str) -> None:
         """Record the final status and remove the job's worktree. Its branch is kept."""

@@ -10,6 +10,9 @@ from . import __version__
 from .api import API_KEY_ENV, ApiError, ApiKeyMissing, list_models, verify_key
 from .client import AuthError, BharatCodeClient, RetryPolicy
 from .gate import Gate, GateConfig
+from .agent_cli import BharatCodeCli
+from .budget import Budgets
+from .jobs import JobConfig
 from .scheduler import Scheduler
 from . import worktree
 from .store import Store, StoreError
@@ -180,7 +183,12 @@ def start(
             config.max_queued = max_queued
         gate = Gate(store, config, client=client)
         try:
-            steps = Scheduler(store, gate, client, log=log).run(max_steps=max_steps)
+            job_config = JobConfig.from_env()
+            scheduler = Scheduler(
+                store, gate, client, cli=BharatCodeCli(timeout=job_config.cli_timeout),
+                budgets=Budgets.from_env(), config=job_config, log=log,
+            )
+            steps = scheduler.run(max_steps=max_steps)
         except AuthError as exc:
             _fail(str(exc))
         except KeyboardInterrupt:

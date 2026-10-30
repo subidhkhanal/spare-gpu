@@ -93,20 +93,6 @@ def test_cancelled_job_stops_between_steps(fake, store, client, make_gate):
     assert store.get_job(job.id).status == "cancelled"
 
 
-def test_survey_step_sends_the_target_and_saves_the_answer(fake, store, client, make_gate, tmp_path):
-    repo = tmp_path / "repo"
-    (repo / "src").mkdir(parents=True)
-    (repo / "src" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
-    job = store.add_job("tests", "src/calc.py", str(repo), note="cover negatives")
-    fake.ok("- test add with negatives")
-    make_scheduler(store, make_gate(), client, fake, None).run()
-    (step,) = store.steps(job.id)
-    assert step["name"] == "survey" and step["status"] == "done" and "negatives" in step["output"]
-    sent = json.loads([r for r in fake.requests if r.url.path.endswith("/chat/completions")][0].content)
-    assert "def add(a, b)" in sent["messages"][1]["content"]
-    assert "cover negatives" in sent["messages"][1]["content"]
-
-
 # --- git isolation ---------------------------------------------------------------
 
 from conftest import git  # noqa: E402

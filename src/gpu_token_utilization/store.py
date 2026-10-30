@@ -299,6 +299,13 @@ class Store:
         """Most recent request attempts, newest first."""
         return self.conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
+    def tokens_since(self, since_utc_iso: str) -> int:
+        """Tokens used by requests sent at or after `since_utc_iso` (an ISO UTC timestamp)."""
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM requests WHERE sent_at >= ?", (since_utc_iso,)
+        ).fetchone()
+        return row[0]
+
     def recent_latencies(self, limit: int) -> list[float]:
         """Response times (ms) of the most recent successful requests."""
         rows = self.conn.execute(
