@@ -291,9 +291,9 @@ def build_server(base: Path, tools: SpareTools | None = None):
         """What spare-gpu got done recently: which jobs ran, when, how long, what each produced
         (files on its branch, tests kept or discarded) and what it cost in tokens.
 
-        Use it for "what did spare-gpu do last night?", "what got done?", "show me the overnight
-        results", "anything finished today?". For a detailed token breakdown use spare_token_cost;
-        for work still queued or running use spare_work_status.
+        Use it for a summary of results: "what did spare-gpu do last night?", "what got done?",
+        "show me the overnight results". For one job's state ("is my tests job done?") or work still
+        queued or running, use spare_work_status; for a token breakdown, spare_token_cost.
 
         Args:
             hours: How far back to look. Leave it out for the last 24 hours ("last night", "today");
@@ -334,8 +334,9 @@ def build_server(base: Path, tools: SpareTools | None = None):
         (the input the CLI re-sends on every step, mostly its own system prompt) and the work
         itself, with the biggest jobs listed.
 
-        Use it for "how many tokens did that cost?", "what did last night cost?", "how much of it
-        was CLI overhead?", "how expensive was job 1a2b3c4d?".
+        Use it when the question is about tokens or cost rather than results: "how many tokens did
+        that cost?", "what did last night cost?", "how much of it was CLI overhead?", "how expensive
+        was job 1a2b3c4d?". For what the work produced, use spare_last_night.
 
         Args:
             scope: A job id for one job; a number of hours, e.g. "24" (the default, also for "last
@@ -345,17 +346,18 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
     @server.tool(annotations=notes(False, world=True))
     def spare_run_when_free(command: str) -> str:
-        """Run any shell command in this repo as soon as BharatCode has spare capacity, in the
-        background, so heavy model-driven work doesn't compete with everyone else. Returns at once
-        with an id; the command waits, runs, and its output is logged.
+        """Run one existing command in this repo as soon as BharatCode has spare capacity, in the
+        background. Returns at once with an id; the command waits, runs, and its output is logged.
 
-        Use it for commands that aren't a tests/docs/review job: "run the big refactor script when
-        BharatCode is free", "start my migration once there's capacity", "run `bharatcode run
-        'add type hints'` tonight". For writing tests, docs or a review, use spare_queue_work.
+        Use it to defer heavy commands, not to write tests/docs/reviews (that's spare_queue_work):
+        "run the test suite when BharatCode is free", "kick off `bharatcode run 'add type hints'`
+        tonight", "run npm run build once there's capacity". Only test, build and lint tools and
+        `bharatcode run` are accepted (pytest, npm test, npm run <script>, go test, cargo test,
+        make, ...); anything else, or anything with &&, pipes or redirects, is refused with the list.
 
         Args:
-            command: The exact command line, run with Command Prompt (cmd.exe) in the repo root.
-                Confirm it with the user before queueing anything that changes files.
+            command: One plain command line, e.g. "pytest -x" or "bharatcode run 'add docstrings'".
+                Run directly in the repo root, not through a shell.
         """
         return tools.run_when_free(command)
 

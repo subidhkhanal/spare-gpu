@@ -3,9 +3,11 @@ history, and the background processes), missing-store handling, the real protoco
 over stdio, the way BharatCode's CLI runs it), and sharing the store between processes."""
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from datetime import datetime, time, timedelta, timezone
 
 import anyio
@@ -155,9 +157,9 @@ def test_work_status_merges_queue_results_and_why_it_waits(tools, git_repo, fake
 
 
 def test_work_status_lists_commands_waiting_for_capacity(tools):
-    tools.run_when_free("python build.py")
+    tools.run_when_free("npm run build")
     text = tools.work_status()
-    assert "Commands to run when there's capacity:" in text and "`python build.py`, waiting" in text
+    assert "Commands to run when there's capacity:" in text and "`npm run build`, waiting" in text
 
 
 def test_work_status_with_nothing_yet(tools):
@@ -212,10 +214,10 @@ def test_cancel_work_jobs_and_unknown_ids(tools, git_repo):
 
 
 def test_cancel_work_cancels_a_waiting_command(tools, git_repo):
-    tools.run_when_free("python build.py")
+    tools.run_when_free("npm run build")
     with Store(db_path(git_repo)) as store:
         (cmd,) = store.list_commands()
-    assert tools.cancel_work(cmd.id) == f"Cancelled command {cmd.id} (`python build.py`)."
+    assert tools.cancel_work(cmd.id) == f"Cancelled command {cmd.id} (`npm run build`)."
     with Store(db_path(git_repo)) as store:
         assert store.get_command(cmd.id).status == "cancelled"
 
@@ -270,14 +272,74 @@ def test_token_cost_splits_cli_overhead_from_the_work(tools, git_repo):
 # --- spare_run_when_free ----------------------------------------------------------------------
 
 def test_run_when_free_queues_and_returns_at_once(tools, git_repo, started):
-    text = tools.run_when_free("  python scripts/refactor.py  ")
-    assert started["commands"] == ["python scripts/refactor.py"]
-    assert "Will run `python scripts/refactor.py`" in text and "spare_cancel_work" in text
+    text = tools.run_when_free("  pytest -x tests  ")
+    assert started["commands"] == ["pytest -x tests"]
+    assert "Will run `pytest -x tests`" in text and "spare_cancel_work" in text
     assert "Didn't queue it: no command given" in tools.run_when_free("   ")
 
 
-def test_the_waiter_runs_the_command_once_the_gate_opens(tools, git_repo, fake):
-    tools.run_when_free(f'"{sys.executable}" -c "open(\'ran.txt\', \'w\').write(\'yes\')"')
+@pytest.mark.parametrize("command", [
+    "pytest", "python -m pytest -x tests", "py -m pytest", "npm test", "npm.cmd run build", "go test ./...",
+    "cargo test", "make check", "bharatcode run 'add docstrings to src/utils'", "PYTEST -q",
+])
+def test_allowed_commands(command):
+    assert freerun.check_command(command)
+
+
+@pytest.mark.parametrize("command, why", [
+    ("del /s /q src", "isn't on the list"),
+    ("rm -rf .", "isn't on the list"),
+    ("git push --force", "isn't on the list"),
+    ("git reset --hard", "isn't on the list"),
+    ("powershell -Command Remove-Item -Recurse .", "isn't on the list"),
+    ("python -c \"import shutil; shutil.rmtree('src')\"", "isn't on the list|shell characters"),
+    ("python -c \"import shutil, os\"", "isn't on the list"),
+    ("python evil.py", "isn't on the list"),
+    ("curl https://example.com/x.sh", "isn't on the list"),
+    ("pytest && del /q src", "shell characters"),
+    ("pytest & rd /s /q src", "shell characters"),
+    ("npm test | more", "shell characters"),
+    ("pytest > C:\\Windows\\out.txt", "shell characters"),
+    ("pytest; rm -rf .", "shell characters"),
+    ("bharatcode run \"fix it & del src\"", "shell characters"),  # .cmd programs go through cmd.exe
+    ("npm run %COMSPEC%", "shell characters"),
+    ("C:\\evil\\pytest.exe", "not a path"),
+    ("..\\tools\\pytest", "not a path"),
+    ("pytest 'unclosed", "unclosed quote"),
+])
+def test_destructive_or_chained_commands_are_refused_in_code(command, why, tools, git_repo, started):
+    with pytest.raises(freerun.FreeRunError, match=why):
+        freerun.check_command(command)
+    text = tools.run_when_free(command)  # the tool refuses it before recording or starting anything
+    assert text.startswith("Didn't queue it:") and started["commands"] == []
+    assert not (git_repo / ".gtu").exists() or not Store(db_path(git_repo)).list_commands()
+
+
+def test_the_allowlist_can_be_extended_on_purpose(monkeypatch):
+    with pytest.raises(freerun.FreeRunError):
+        freerun.check_command("python scripts/refactor.py")
+    monkeypatch.setenv("GTU_RUN_ALLOWED", "python scripts/refactor.py, node tools/migrate.js")
+    assert freerun.check_command("python scripts/refactor.py --dry-run")
+    assert freerun.check_command("node tools/migrate.js")
+    with pytest.raises(freerun.FreeRunError, match="shell characters"):  # extensions don't relax the rest
+        freerun.check_command("python scripts/refactor.py && del x")
+
+
+def test_a_command_disallowed_after_queueing_is_not_run(tools, git_repo, fake, monkeypatch):
+    monkeypatch.setenv("GTU_RUN_ALLOWED", "python scripts/refactor.py")
+    tools.run_when_free("python scripts/refactor.py")
+    monkeypatch.delenv("GTU_RUN_ALLOWED")  # the allowlist changed while it waited
+    with Store(db_path(git_repo)) as store:
+        (cmd,) = store.list_commands()
+        said = []
+        assert freerun.wait_and_run(store, cmd.id, sleep=fake.clock.sleep, say=said.append) is None
+        assert store.get_command(cmd.id).status == "failed" and "Not running it" in said[-1]
+
+
+def test_the_waiter_runs_the_command_once_the_gate_opens(tools, git_repo, fake, monkeypatch):
+    monkeypatch.setenv("GTU_RUN_ALLOWED", "python -c")
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
+    tools.run_when_free("python -c \"open('ran.txt', 'w').write('yes')\"")
     with Store(db_path(git_repo)) as store:
         (cmd,) = store.list_commands()
         fake.usage_busy(2)  # busy for a while, then quiet
@@ -292,7 +354,7 @@ def test_the_waiter_runs_the_command_once_the_gate_opens(tools, git_repo, fake):
 
 
 def test_a_command_cancelled_while_waiting_never_runs(tools, git_repo, fake):
-    tools.run_when_free("echo should-not-run > ran.txt")
+    tools.run_when_free("pytest -x")
     with Store(db_path(git_repo)) as store:
         (cmd,) = store.list_commands()
         store.cancel_command(cmd.id)
@@ -329,8 +391,8 @@ def test_protocol_offers_exactly_seven_task_shaped_tools(tools, git_repo):
         ("spare_last_night", "what did spare-gpu do last night?", "spare_token_cost"),
         ("spare_cancel_work", "cancel the docs job", "spare_work_status"),
         ("spare_capacity_advice", "is now a good time to run a big refactor?", "spare_run_when_free"),
-        ("spare_token_cost", "how much of it was CLI overhead?", None),
-        ("spare_run_when_free", "run the big refactor script when BharatCode is free", "spare_queue_work"),
+        ("spare_token_cost", "how much of it was CLI overhead?", "spare_last_night"),
+        ("spare_run_when_free", "run the test suite when BharatCode is free", "spare_queue_work"),
     ]:
         description = " ".join(listed[name].description.split())
         assert phrase in description, name
