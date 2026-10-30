@@ -19,7 +19,7 @@ from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolv
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import dryrun, runstate, worktree
+from . import actions, dryrun, runstate, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -224,26 +224,12 @@ def add(
 ) -> None:
     """Queue a job. It runs later with `gtu start`, on its own branch gtu/<job-id>."""
     try:
-        repo = worktree.repo_root(Path.cwd()).resolve()
-        worktree.ensure_clean(repo)
-    except worktree.GitError as exc:
+        outcome = actions.queue_job(lambda repo: Store.open_default(), Path.cwd(), kind.value, str(target), note)
+    except actions.ActionError as exc:
         _fail(str(exc))
-    path = (Path.cwd() / target).resolve()
-    if not path.exists():
-        _fail(f"{target} does not exist")
-    try:
-        relative = path.relative_to(repo)
-    except ValueError:
-        _fail(f"{target} is outside this repo ({repo})")
-    with Store.open_default() as store:
-        job = store.add_job(kind.value, relative.as_posix() or ".", str(repo), note)
-    typer.echo(f"Queued job {job.id}: {job.kind} {job.target}")
-    if job.kind in CLI_KINDS:
-        try:
-            resolve_command()
-        except CliNotFound as exc:
-            typer.echo(f"Note: this job won't run yet. {exc}\n"
-                       "It stays queued and runs on the first `gtu start` after that.")
+    typer.echo(f"Queued job {outcome.job.id}: {outcome.job.kind} {outcome.job.target}")
+    if outcome.note:
+        typer.echo(f"Note: {outcome.note}")
 
 
 @app.command("list")
@@ -513,15 +499,25 @@ def report(
 
 
 @app.command()
+def mcp(
+    folder: Path = typer.Option(None, "--dir", help="Project folder to serve. Default: the current folder."),
+) -> None:
+    """Run spare-gpu's MCP server over stdio, so an agent (BharatCode's CLI) can queue and check
+    jobs. Started by the agent, not by hand; see the README for the config snippet."""
+    from .mcp_server import serve
+
+    serve(folder or Path.cwd())
+
+
+@app.command()
 def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) -> None:
     """Cancel a job that has not finished."""
     with Store.open_default() as store:
         try:
-            job = store.cancel_job(job_id)
-        except StoreError as exc:
+            outcome = actions.cancel_job(store, job_id)
+        except actions.ActionError as exc:
             _fail(str(exc))
-    try:
-        worktree.remove(Path(job.repo), job.id)
-    except worktree.GitError as exc:
-        typer.echo(f"warning: could not remove the job's worktree: {exc}", err=True)
+    if outcome.note:
+        typer.echo(f"warning: {outcome.note}", err=True)
+    job = outcome.job
     typer.echo(f"Cancelled job {job.id}. Anything it committed stays on branch {worktree.branch_name(job.id)}.")

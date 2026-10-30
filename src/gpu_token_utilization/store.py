@@ -16,6 +16,7 @@ STEP_STATUSES = ("pending", "running", "done", "failed")
 
 DB_ENV = "GTU_DB"
 DEFAULT_DB = Path(".gtu") / "gtu.db"
+BUSY_TIMEOUT_S = 30.0
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -169,8 +170,15 @@ class Store:
         marker = self.path.parent / ".gitignore"
         if not marker.exists():
             marker.write_text("*\n", encoding="utf-8")
-        self.conn = sqlite3.connect(self.path)
+        # Several processes share this file: `gtu start`, other gtu commands, and the MCP server.
+        # Wait up to 30 s for another writer instead of failing at once, and use WAL so readers
+        # never block the writer (or the other way round).
+        self.conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S)
         self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            pass  # another process holds a lock right now; WAL is persistent, so it's on next time
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
         for table, columns in ADDED_COLUMNS.items():
@@ -224,11 +232,14 @@ class Store:
         return [Job(**dict(r)) for r in rows]
 
     def set_status(self, job_id: str, status: str) -> Job:
+        """Change a job's status. A cancelled job stays cancelled: the user's cancel (from any
+        process) always wins over a runner that finishes or pauses the job a moment later."""
         if status not in JOB_STATUSES:
             raise StoreError(f"unknown job status {status!r}")
         self.get_job(job_id)
         with self.conn:
-            self.conn.execute("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?", (status, utc_now(), job_id))
+            self.conn.execute("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ? AND status != 'cancelled'",
+                              (status, utc_now(), job_id))
         return self.get_job(job_id)
 
     def set_base_commit(self, job_id: str, commit: str) -> None:
@@ -236,10 +247,19 @@ class Store:
             self.conn.execute("UPDATE jobs SET base_commit = ? WHERE id = ?", (commit, job_id))
 
     def cancel_job(self, job_id: str) -> Job:
+        """Cancel in one statement, so a runner finishing the job at the same moment can't
+        leave it both done and cancelled."""
+        self.get_job(job_id)
+        marks = ", ".join("?" for _ in FINAL_STATUSES)
+        with self.conn:
+            changed = self.conn.execute(
+                f"UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status NOT IN ({marks})",
+                (utc_now(), job_id, *FINAL_STATUSES),
+            ).rowcount
         job = self.get_job(job_id)
-        if job.status in FINAL_STATUSES:
+        if not changed:
             raise StoreError(f"job {job_id} is already {job.status}")
-        return self.set_status(job_id, "cancelled")
+        return job
 
     # steps
 
