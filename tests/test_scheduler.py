@@ -26,8 +26,8 @@ def make_scheduler(store, gate, client, fake, plans, isolate=False):
     return Scheduler(store, gate, client, plans=plans, sleep=fake.clock.sleep, isolate=isolate)
 
 
-def test_pauses_while_busy_and_resumes_when_quiet(fake, store, client, make_gate):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_pauses_while_busy_and_resumes_when_quiet(fake, store, client, make_gate, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     fake.usage_busy(4)  # then the default reply: quiet
     calls = []
     done = make_scheduler(store, make_gate(), client, fake, counting_plan(["one", "two"], calls)).run()
@@ -40,16 +40,16 @@ def test_pauses_while_busy_and_resumes_when_quiet(fake, store, client, make_gate
     assert all(verdict == "quiet" for _, verdict in calls)
 
 
-def test_requests_record_the_gate_view_at_send_time(fake, store, client, make_gate):
-    store.add_job("tests", "a.py", "/repo")
+def test_requests_record_the_gate_view_at_send_time(fake, store, client, make_gate, job_repo):
+    store.add_job("tests", "a.py", job_repo)
     fake.usage(times=3, active=1, queued=0)
     make_scheduler(store, make_gate(), client, fake, counting_plan(["one"], [])).run()
     (row,) = store.requests()
     assert row["gate_source"] == "livestats" and row["queue_at_send"] == 0 and row["active_at_send"] == 1
 
 
-def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, client, make_gate):
-    job = store.add_job("docs", "a.py", "/repo")
+def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, client, make_gate, job_repo):
+    job = store.add_job("docs", "a.py", job_repo)
     calls = []
     plans = counting_plan(["one", "two", "three"], calls, crash_on={"two": 1})
     with pytest.raises(KeyboardInterrupt):
@@ -65,8 +65,8 @@ def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, cl
     assert fake.chat_calls == 3  # step one's request was not sent again
 
 
-def test_busy_answer_closes_the_gate_and_the_step_is_retried(fake, store, client, make_gate):
-    job = store.add_job("review", "a.py", "/repo")
+def test_busy_answer_closes_the_gate_and_the_step_is_retried(fake, store, client, make_gate, job_repo):
+    job = store.add_job("review", "a.py", job_repo)
     fake.busy(1)  # first chat request gets 503
     calls = []
     done = make_scheduler(store, make_gate(), client, fake, counting_plan(["one"], calls)).run()
@@ -78,8 +78,8 @@ def test_busy_answer_closes_the_gate_and_the_step_is_retried(fake, store, client
     assert [r["status_code"] for r in store.requests()] == [503, 200]
 
 
-def test_cancelled_job_stops_between_steps(fake, store, client, make_gate):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_cancelled_job_stops_between_steps(fake, store, client, make_gate, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     calls = []
 
     def cancel_self(ctx):

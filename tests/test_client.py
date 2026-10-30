@@ -137,8 +137,8 @@ def test_max_tokens_is_capped(fake, store):
         make_client(fake, store).chat(MESSAGES, max_tokens=32_001)
 
 
-def test_requests_are_tagged_with_job_and_step(fake, store):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_requests_are_tagged_with_job_and_step(fake, store, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     step = store.add_step(job.id, "write tests")
     make_client(fake, store).chat(MESSAGES, job_id=job.id, step_id=step)
     row = store.requests(job.id)[0]

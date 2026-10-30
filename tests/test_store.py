@@ -14,17 +14,17 @@ def test_store_gitignores_its_folder(tmp_path):
     assert (tmp_path / ".gtu" / ".gitignore").read_text() == "*\n"
 
 
-def test_add_get_and_list_jobs(store):
-    a = store.add_job("tests", "src/a.py", "/repo")
-    b = store.add_job("review", "src", "/repo", note="focus on errors")
+def test_add_get_and_list_jobs(store, job_repo):
+    a = store.add_job("tests", "src/a.py", job_repo)
+    b = store.add_job("review", "src", job_repo, note="focus on errors")
     assert len(a.id) == 8 and a.status == "queued"
     assert store.get_job(b.id).note == "focus on errors"
     assert [j.id for j in store.list_jobs()] == [a.id, b.id]
 
 
-def test_unknown_kind_is_rejected(store):
+def test_unknown_kind_is_rejected(store, job_repo):
     with pytest.raises(StoreError):
-        store.add_job("bulk-generate", "x", "/repo")
+        store.add_job("bulk-generate", "x", job_repo)
 
 
 def test_unknown_job_is_an_error(store):
@@ -32,26 +32,26 @@ def test_unknown_job_is_an_error(store):
         store.get_job("nope")
 
 
-def test_cancel_rules(store):
-    job = store.add_job("docs", "README.md", "/repo")
+def test_cancel_rules(store, job_repo):
+    job = store.add_job("docs", "README.md", job_repo)
     assert store.cancel_job(job.id).status == "cancelled"
     with pytest.raises(StoreError):
         store.cancel_job(job.id)
-    done = store.add_job("docs", "a.py", "/repo")
+    done = store.add_job("docs", "a.py", job_repo)
     store.set_status(done.id, "done")
     with pytest.raises(StoreError):
         store.cancel_job(done.id)
 
 
-def test_list_active_hides_finished(store):
-    keep = store.add_job("tests", "a.py", "/repo")
-    gone = store.add_job("tests", "b.py", "/repo")
+def test_list_active_hides_finished(store, job_repo):
+    keep = store.add_job("tests", "a.py", job_repo)
+    gone = store.add_job("tests", "b.py", job_repo)
     store.cancel_job(gone.id)
     assert [j.id for j in store.list_jobs(include_finished=False)] == [keep.id]
 
 
-def test_steps_are_numbered_in_order(store):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_steps_are_numbered_in_order(store, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     first = store.add_step(job.id, "read code")
     store.add_step(job.id, "write tests")
     store.set_step(first, "running")
@@ -74,16 +74,16 @@ def test_phase1_database_gains_new_columns(tmp_path):
     assert {"gate_source", "queue_at_send", "active_at_send"} <= cols
 
 
-def test_interrupted_steps_become_pending(store):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_interrupted_steps_become_pending(store, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     step = store.add_step(job.id, "write tests")
     store.set_step(step, "running")
     assert store.reset_interrupted_steps(job.id) == 1
     assert store.steps(job.id)[0]["status"] == "pending"
 
 
-def test_request_summary(store):
-    job = store.add_job("tests", "a.py", "/repo")
+def test_request_summary(store, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
     store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=503, request_id="r1", job_id=job.id))
     store.log_request(
         RequestLog(endpoint="/chat/completions", attempt=2, status_code=200, request_id="r2",

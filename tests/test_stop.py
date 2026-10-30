@@ -56,8 +56,8 @@ def test_checking_liveness_never_kills_the_process():
 
 # --- the scheduler -------------------------------------------------------------------------
 
-def test_stop_while_waiting_for_the_gate(fake, store, client, make_gate):
-    job = store.add_job("review", "a.py", "/repo")
+def test_stop_while_waiting_for_the_gate(fake, store, client, make_gate, job_repo):
+    job = store.add_job("review", "a.py", job_repo)
     fake.usage_busy(100)
     checks = {"n": 0}
 
@@ -141,9 +141,9 @@ def test_stop_with_nothing_running(folder):
     assert result.exit_code == 0 and "Nothing is running." in result.output
 
 
-def test_stop_with_nothing_running_still_pauses_crashed_jobs(folder):
+def test_stop_with_nothing_running_still_pauses_crashed_jobs(folder, job_repo):
     with Store(folder / "gtu.db") as s:
-        job = s.add_job("review", "a.py", "/repo")
+        job = s.add_job("review", "a.py", job_repo)
         s.set_status(job.id, "running")
     result = runner.invoke(app, ["stop"])
     assert f"Paused interrupted job(s): {job.id}" in result.output

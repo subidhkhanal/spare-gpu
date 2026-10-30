@@ -45,8 +45,8 @@ def test_timeouts_are_announced_too(fake, store):
     assert messages == ["BharatCode timed out. Waiting 5s before retry 1 of 8."]
 
 
-def test_scheduler_narrates_the_gate_and_each_step(fake, store, client, make_gate):
-    store.add_job("review", "a.py", "/repo")
+def test_scheduler_narrates_the_gate_and_each_step(fake, store, client, make_gate, job_repo):
+    store.add_job("review", "a.py", job_repo)
     fake.usage_busy(2)
     fake.queue(Reply(content="report", queue_wait_ms=6200))
     logs = []

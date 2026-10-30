@@ -64,8 +64,8 @@ def one_chat_step(ctx):
     return "ok"
 
 
-def test_ignore_gate_runs_jobs_immediately_into_a_full_lane(fake, store, client, make_gate):
-    job = store.add_job("review", "a.py", "/repo")
+def test_ignore_gate_runs_jobs_immediately_into_a_full_lane(fake, store, client, make_gate, job_repo):
+    job = store.add_job("review", "a.py", job_repo)
     fake.usage_busy(10, queued=6)
     plans = {k: [("one", one_chat_step), ("two", one_chat_step)] for k in ("tests", "docs", "review")}
     done = Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep,
@@ -76,8 +76,8 @@ def test_ignore_gate_runs_jobs_immediately_into_a_full_lane(fake, store, client,
     assert {r["gate_source"] for r in rows} == {"bypass"} and {r["queue_at_send"] for r in rows} == {6}
 
 
-def test_normal_mode_still_waits_with_the_same_full_lane(fake, store, client, make_gate):
-    store.add_job("review", "a.py", "/repo")
+def test_normal_mode_still_waits_with_the_same_full_lane(fake, store, client, make_gate, job_repo):
+    store.add_job("review", "a.py", job_repo)
     fake.usage_busy(3, queued=6)  # then quiet
     plans = {k: [("one", one_chat_step)] for k in ("tests", "docs", "review")}
     Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep, isolate=False).run()

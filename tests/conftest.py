@@ -23,6 +23,13 @@ def store(tmp_path):
 
 
 @pytest.fixture
+def job_repo(tmp_path):
+    """A repo path for jobs that never touch git. Must be a real temp folder: the scheduler
+    writes per-job state under <repo>/.gtu, and a literal like "/repo" escapes the sandbox."""
+    return str(tmp_path / "repo")
+
+
+@pytest.fixture
 def client(fake, store):
     # Scheduler-style client: no retries, the gate decides when to try again.
     return BharatCodeClient(
