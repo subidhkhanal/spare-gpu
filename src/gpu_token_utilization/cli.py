@@ -96,16 +96,8 @@ def setup(
 ) -> None:
     """Set everything up in one go: your API key, and spare-gpu's MCP server in BharatCode's CLI.
     Safe to run again."""
-    try:
-        path = bc_config.config_file(bc_config.config_dir())
-    except OSError as exc:
-        _fail(f"couldn't find BharatCode's config folder ({exc})")
     if remove:
-        try:
-            removed = bc_config.unregister(path)
-        except bc_config.ConfigError as exc:
-            _fail(str(exc))
-        typer.echo(f"Removed spare-gpu from {path}." if removed else f"spare-gpu wasn't registered in {path}.")
+        _uninstall()
         return
 
     typer.echo("Setting up spare-gpu.\n")
@@ -122,35 +114,90 @@ def setup(
         _read_check_save_key(check_key)
 
     typer.echo("\n2/3  BharatCode's CLI (where you'll talk to spare-gpu)")
-    status = cli_status()
-    if status.problem:
-        typer.echo("     Not installed yet. spare-gpu is registered anyway, so it's there once you install it:")
-        typer.echo("     " + status.problem.split("\n", 1)[-1].replace("\n", "\n     "))
-    elif status.signed_in is False:
-        typer.echo(f"     Installed ({status.version}) but not signed in. Run: bharatcode.cmd auth login")
-    else:
-        typer.echo(f"     Installed ({status.version})" + (" and signed in." if status.signed_in else "."))
+    status = _report_cli_for_integration("     ")
 
     typer.echo("\n3/3  spare-gpu's MCP server in BharatCode")
-    try:
-        outcome = bc_config.register(path, bc_config.server_command())
-    except bc_config.ConfigError as exc:
-        _fail(str(exc))
-    typer.echo({"added": f"     Registered in {path}.",
-                "updated": f"     Updated in {path} (the previous file is saved next to it as "
-                           f"{path.name}{bc_config.BACKUP_SUFFIX}).",
-                "unchanged": f"     Already registered in {path}."}[outcome])
-    if not status.problem:
-        ok = bc_config.connected(path)
-        if ok:
-            typer.echo("     BharatCode reports: spare-gpu connected.")
-        elif ok is False:
-            typer.echo("     BharatCode doesn't list it as connected yet. Run `bharatcode.cmd mcp list` to see why.")
-
+    if not _register("     ", status):
+        raise typer.Exit(1)
     typer.echo("\nDone. Open BharatCode in one of your git repos and ask, for example:")
     for phrase in EXAMPLE_PHRASES:
         typer.echo(f'  "{phrase}"')
     typer.echo("Already-open BharatCode windows need a restart to see spare-gpu.")
+
+
+@app.command()
+def integrate(
+    uninstall: bool = typer.Option(False, "--uninstall", help="Remove spare-gpu from BharatCode's config."),
+) -> None:
+    """Register spare-gpu's MCP server with BharatCode's CLI (the API key is separate: `gtu setkey`
+    or `gtu setup`). Backs the config up first, says exactly what it changed and how to undo it,
+    and is safe to run again."""
+    if uninstall:
+        _uninstall()
+        return
+    status = _report_cli_for_integration("")
+    if not _register("", status):
+        raise typer.Exit(1)
+    typer.echo("Already-open BharatCode windows need a restart to see spare-gpu.")
+
+
+def _report_cli_for_integration(pad: str):
+    status = cli_status()
+    if status.problem:
+        typer.echo(f"{pad}BharatCode's CLI isn't installed yet; spare-gpu is registered anyway, so it's there once it is:")
+        typer.echo(pad + status.problem.split("\n", 1)[-1].replace("\n", "\n" + pad))
+    else:
+        where = " ".join(status.command)
+        sign = {True: " and signed in", False: " but not signed in (run: bharatcode.cmd auth login)", None: ""}
+        typer.echo(f"{pad}BharatCode's CLI {status.version}{sign[status.signed_in]}: {where}")
+    return status
+
+
+def _register(pad: str, status) -> bool:
+    """Register spare-gpu in BharatCode's config, saying what changed and how to undo it. When the
+    file can't be edited safely, print the snippet to paste instead."""
+    folder, how = bc_config.locate_config_dir()
+    path = bc_config.config_file(folder)
+    command = bc_config.server_command()
+    typer.echo(f"{pad}Config file: {path} ({how}).")
+    backup = path.with_name(path.name + bc_config.BACKUP_SUFFIX)
+    had_backup = backup.exists() and backup.stat().st_mtime
+    try:
+        outcome = bc_config.register(path, command)
+    except (bc_config.ConfigError, OSError) as exc:
+        typer.echo(f"{pad}Couldn't change it automatically: {exc}")
+        typer.echo(f"{pad}Add this to {path} by hand (merge it into any existing \"mcp\" section):")
+        typer.echo(bc_config.snippet(command))
+        return False
+    if outcome == "unchanged":
+        typer.echo(f"{pad}spare-gpu is already registered there; nothing changed.")
+    else:
+        typer.echo(f"{pad}{'Added' if outcome == 'added' else 'Updated'} the \"spare-gpu\" entry under \"mcp\", "
+                   f"which starts: {' '.join(command)}")
+        if backup.exists() and backup.stat().st_mtime != had_backup:
+            typer.echo(f"{pad}The file as it was before is saved as {backup}.")
+        typer.echo(f"{pad}To undo: gtu integrate --uninstall" + (f" (or copy {backup.name} back)" if backup.exists() else ""))
+    if not status.problem:
+        ok = bc_config.connected(path)
+        if ok:
+            typer.echo(f"{pad}BharatCode reports: spare-gpu connected.")
+        elif ok is False:
+            typer.echo(f"{pad}BharatCode doesn't list it as connected yet; `bharatcode.cmd mcp list` shows why.")
+    return True
+
+
+def _uninstall() -> None:
+    folder, how = bc_config.locate_config_dir()
+    path = bc_config.config_file(folder)
+    try:
+        removed = bc_config.unregister(path)
+    except bc_config.ConfigError as exc:
+        _fail(f"{exc}\nRemove the \"spare-gpu\" entry under \"mcp\" in {path} by hand.")
+    if removed:
+        typer.echo(f"Removed spare-gpu from {path} ({how}). The file as it was is saved as "
+                   f"{path.name}{bc_config.BACKUP_SUFFIX}. Nothing else was changed; your jobs and key are kept.")
+    else:
+        typer.echo(f"spare-gpu wasn't registered in {path}; nothing changed.")
 
 
 EXAMPLE_PHRASES = (

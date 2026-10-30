@@ -30,23 +30,33 @@ class ConfigError(Exception):
     """The config file couldn't be read or safely changed; the message says what to do."""
 
 
-def config_dir() -> Path:
-    """Where BharatCode keeps its global config: asked from the CLI when installed."""
+def locate_config_dir() -> tuple[Path, str]:
+    """Where BharatCode keeps its global config, and how we know: asked from its CLI when it's
+    installed, else BharatCode's default location."""
     override = os.environ.get(CONFIG_DIR_ENV, "").strip()
     if override:
-        return Path(override)
+        return Path(override), f"from {CONFIG_DIR_ENV}"
     try:
         proc = subprocess.run([*resolve_command(), "debug", "paths"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=60, stdin=subprocess.DEVNULL,
                               env=env_without_key())
-        for line in proc.stdout.splitlines():
+        for line in (proc.stdout + proc.stderr).splitlines():
             parts = re.sub(r"\x1b\[[0-9;]*m", "", line).split(None, 1)
             if len(parts) == 2 and parts[0] == "config":
-                return Path(parts[1].strip())
+                return Path(parts[1].strip()), "reported by `bharatcode debug paths`"
     except (CliNotFound, OSError, subprocess.TimeoutExpired):
         pass
     base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "BharatCode" / "Config"
+    return Path(base) / "BharatCode" / "Config", "BharatCode's default location (its CLI didn't say)"
+
+
+def config_dir() -> Path:
+    return locate_config_dir()[0]
+
+
+def snippet(command: list[str]) -> str:
+    """What to paste by hand when the file can't be edited automatically."""
+    return json.dumps({"mcp": {SERVER_NAME: server_entry(command)}}, indent=2)
 
 
 def config_file(folder: Path) -> Path:

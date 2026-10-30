@@ -115,12 +115,12 @@ def test_setup_with_a_key_registers_and_confirms_the_connection(config_dir, monk
     out = result.output
     assert result.exit_code == 0, out
     assert "1/3" in out and "Found in the BHARATCODE_API_KEY environment variable" in out
-    assert "Installed (0.0.0-fake) and signed in" in out
-    assert "Registered in" in out and "BharatCode reports: spare-gpu connected" in out
+    assert "BharatCode's CLI 0.0.0-fake and signed in" in out
+    assert "Added the \"spare-gpu\" entry" in out and "BharatCode reports: spare-gpu connected" in out
     assert "queue tests for src/utils tonight" in out
     assert entry_in(config_dir / "opencode.jsonc")["command"][-1] == "mcp"
     again = cli.invoke(app, ["setup"])
-    assert again.exit_code == 0 and "Already registered" in again.output
+    assert again.exit_code == 0 and "already registered there; nothing changed" in again.output
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Credential Manager")
@@ -129,7 +129,7 @@ def test_setup_without_a_key_asks_for_it_once(config_dir):
 
     result = cli.invoke(app, ["setup", "--no-check"], input="bc_live_typed_in_setup\n")
     assert result.exit_code == 0, result.output
-    assert keystore.load() == "bc_live_typed_in_setup" and "Registered in" in result.output
+    assert keystore.load() == "bc_live_typed_in_setup" and "Added the \"spare-gpu\" entry" in result.output
     assert "bc_live_typed_in_setup" not in result.output
 
 
@@ -139,7 +139,7 @@ def test_setup_without_bharatcodes_cli_still_registers(config_dir, monkeypatch):
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     result = cli.invoke(app, ["setup"])
     assert result.exit_code == 0, result.output
-    assert "Not installed yet" in result.output and "npm install -g bharatcode" in result.output
+    assert "isn't installed yet" in result.output and "npm install -g bharatcode" in result.output
     assert entry_in(config_dir / "opencode.jsonc") is not None
 
 
@@ -149,6 +149,62 @@ def test_setup_remove(config_dir, monkeypatch):
     result = cli.invoke(app, ["setup", "--remove"])
     assert result.exit_code == 0 and "Removed spare-gpu" in result.output
     assert entry_in(config_dir / "opencode.jsonc") is None
+
+
+# --- gtu integrate ---------------------------------------------------------------------------
+
+def test_integrate_says_what_it_found_changed_and_how_to_undo(config_dir):
+    result = cli.invoke(app, ["integrate"])
+    out = result.output
+    assert result.exit_code == 0, out
+    assert "BharatCode's CLI 0.0.0-fake and signed in" in out
+    assert f"Config file: {config_dir / 'opencode.jsonc'} (from GTU_BHARATCODE_CONFIG_DIR)" in out
+    assert 'Added the "spare-gpu" entry under "mcp"' in out and "mcp" in out
+    assert "opencode.jsonc.spare-gpu-backup" in out and "To undo: gtu integrate --uninstall" in out
+    assert "BharatCode reports: spare-gpu connected" in out
+    backup = config_dir / "opencode.jsonc.spare-gpu-backup"
+    assert "mcp" not in backup.read_text(encoding="utf-8")  # the backup is the file as it was
+
+
+def test_integrate_is_idempotent(config_dir):
+    cli.invoke(app, ["integrate"])
+    config, backup = config_dir / "opencode.jsonc", config_dir / "opencode.jsonc.spare-gpu-backup"
+    before, backup_before = config.read_text(encoding="utf-8"), backup.read_text(encoding="utf-8")
+    for _ in range(2):
+        again = cli.invoke(app, ["integrate"])
+        assert again.exit_code == 0 and "already registered there; nothing changed" in again.output
+        assert "To undo" not in again.output
+    assert config.read_text(encoding="utf-8") == before
+    assert backup.read_text(encoding="utf-8") == backup_before  # the original backup isn't overwritten
+
+
+def test_integrate_uninstall(config_dir):
+    cli.invoke(app, ["integrate"])
+    result = cli.invoke(app, ["integrate", "--uninstall"])
+    assert result.exit_code == 0 and "Removed spare-gpu from" in result.output and "jobs and key are kept" in result.output
+    assert entry_in(config_dir / "opencode.jsonc") is None
+    again = cli.invoke(app, ["integrate", "--uninstall"])
+    assert again.exit_code == 0 and "wasn't registered" in again.output
+
+
+def test_integrate_prints_the_snippet_when_it_cannot_edit_safely(config_dir):
+    config = config_dir / "opencode.jsonc"
+    config.write_text('{"theme": "dark",, }', encoding="utf-8")
+    result = cli.invoke(app, ["integrate"])
+    assert result.exit_code == 1
+    assert "Couldn't change it automatically" in result.output and f"Add this to {config} by hand" in result.output
+    assert '"spare-gpu": {' in result.output and '"type": "local"' in result.output
+    assert config.read_text(encoding="utf-8") == '{"theme": "dark",, }'
+
+
+def test_integrate_without_bharatcodes_cli_uses_the_default_location(tmp_path, monkeypatch):
+    monkeypatch.delenv("GTU_BHARATCODE_CMD")
+    monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    result = cli.invoke(app, ["integrate"])
+    assert result.exit_code == 0, result.output
+    assert "isn't installed yet" in result.output and "BharatCode's default location" in result.output
+    assert entry_in(tmp_path / "BharatCode" / "Config" / "opencode.jsonc") is not None
 
 
 # --- the background runner -------------------------------------------------------------------
