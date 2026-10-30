@@ -216,6 +216,17 @@ python -m pytest
 
 No test calls the real BharatCode API or CLI; they use in-process fakes of both, plus real git and real pytest runs in temporary folders.
 
+## Releases
+
+Releases are published to PyPI by hand; there is no release workflow. To cut one: bump `__version__` in `src/gpu_token_utilization/__init__.py`, run the tests and the [install checklist](docs/install-checklist.md), then:
+
+```powershell
+python -m pip install -e ".[build]"
+python -m build
+python -m twine check dist/*
+python -m twine upload dist/*
+```
+
 ## What it will never do
 
 - Never touches your `main` branch or your checkout; all work happens in a worktree on `gtu/<job-id>`.
