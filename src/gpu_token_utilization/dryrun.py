@@ -6,14 +6,13 @@ branches, worktrees, steps or gate readings.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from . import worktree
 from .agent_cli import CliNotFound, resolve_command
-from .api import API_KEY_ENV
+from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
 from .jobs import PLANS, JobConfig, numbered_listing
 from .store import Job, Store
@@ -153,7 +152,11 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
         last = store.last_gate_reading()
         seen = f" Last reading ({last.taken_at[11:16]} UTC): {last.reason}." if last else ""
         out.append(f"Gate: jobs start only when BharatCode has spare capacity.{seen} Use --now to skip waiting.")
-    if not os.environ.get(API_KEY_ENV):
-        out.append(f"PROBLEM: {API_KEY_ENV} is not set; a real run would stop at once.")
+    try:
+        key_found = find_api_key() is not None
+    except ApiKeyMissing:
+        key_found = False
+    if not key_found:
+        out.append("PROBLEM: no BharatCode API key found (run `gtu setkey`); a real run would stop at once.")
     out.append("Estimates are rough: BharatCode CLI steps vary with how much the model reads and retries.")
     return "\n".join(out)

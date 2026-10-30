@@ -127,7 +127,7 @@ def test_demo_with_an_explicit_file(project):
 def test_demo_without_a_key_says_where_to_get_one(project, monkeypatch):
     monkeypatch.delenv("BHARATCODE_API_KEY")
     result = runner.invoke(app, ["demo"])
-    assert result.exit_code == 1 and "BHARATCODE_API_KEY is not set" in result.output
+    assert result.exit_code == 1 and "no BharatCode API key found" in result.output
     assert "bharatcode.ai/account" in result.output
     assert '$env:BHARATCODE_API_KEY = "<your key>"' in result.output
 
@@ -137,7 +137,7 @@ def test_demo_without_a_key_says_so_before_looking_for_a_file(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("BHARATCODE_API_KEY", raising=False)
     result = runner.invoke(app, ["demo"])
-    assert result.exit_code == 1 and "BHARATCODE_API_KEY is not set" in result.output
+    assert result.exit_code == 1 and "no BharatCode API key found" in result.output
     assert "path/to/file.py" not in result.output
 
 
@@ -145,7 +145,7 @@ def test_demo_without_a_key_says_so_before_looking_for_a_file(tmp_path, monkeypa
 def test_demo_with_a_rejected_key(project):
     respx.post(CHAT).mock(return_value=httpx.Response(401, json={"error": "bad key"}))
     result = runner.invoke(app, ["demo"])
-    assert result.exit_code == 1 and "rejected the key" in result.output
+    assert result.exit_code == 1 and "rejected your API key" in result.output
 
 
 @respx.mock

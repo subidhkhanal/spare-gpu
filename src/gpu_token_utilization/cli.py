@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -8,7 +9,9 @@ from pathlib import Path
 import typer
 
 from . import __version__
-from .api import API_KEY_ENV, ApiError, ApiKeyMissing, get_api_key, list_models, verify_key
+from .api import (API_KEY_ENV, ApiError, ApiKeyMissing, KeyRejected, clean_key, find_api_key,
+                  get_api_key, key_problem, list_models, verify_key)
+from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .gate import Gate, GateConfig
@@ -20,7 +23,25 @@ from . import dryrun, runstate, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
-SET_KEY = f'Set it in PowerShell with `$env:{API_KEY_ENV} = "<your key>"`'
+GET_KEY_URL = "https://bharatcode.ai/account"
+
+
+def _no_key(exc: Exception) -> str:
+    """The one message for a missing key: where to get one and exactly how to set it."""
+    return (
+        f"{exc}.\n"
+        f"  1. Get a key at {GET_KEY_URL}\n"
+        "  2. Run:  gtu setkey\n"
+        "     It asks for the key and saves it for your Windows account, so every terminal finds it.\n"
+        f'  Or, for this terminal only (PowerShell):  $env:{API_KEY_ENV} = "<your key>"'
+    )
+
+
+def _rejected_key() -> str:
+    found = find_api_key()
+    source = f", which came from {found[1]}" if found else ""
+    return (f"BharatCode rejected your API key{source}. Copy it again from {GET_KEY_URL} "
+            "and save it with `gtu setkey`.")
 
 
 def _utf8_when_redirected() -> None:
@@ -69,18 +90,22 @@ def main(
 
 @app.command()
 def check() -> None:
-    """Call GET /models with the key from the environment and report what is available."""
+    """Check your setup: finds your API key, reaches BharatCode, and confirms the key works
+    with one 1-token request."""
     try:
-        result = list_models()
-    except ApiKeyMissing:
-        typer.echo(f"error: {API_KEY_ENV} is not set. {SET_KEY} and try again.", err=True)
-        raise typer.Exit(1)
+        found = find_api_key()
+    except ApiKeyMissing as exc:
+        _fail(_no_key(exc))
+    if found is None:
+        _fail(_no_key(ApiKeyMissing("no BharatCode API key found")))
+    key, source = found
+    typer.echo(f"API key: found in {source}.")
+    try:
+        result = list_models(key=key)
     except ApiError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(1)
+        _fail(str(exc))
 
-    typer.echo(f"BharatCode API reachable in {result.elapsed_ms:.0f} ms (GET /models)")
-    typer.echo("Models:")
+    typer.echo(f"BharatCode reachable in {result.elapsed_ms:.0f} ms. Models:")
     for model in result.models:
         tier = f" [{model.access_tier}]" if model.access_tier else ""
         name = f" - {model.display_name}" if model.display_name else ""
@@ -88,13 +113,79 @@ def check() -> None:
 
     # GET /models does not check the key, so confirm it with a 1-token request.
     try:
-        key_check = verify_key(result.models)
+        key_check = verify_key(result.models, key=key)
+    except KeyRejected:
+        _fail(_rejected_key())
     except ApiError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(1)
-    tokens = f", {key_check.total_tokens} tokens used" if key_check.total_tokens is not None else ""
-    typer.echo(f"API key accepted: 1-token test on {key_check.model} took {key_check.elapsed_ms:.0f} ms{tokens}")
+        _fail(str(exc))
+    tokens = f", {key_check.total_tokens} tokens" if key_check.total_tokens is not None else ""
+    typer.echo(f"OK: API key accepted. 1-token test on {key_check.model} took "
+               f"{key_check.elapsed_ms / 1000:.1f} s{tokens}.")
     typer.echo(f"x-request-id: {key_check.request_id or 'not sent by /chat/completions'}")
+
+
+@app.command()
+def setkey(
+    remove: bool = typer.Option(False, "--remove", help="Delete the saved key."),
+    check_key: bool = typer.Option(True, "--check/--no-check",
+                                   help="Test the key with one 1-token request before saving it."),
+) -> None:
+    """Save your BharatCode API key for your Windows account, so every terminal finds it."""
+    if not keystore.supported():
+        _fail(f"gtu setkey needs Windows. Set the {API_KEY_ENV} environment variable instead.")
+    env_note = (f"Note: {API_KEY_ENV} is also set in this terminal's environment, and gtu uses "
+                "that first." if find_api_key_in_env() else None)
+    if remove:
+        try:
+            removed = keystore.delete()
+        except keystore.KeystoreError as exc:
+            _fail(str(exc))
+        typer.echo(f"Removed the saved key from {keystore.LOCATION}." if removed
+                   else "There was no saved key to remove.")
+        if env_note:
+            typer.echo(env_note)
+        return
+
+    if sys.stdin is not None and not sys.stdin.isatty():
+        # Piped in (`Get-Content key.txt | gtu setkey`). Hidden prompts on Windows read the
+        # console directly and ignore a pipe, so they would wait forever. Read bytes: the
+        # pipe's text encoding is a guess, and PowerShell may prefix a byte-order mark.
+        stream = getattr(sys.stdin, "buffer", None)
+        raw = stream.readline().decode("utf-8-sig", errors="replace") if stream else sys.stdin.readline()
+    else:
+        typer.echo(f"Get a key at {GET_KEY_URL} if you don't have one.")
+        raw = typer.prompt("Paste your BharatCode API key (it won't be shown)", hide_input=True,
+                           default="", show_default=False)
+    key = clean_key(raw)
+    if not key:
+        _fail("no key entered; nothing saved.")
+    problem = key_problem(key)
+    if problem:
+        _fail(f"that doesn't look like a key ({problem}); nothing saved.")
+    if check_key:
+        typer.echo("Checking it with BharatCode (one 1-token request; can take up to a minute)...")
+        try:
+            verify_key([], key=key)
+        except KeyRejected:
+            _fail(f"BharatCode rejected that key; nothing saved. Copy it again from {GET_KEY_URL}.")
+        except ApiError as exc:
+            typer.echo(f"Couldn't check it right now ({exc}). Saving it anyway; run `gtu check` later.")
+        else:
+            typer.echo("BharatCode accepted the key.")
+    try:
+        keystore.save(key)
+    except keystore.KeystoreError as exc:
+        _fail(f"{exc}; nothing saved.")
+    typer.echo(f'Saved in {keystore.LOCATION} as "{keystore.target()}".')
+    typer.echo("Only your Windows account can read it. It stays after you close the terminal or restart,")
+    typer.echo("and gtu finds it in every terminal from now on. Nothing else on your system was changed.")
+    typer.echo("Replace it: gtu setkey    Remove it: gtu setkey --remove")
+    if env_note:
+        typer.echo(env_note)
+
+
+def find_api_key_in_env() -> bool:
+    return bool(os.environ.get(API_KEY_ENV, "").strip())
 
 
 class JobKind(str, Enum):
@@ -180,9 +271,8 @@ def demo(
     """See it work in a minute or two: one short code review, sent straight away."""
     try:
         get_api_key()
-    except ApiKeyMissing:
-        _fail(f"{API_KEY_ENV} is not set. Get a key at https://bharatcode.ai/account. "
-              f"{SET_KEY}, then run `gtu demo` again.")
+    except ApiKeyMissing as exc:
+        _fail(_no_key(exc))
     try:
         root = worktree.repo_root(Path.cwd()).resolve()
     except worktree.GitError:
@@ -206,7 +296,7 @@ def demo(
         try:
             outcome = run_demo(root, target, client)
         except AuthError:
-            _fail(f"BharatCode rejected the key in {API_KEY_ENV}. Check it at https://bharatcode.ai/account.")
+            _fail(_rejected_key())
         except BusyError:
             _fail("BharatCode is busy right now. Try `gtu demo` again in a minute.")
         except BharatCodeError as exc:
@@ -297,8 +387,8 @@ def start(
             # again. --now: no gate to do that, so the client's patient retry ladder takes over.
             client = BharatCodeClient(store=store, retry=RetryPolicy.from_env() if now else RetryPolicy(max_retries=0),
                                       on_retry=lambda message: log(f"  {message}"))
-        except ApiKeyMissing:
-            _fail(f"{API_KEY_ENV} is not set. {SET_KEY} and try again.")
+        except ApiKeyMissing as exc:
+            _fail(_no_key(exc))
         config = GateConfig.from_env()
         if quiet_readings is not None:
             config.quiet_needed = quiet_readings
@@ -315,8 +405,8 @@ def start(
                 should_stop=lambda: runstate.stop_requested(folder),
             )
             steps = scheduler.run(max_steps=max_steps)
-        except AuthError as exc:
-            _fail(str(exc))
+        except AuthError:
+            _fail(_rejected_key())
         except KeyboardInterrupt:
             paused = runstate.tidy(store)
             typer.echo("\nStopped." + (f" Paused job(s) {', '.join(paused)}." if paused else "")

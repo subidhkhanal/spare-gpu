@@ -70,7 +70,7 @@ def test_dry_run_needs_no_api_key_but_mentions_it(repo, monkeypatch):
     add("review", "src/calc.py")
     monkeypatch.delenv("BHARATCODE_API_KEY")
     result = runner.invoke(app, ["start", "--dry-run"])
-    assert result.exit_code == 0 and "PROBLEM: BHARATCODE_API_KEY is not set" in result.output
+    assert result.exit_code == 0 and "PROBLEM: no BharatCode API key found (run `gtu setkey`)" in result.output
 
 
 def test_dry_run_with_nothing_queued(repo):

@@ -29,15 +29,18 @@ There is no standalone `gtu.exe`: Windows Smart App Control blocks an unsigned e
 
 In a folder with a small git repo of your own:
 
-1. [ ] Set the key: `$env:BHARATCODE_API_KEY = "..."`.
-2. [ ] `gtu check` lists the models and says "API key accepted".
-3. [ ] `gtu demo` picks a file, prints a short review, and tells you what to do next. It usually takes
+1. [ ] `gtu check` with no key says "no BharatCode API key found", with the link and `gtu setkey`.
+2. [ ] `gtu setkey`, paste the key (nothing is shown while typing). It says BharatCode accepted
+   it and where it was saved.
+3. [ ] Close the terminal, open a new one: `gtu check` says the key was found in Windows
+   Credential Manager and "OK: API key accepted". Repeat in Command Prompt.
+4. [ ] `gtu demo` picks a file, prints a short review, and tells you what to do next. It usually takes
    under a minute; a real morning run (08:00–11:00 IST) took 73 s, 60 s of it in BharatCode's queue.
-4. [ ] `gtu add review <that file>` then `gtu start --dry-run` shows the job and a token estimate,
+5. [ ] `gtu add review <that file>` then `gtu start --dry-run` shows the job and a token estimate,
    and sends nothing.
-5. [ ] `gtu start --now` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
+6. [ ] `gtu start --now` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
    own branch and files are unchanged (`git status` is clean).
-6. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
+7. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
 
 ## D. Tests and docs jobs (need BharatCode's own CLI)
 

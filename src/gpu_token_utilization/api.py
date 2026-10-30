@@ -1,7 +1,5 @@
-"""Minimal BharatCode API access used by `gtu check`.
-
-The full client (backoff, truncation handling, request log) arrives in Phase 1.
-"""
+"""Minimal BharatCode API access used by `gtu check` and `gtu setkey`, and where the key
+comes from. The full client (backoff, truncation, request log) is in client.py."""
 
 from __future__ import annotations
 
@@ -11,6 +9,8 @@ from dataclasses import dataclass
 
 import httpx
 from pydantic import BaseModel
+
+from . import keystore
 
 BASE_URL = "https://bharatcode.ai/api/model/v1"
 API_KEY_ENV = "BHARATCODE_API_KEY"
@@ -36,11 +36,15 @@ def request_timeout() -> float:
 
 
 class ApiKeyMissing(Exception):
-    """BHARATCODE_API_KEY is not set."""
+    """No key in BHARATCODE_API_KEY and none saved by `gtu setkey`."""
 
 
 class ApiError(Exception):
     """The API could not be reached or rejected the request."""
+
+
+class KeyRejected(ApiError):
+    """BharatCode answered 401/403: the key itself is wrong."""
 
 
 class Model(BaseModel):
@@ -68,20 +72,64 @@ class KeyCheck:
     total_tokens: int | None
 
 
-def get_api_key() -> str:
-    key = os.environ.get(API_KEY_ENV, "").strip()
+def clean_key(raw: str) -> str:
+    """Trim whitespace and invisible byte-order marks (PowerShell pipes and some editors
+    add one; "ï»¿" is the same mark mis-decoded as cp1252)."""
+    return raw.replace("﻿", "").replace("ï»¿", "").strip()
+
+
+def key_problem(key: str) -> str | None:
+    """Why this can't be an API key, or None. Keys are plain printable ASCII; anything else
+    would crash the HTTP header instead of giving a clear message."""
+    if any(ch.isspace() for ch in key):
+        return "it contains spaces"
+    if not (key.isascii() and key.isprintable()):
+        return "it contains characters that can't be in a key (often an invisible mark added when copying)"
+    return None
+
+
+def find_api_key() -> tuple[str, str] | None:
+    """(key, where it came from): the environment variable wins, then the key saved by
+    `gtu setkey`. The saved key is never copied into the environment."""
+    key, source = clean_key(os.environ.get(API_KEY_ENV, "")), f"the {API_KEY_ENV} environment variable"
     if not key:
-        raise ApiKeyMissing(f"{API_KEY_ENV} is not set")
-    return key
+        try:
+            key = clean_key(keystore.load() or "")
+        except keystore.KeystoreError as exc:
+            raise ApiKeyMissing(str(exc)) from None
+        source = f"{keystore.LOCATION} (saved by gtu setkey)"
+    if not key:
+        return None
+    problem = key_problem(key)
+    if problem:
+        raise ApiKeyMissing(f"the API key in {source} isn't usable: {problem}")
+    return key, source
+
+
+def env_without_key(**extra: str) -> dict[str, str]:
+    """The environment for subprocesses we start (model-written tests, the BharatCode CLI and
+    the commands it runs), minus our API key: none of them need it, and none should see it.
+    The BharatCode CLI signs in with `bharatcode auth login`, not this variable."""
+    env = {k: v for k, v in os.environ.items() if k.upper() != API_KEY_ENV}
+    env.update(extra)
+    return env
+
+
+def get_api_key() -> str:
+    found = find_api_key()
+    if found is None:
+        raise ApiKeyMissing("no BharatCode API key found")
+    return found[0]
 
 
 def list_models(
     base_url: str = BASE_URL,
     timeout: float = 30.0,
     client: httpx.Client | None = None,
+    key: str | None = None,
 ) -> CheckResult:
-    """GET /models. The key is read from the environment and only sent as a header."""
-    key = get_api_key()
+    """GET /models. The key (found as in get_api_key unless given) is only sent as a header."""
+    key = key or get_api_key()
     owns_client = client is None
     http = client or httpx.Client(timeout=timeout)
     try:
@@ -97,7 +145,7 @@ def list_models(
 
     request_id = response.headers.get("x-request-id")
     if response.status_code in (401, 403):
-        raise ApiError(f"API key was rejected (HTTP {response.status_code})")
+        raise KeyRejected(f"API key was rejected (HTTP {response.status_code})")
     if response.status_code == 503:
         raise ApiError("BharatCode is busy (HTTP 503), try again in a few seconds")
     if response.status_code != 200:
@@ -117,9 +165,10 @@ def verify_key(
     base_url: str = BASE_URL,
     timeout: float | None = None,
     client: httpx.Client | None = None,
+    key: str | None = None,
 ) -> KeyCheck:
     """Send a 1-token POST /chat/completions. GET /models does not check the key, this does."""
-    key = get_api_key()
+    key = key or get_api_key()
     timeout = request_timeout() if timeout is None else timeout
     ids = [m.id for m in models]
     model = PREFERRED_MODEL if PREFERRED_MODEL in ids or not ids else ids[0]
@@ -147,7 +196,7 @@ def verify_key(
 
     request_id = response.headers.get("x-request-id")
     if response.status_code in (401, 403):
-        raise ApiError(f"API key was rejected (HTTP {response.status_code})")
+        raise KeyRejected(f"API key was rejected (HTTP {response.status_code})")
     if response.status_code == 503:
         raise ApiError("BharatCode is busy (HTTP 503), try again in a few seconds")
     if response.status_code != 200:

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from .api import env_without_key
+
 DEFAULT_MODEL = "bharatcode/qwen-3.8-27b"
 CMD_ENV = "GTU_BHARATCODE_CMD"
 CONFIG_FILE = "opencode.json"
@@ -143,7 +145,7 @@ class BharatCodeCli:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             args, cwd=workdir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", **kwargs,
+            text=True, encoding="utf-8", errors="replace", env=env_without_key(), **kwargs,
         )
         lines: queue.Queue = queue.Queue()
         stderr: list[str] = []

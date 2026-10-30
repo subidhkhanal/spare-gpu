@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 from . import worktree
 from .agent_cli import CONFIG_FILE, CliNotFound, CliResult
+from .api import env_without_key
 from .budget import BudgetExceeded
 from .client import BharatCodeError, BusyError
 from .runstate import StopRequested
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
 
 DEFAULT_ALLOWED = ("python -m pytest", "pytest", "npm test", "go test")
 def _test_env() -> dict:
-    """Test runs shouldn't leave bytecode caches in the job's worktree."""
-    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    """Model-written tests never see the API key, and leave no bytecode caches behind."""
+    return env_without_key(PYTHONDONTWRITEBYTECODE="1")
 SKIP_DIRS = {".git", ".gtu", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
 MAX_FILE_BYTES = 200_000
 

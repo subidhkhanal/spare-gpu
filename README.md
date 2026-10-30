@@ -8,7 +8,7 @@ spare-gpu runs on Windows (PowerShell).
 
 ```powershell
 pipx install spare-gpu                     # or: pip install spare-gpu
-$env:BHARATCODE_API_KEY = "bc_live_..."
+gtu setkey                                 # paste your key once; every terminal finds it
 cd your-repo
 gtu demo                                # a short code review of one of your files, in a minute or two
 ```
@@ -118,12 +118,18 @@ There is no standalone `gtu.exe`: an unsigned executable is blocked by Windows S
 gtu demo [file]   # one short review, sent straight away, to see it work
 ```
 
+### Your API key
+
 ```powershell
-$env:BHARATCODE_API_KEY = "..."
-gtu check
+gtu setkey   # asks for the key (input hidden), tests it, saves it
+gtu check    # says where it found the key and confirms BharatCode accepts it
 ```
 
-`gtu check` calls `GET /models`, then sends a 1-token `POST /chat/completions` to confirm the key is actually accepted (`/models` answers even with a wrong key). Exits non-zero if the key is missing, rejected, or BharatCode is busy.
+`gtu setkey` saves the key in **Windows Credential Manager**: encrypted, readable only by your Windows account, and still there after you close the terminal or restart. It tests the key with one 1-token request first and won't save a key BharatCode rejects (`--no-check` skips the test). Run it again to replace the key; `gtu setkey --remove` deletes it.
+
+Setting `$env:BHARATCODE_API_KEY = "..."` still works, but only lasts for that terminal; when it's set, it takes priority over the saved key.
+
+`gtu check` reports where the key came from, calls `GET /models`, then sends a 1-token `POST /chat/completions` to confirm the key is actually accepted (`/models` answers even with a wrong key). Exits non-zero if the key is missing, rejected, or BharatCode is busy.
 
 ```powershell
 gtu add tests src/calc.py --note "cover negative numbers"   # kinds: tests, docs, review
@@ -237,7 +243,7 @@ python -m twine upload dist/*
 - Never touches your `main` branch or your checkout; all work happens in a worktree on `gtu/<job-id>`.
 - Never pushes to GitHub on its own.
 - Only runs allowlisted test commands, under a timeout. Note that this still means **running tests the model wrote** on your machine, inside the job's worktree; read what a tests job will run if that matters to you.
-- Your API key stays in the `BHARATCODE_API_KEY` environment variable — it is never written to a file, logged, or sent anywhere except to BharatCode.
+- Your API key comes from Windows Credential Manager (`gtu setkey`) or the `BHARATCODE_API_KEY` environment variable. It is never written to a file, logged, printed, or sent anywhere except to BharatCode, and it is removed from the environment of everything gtu starts: model-written tests, the BharatCode CLI, and the commands the CLI runs.
 
 ## Honest limitations
 

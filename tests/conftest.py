@@ -1,14 +1,30 @@
+import uuid
 from datetime import time
 
 import httpx
 import pytest
 
+from gpu_token_utilization import keystore
+from gpu_token_utilization.keystore import TARGET_ENV
 from gpu_token_utilization.client import BharatCodeClient, RetryPolicy
 from gpu_token_utilization.fakeapi import FakeBharatCode
 from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.store import Store
 
 KEY = "bc_live_fake_key"
+
+
+@pytest.fixture(autouse=True)
+def private_credential_target(monkeypatch):
+    """Every test gets its own Credential Manager entry name, so no test can read (or
+    overwrite) a key the user saved with `gtu setkey`. Tests that save one clean up."""
+    target = f"spare-gpu-test/{uuid.uuid4().hex}"
+    monkeypatch.setenv(TARGET_ENV, target)
+    yield target
+    try:
+        keystore.delete()
+    except keystore.KeystoreError:
+        pass
 
 
 @pytest.fixture
