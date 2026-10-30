@@ -4,13 +4,13 @@
 
 Queues repo chores (tests, docs, code review) and sends them to the BharatCode model API only when it has spare capacity, instead of on a fixed schedule or all at once.
 
-**Status: Phase 2 (capacity gate and runner).** Jobs run one step at a time while BharatCode has spare capacity, and survive being stopped. The only work each job does so far is a short "survey" (a plan of what it would do); the real tests/docs/review work arrives in Phase 3.
+**Status: Phase 3 (real jobs).** Tests, docs and review jobs do real work on their own git branch, one step at a time while BharatCode has spare capacity, within token budgets, and survive being stopped. Tested end to end against fakes of BharatCode's API and CLI; not yet run end to end against the real service.
 
 ## The finding
 
 The premise behind "just run your AI chores overnight" is that BharatCode is quiet at night. We measured it instead of assuming it.
 
-On 2026-10-29, we polled BharatCode's public live-stats endpoint (`/api/serving/usage`, undocumented, no auth needed — see [research/livestats-endpoints.md](research/livestats-endpoints.md)) once a minute. At **01:30 IST**, the Qwen 3.8 27B API lane was running all 4 of its slots and had **13 requests queued** — 100% capacity used. At the same moment, BharatCode's public combined Live Stats chart looked unremarkable, because it blends Qwen with DeepSeek (which was near-idle) and shows totals, not per-model queue depth.
+On 2026-10-29, we polled BharatCode's public live-stats endpoint (`/api/serving/usage`, undocumented, no auth needed — see [research/livestats-endpoints.md](research/livestats-endpoints.md)) once a minute. At **01:30 IST**, the Qwen 3.8 27B API lane was running all 4 of its slots and had **13 requests queued** — 100% capacity used. The endpoint's per-lane figures show this directly; totals across both models hide which lane is full.
 
 | IST time | Qwen API: active/queued (slots, used) |
 |---|---|
@@ -32,13 +32,22 @@ Two things follow from this:
 1. **"Run it overnight" is not a reliable strategy.** The lane most relevant to this project was saturated through the middle of the Indian night.
 2. **A fixed-time scheduler (e.g. "always run 00:00–09:00 IST") fires blindly into whatever load actually exists.** It has no way to know the lane is full, so it would queue work behind 13 other requests anyway.
 
-## How spare-gpu works differently
+### Since then: pacing, and an open question
 
-Instead of trusting a clock, spare-gpu polls BharatCode's live capacity and only sends work into a genuinely free slot:
+The next day BharatCode announced **account-level pacing**: requests from an account can be held back even when slots are free, to share capacity fairly. Two things we've measured since change the picture:
+
+- A queue is often present while slots are idle (it's pacing, not load), so "queued requests" alone doesn't mean "busy".
+- BharatCode reports how long it held each request (`x-bharatcode-queue-wait-ms`). In our first real tests, requests sent straight into a **full** lane waited only **3–15 seconds**, while waiting for the gate to see a free slot once took **11 minutes**.
+
+So whether waiting for capacity actually beats just sending is now an open question. A 24-hour experiment is measuring it (see [Research](#research)); the gate below is the current design, not a settled answer.
+
+## How spare-gpu works
+
+Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before sending:
 
 - Checks real capacity before sending, rather than assuming a time window is quiet.
 - One request in flight at a time, never in parallel.
-- Backs off the moment the queue fills or BharatCode answers busy.
+- Holds off while every slot in the lane is busy, the queue is longer than a tolerance, or BharatCode has just answered busy.
 - Results land on a separate git branch for review — it never touches `main`.
 
 ## What works today vs. what's coming
@@ -46,14 +55,14 @@ Instead of trusting a clock, spare-gpu polls BharatCode's live capacity and only
 **Today:**
 - A SQLite job store (`gtu add`, `gtu list`, `gtu status`, `gtu cancel`) — jobs can be queued, listed and cancelled.
 - A capacity gate (`gtu why`, `gtu start`) that polls BharatCode's live stats, falls back to our own request history when that's unusable, and only sends work while it's genuinely quiet.
-- A runner (`gtu start`) that works through the queue one step at a time, survives being stopped (Ctrl+C, a crash, closing the terminal) and resumes without redoing finished steps. So far each job's only step is a short "survey" — a plan of what the real work would be, not the work itself.
-- A BharatCode API client with exponential backoff on busy responses, truncation detection (a cut-off reply is kept but never auto-retried with a half-written tool call), and a full request log (tokens, latency, `x-request-id`, and what the gate saw when each request was sent).
-- Tests against an in-process fake of the BharatCode API — no test ever calls the real one.
+- A runner (`gtu start`) that works through the queue one step at a time, survives being stopped (Ctrl+C, a crash, closing the terminal) and resumes without redoing finished steps.
+- Three job types — `tests`, `docs`, `review` — each working in its own git worktree on branch `gtu/<job-id>` (see below).
+- Per-job and per-night token budgets that pause work when reached.
+- A BharatCode API client with exponential backoff on busy responses, truncation detection (a cut-off reply is kept but never auto-retried with a half-written tool call), and a full request log (tokens, latency, `x-request-id`, BharatCode's reported queue wait, and what the gate saw when each request was sent).
+- Tests against in-process fakes of the BharatCode API and CLI — no test ever calls the real service.
 
 **Coming:**
-- Job runners that do the actual tests/docs/review work, not just a survey of it (Phase 3).
 - A morning report summarizing what ran overnight.
-- Putting results on a separate git branch (designed for, not wired up yet).
 
 ## Install and try it
 
@@ -88,6 +97,34 @@ gtu start   # work through the queue, one step at a time, until it is empty
 
 `gtu start` only sends a request while the **capacity gate** is open. Stop it any time (Ctrl+C, closing the terminal, a crash); run it again and it continues from the last finished step without redoing anything.
 
+### The three job types
+
+Every job works in its own git worktree (`.gtu/worktrees/<job-id>`) on branch **`gtu/<job-id>`**, made from your current commit. Your checkout is only ever read; results are committed to the job's branch for you to review and merge yourself. `gtu add` refuses a repo with uncommitted changes or untracked files, so the branch starts from exactly what you see.
+
+| Job | Who does the work | Steps | What lands on the branch |
+|---|---|---|---|
+| `tests` | BharatCode's CLI (`bharatcode run`) | **write**: the CLI writes new test files and may run the allowlisted test command. **verify**: we run each new test file ourselves, delete failing tests, discard files that still fail or don't run, and revert any change that isn't a new test file. | Only tests that pass. |
+| `docs` | BharatCode's CLI | **write**: the CLI adds docstrings and README text (no shell at all). **verify**: a Python file is kept only if its code is unchanged apart from docstrings and no existing docstring was removed or shortened; a Markdown file only if no line was removed. Everything else is reverted. | Only additive documentation changes. |
+| `review` | Our own client | **review**: sends the code with line numbers and writes the answer to `gtu-review-<job-id>.md`. | One report file; no source changes. |
+
+The CLI's output is saved as a patch outside the worktree before it's checked, so unchecked work is never committed and a crash during checking never loses it.
+
+**Safeguards on the CLI.** It runs only in the job's worktree, with `--pure` (your global BharatCode plugins are off), one call per step under a timeout (`GTU_CLI_TIMEOUT`, default 900 s), and a generated `opencode.json` that denies every shell command except the allowlist (`GTU_ALLOWED_COMMANDS`, default `python -m pytest, pytest, npm test, go test`) and denies web access. That file is never committed. The CLI is started directly, not through a shell, so nothing in a prompt is interpreted by one. If your main checkout changes while a step runs, the job stops.
+
+**What we can't see.** The CLI's requests don't go through our client, so for tests and docs jobs we log only what the CLI reports: tokens per step and timings, not `x-request-id` or queue wait. Each CLI step costs about 11,500 tokens, mostly the CLI's own system prompt; a tests or docs job typically uses 50–150k. A one-run check suggested the CLI's traffic uses the same API lane the gate watches.
+
+### Token budgets
+
+Reaching a budget pauses the job; it never fails it. A CLI run is killed as soon as its tokens cross what's left, and the half-done step is discarded and rerun later.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GTU_JOB_TOKEN_BUDGET` | `200000` | Most tokens one job may use. |
+| `GTU_NIGHT_TOKEN_BUDGET` | `1000000` | Most tokens all jobs together may use per night. |
+| `GTU_NIGHT_START` | `12:00` | When a "night" starts (IST); it lasts 24 hours, so one overnight session counts once. |
+| `GTU_TEST_COMMAND` | `python -m pytest` | How the tests job runs tests. Must be in the allowlist. |
+| `GTU_TEST_TIMEOUT` | `300` | Seconds per test run. |
+
 ### The capacity gate
 
 - **Main signal: BharatCode's public live stats** (`/api/serving/usage`), checked at most once a minute. It counts as quiet when the model is up and a slot in the API lane is free, as long as the queue is within a tolerance (see below).
@@ -114,28 +151,36 @@ All of it is configurable:
 | `GTU_RETRY_BASE` | `5` | First wait in seconds; each later wait doubles. |
 | `GTU_RETRY_MAX_DELAY` | `300` | Longest single wait in seconds. |
 | `GTU_RETRY_JITTER` | `0.2` | Random spread on each wait (0.2 = ±20%). |
+
 - If an answer is cut off (`finish_reason: length`), the partial text is kept, any half-written tool call is thrown away rather than run, and it is not retried automatically.
-- Every attempt is logged with its time, tokens (including reasoning tokens), response time, `x-request-id`, and whether it was cut off.
+- Every attempt is logged with when it was sent, tokens (including reasoning tokens), response time, `x-request-id`, BharatCode's reported queue wait (`x-bharatcode-queue-wait-ms`), and whether it was cut off.
+
+## Running the tests
 
 ```bash
 python -m pytest
 ```
 
+No test calls the real BharatCode API or CLI; they use in-process fakes of both, plus real git and real pytest runs in temporary folders.
+
 ## What it will never do
 
-- Never touches your `main` branch.
+- Never touches your `main` branch or your checkout; all work happens in a worktree on `gtu/<job-id>`.
 - Never pushes to GitHub on its own.
-- Will only run allowlisted commands, under a timeout, once job runners exist.
+- Only runs allowlisted test commands, under a timeout. Note that this still means **running tests the model wrote** on your machine, inside the job's worktree; read what a tests job will run if that matters to you.
 - Your API key stays in the `BHARATCODE_API_KEY` environment variable — it is never written to a file, logged, or sent anywhere except to BharatCode.
 
 ## Honest limitations
 
 - The finding above is a single-user, single-night measurement, not a study of BharatCode's aggregate load. It shows the premise can be false; it doesn't show how often.
 - The live stats endpoints (`/api/serving/usage`, `/api/serving/history`) are undocumented, unversioned, and could change or disappear without notice. The gate is built to fall back to our own signals when that happens.
-- We assume the API lane's queue is the one our requests join, and that a free slot means our request starts promptly. Both are guesses.
+- We assume the API lane's queue is the one our requests join. A free slot does not guarantee a prompt start: under pacing, BharatCode can hold a request for several seconds either way, and once answered busy (503) after holding it for 5.6 s.
 - Two assumptions in the client are unconfirmed: that HTTP 429 should be treated like 503 (BharatCode's docs only mention 503), and that `Retry-After` is honoured when sent — it was never observed in testing.
 - `gtu start` stops when the queue is empty; it does not wait for new jobs.
-- Each job only produces a short survey/plan right now; no tests, docs or reviews are actually written yet, and nothing touches git.
+- The job types are tested against fakes of BharatCode's API and CLI, not yet end to end against the real service.
+- Failing generated tests are dropped per test for Python (pytest); for other languages a whole test file is kept or discarded.
+- A tests job only accepts new test files; it never edits your existing tests.
+- A CLI step that times out is retried after the gate reopens; a task that always times out will keep retrying until its budget runs out.
 - Only `/chat/completions` is used; `/responses` is not supported.
 - This is a development-chores tool, not a general-purpose bulk prompt runner.
 - The command is `gtu` and the package `gpu_token_utilization`, left over from an earlier project name.
@@ -144,7 +189,8 @@ python -m pytest
 
 - [research/livestats-endpoints.md](research/livestats-endpoints.md) — the live stats endpoints: what they return, how fresh, how trustworthy, the measurement behind the finding above, and the capacity gate design it led to.
 - [research/bharatcode-cli-scheduling-check.md](research/bharatcode-cli-scheduling-check.md) — whether BharatCode's own CLI and Desktop app already have a scheduling feature (checked so spare-gpu doesn't duplicate one that exists). Short answer: no.
-- [scripts/livestats_log.py](scripts/livestats_log.py) — logs the Qwen API lane once a minute to a CSV, to build a dataset of when BharatCode actually has spare capacity.
+- [scripts/livestats_log.py](scripts/livestats_log.py) — logs the live stats once a minute (Qwen and DeepSeek API lanes, plus totals) to CSV, to build a dataset of when BharatCode actually has spare capacity.
+- [scripts/gate_vs_send.py](scripts/gate_vs_send.py) — the gate-vs-send experiment: every 20 minutes it records what the gate would decide, then sends one tiny request anyway and records BharatCode's reported queue wait. Results will be in `research/gate-vs-send-experiment.md`.
 
 ## Licence and attribution
 
