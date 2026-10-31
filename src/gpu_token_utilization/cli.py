@@ -622,7 +622,7 @@ def cost(scope: str = typer.Argument(None, help="A job id, a number of hours (de
 
 @app.command()
 def advice() -> None:
-    """Is now a good time for heavy work on BharatCode, and if not, when?"""
+    """Is now a fine time for heavy work on BharatCode? Answers from our own measured queue waits."""
     from .mcp_server import SpareTools
 
     typer.echo(SpareTools(Path.cwd()).capacity_advice())

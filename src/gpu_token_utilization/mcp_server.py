@@ -15,8 +15,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-import httpx
-
 from . import __version__, actions, advice, costs, freerun, runner, runstate, worktree
 from . import report as reporting
 from .api import ApiKeyMissing, find_api_key
@@ -56,15 +54,13 @@ class SpareTools:
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
-                 start_command: Callable[[Command], int] | None = None,
-                 http: Callable[[], httpx.Client] | None = None):
+                 start_command: Callable[[Command], int] | None = None):
         self.base = Path(base)
         # Everything that reaches outside is injectable, so tests use fakes: the gate (BharatCode's
-        # live stats), the background job runner, the run-when-free waiter, and the history fetch.
+        # live stats), the background job runner and the run-when-free waiter.
         self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
         self._launch = launch or runner.launch
         self._start_command = start_command
-        self._http = http or (lambda: httpx.Client(timeout=10.0))
 
     # --- helpers -------------------------------------------------------------------------
 
@@ -220,10 +216,8 @@ class SpareTools:
         path = db_path(self._root())
         with Store(path if path.exists() else ":memory:") as store:  # advice needs no jobs
             decision = self._decision(store)
-            waits = advice.waits_by_hour(store)
-        with self._http() as http:
-            buckets = advice.fetch_history(http, GateConfig.from_env().model)
-        return advice.advise(decision, advice.busy_by_hour(buckets) if buckets else None, waits)
+            waits = advice.measured_waits(store)
+        return advice.advise(waits, decision)
 
     def token_cost(self, scope: str | None = None) -> str:
         try:
@@ -321,9 +315,10 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
     @server.tool(annotations=notes(True, world=True))
     def spare_capacity_advice() -> str:
-        """Should something heavy run on BharatCode now, and if not, when? Combines BharatCode's
-        live load, its hourly load over the past week, and how long our own requests actually
-        waited, into one recommendation with the quietest hours.
+        """Is now a fine time for something heavy on BharatCode? Answers from how long our own
+        requests actually waited in BharatCode's queue: the last few requests and whether waits are
+        rising or falling, what's usual at this hour, and BharatCode's live load for context. It
+        describes what was measured and says so when there isn't enough data; it doesn't forecast.
 
         Use it before starting anything big, or when the user asks about timing: "is now a good
         time to run a big refactor?", "is BharatCode busy right now?", "when is the quietest time

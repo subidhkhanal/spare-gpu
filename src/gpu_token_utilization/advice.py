@@ -1,116 +1,130 @@
-"""Should heavy work run now, and if not, when? (`spare_capacity_advice`, `gtu advice`)
+"""Is now a fine time for heavy work on BharatCode? (`spare_capacity_advice`, `gtu advice`)
 
-Three signals, each labelled in the answer so the user can weigh them:
-- now: the capacity gate's live reading of BharatCode's load;
-- the past week: BharatCode's public hourly history for the model's API lane (undocumented, so
-  it's context, never the decision itself);
-- your own measured waits: how long BharatCode held our requests (x-bharatcode-queue-wait-ms),
-  by hour of day.
+Built on what we measured, not on forecasts. BharatCode reports how long it held each of our
+requests (x-bharatcode-queue-wait-ms); the answer is those waits:
+- now: the median of our last few requests, if they're recent, and how many it rests on;
+- trend: whether waits over the last ~20 minutes are rising, falling or steady;
+- this hour: what our requests usually waited at this time of day.
+BharatCode's live lane figures are shown for context only. In our experiment its queue count
+tracked waits roughly at 4 slots and not at all at 2, and our own recent waits didn't predict the
+next one better either (research/why-live-stats-dont-predict-wait.md). So this describes, and
+never claims to know what the next request will wait.
 """
 
 from __future__ import annotations
 
 import statistics
-from collections import defaultdict
-from datetime import datetime, timezone
-
-import httpx
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from .budget import IST
 from .gate import Decision
 from .store import Store
 
-HISTORY_URL = "https://bharatcode.ai/api/serving/history"
-QUIET_MARGIN_PCT = 10.0  # an hour within this many points of the quietest counts as quiet too
+RECENT = timedelta(minutes=30)  # older than this isn't "now"
+RECENT_COUNT = 5  # the last this many requests, within RECENT
+MIN_RECENT = 3  # fewer than this and we say we don't have enough
+TREND_WINDOW = timedelta(minutes=20)
+MIN_TREND = 4
+ELEVATED_S = 30.0  # median waits above this are called elevated (the experiment's p90 was 56 s)
+MIN_HOUR = 3  # samples needed before quoting an hour of day
 
 
-def fetch_history(http: httpx.Client, model: str, timeout: float = 10.0) -> list[dict] | None:
-    """The past 7 days in hourly buckets, or None if the endpoint is unusable."""
-    try:
-        response = http.get(HISTORY_URL, params={"hours": 168, "bucket": "1h", "model": model, "lane": "api"},
-                            timeout=timeout)
-        data = response.json() if response.status_code == 200 else None
-    except (httpx.HTTPError, ValueError):
-        return None
-    buckets = data.get("buckets") if isinstance(data, dict) else None
-    if not isinstance(buckets, list):
-        return None
-    needed = ("started_at", "avg_capacity_utilization_pct", "avg_queue_depth", "sample_count")
-    good = [b for b in buckets if isinstance(b, dict) and all(k in b for k in needed) and b["sample_count"]]
-    return good or None
+@dataclass
+class Wait:
+    sent_at: datetime
+    seconds: float
 
 
-def busy_by_hour(buckets: list[dict]) -> dict[int, tuple[float, float]]:
-    """IST hour -> (average % of capacity in use, average queue depth)."""
-    use, queue = defaultdict(list), defaultdict(list)
-    for b in buckets:
+def measured_waits(store: Store) -> list[Wait]:
+    """Our successful requests that came back with BharatCode's queue-wait figure, oldest first."""
+    out = []
+    rows = store.conn.execute(
+        "SELECT sent_at, queue_wait_ms FROM requests WHERE queue_wait_ms IS NOT NULL AND status_code = 200"
+    )
+    for sent_at, wait in rows:
         try:
-            hour = datetime.fromisoformat(b["started_at"].replace("Z", "+00:00")).astimezone(IST).hour
-            use[hour].append(float(b["avg_capacity_utilization_pct"]))
-            queue[hour].append(float(b["avg_queue_depth"]))
+            when = datetime.fromisoformat(sent_at)
         except (TypeError, ValueError):
             continue
-    return {h: (statistics.mean(use[h]), statistics.mean(queue[h])) for h in use}
+        out.append(Wait(when if when.tzinfo else when.replace(tzinfo=timezone.utc), int(wait) / 1000))
+    return sorted(out, key=lambda w: w.sent_at)
 
 
-def waits_by_hour(store: Store) -> dict[int, list[int]]:
-    """IST hour -> BharatCode's reported queue waits (ms) for our own requests."""
-    out = defaultdict(list)
-    for sent_at, wait in store.conn.execute("SELECT sent_at, queue_wait_ms FROM requests WHERE queue_wait_ms IS NOT NULL"):
-        try:
-            out[datetime.fromisoformat(sent_at).astimezone(IST).hour].append(int(wait))
-        except (TypeError, ValueError):
-            continue
-    return dict(out)
+def _s(seconds: float) -> str:
+    return f"{seconds:.1f} s"
 
 
-def _hour(h: int) -> str:
-    return f"{h:02d}:00"
+def _ago(delta: timedelta) -> str:
+    minutes = delta.total_seconds() / 60
+    return "under a minute ago" if minutes < 1 else f"{minutes:.0f} min ago"
 
 
-def advise(decision: Decision, history: dict[int, tuple[float, float]] | None,
-           waits: dict[int, list[int]], now: datetime | None = None) -> str:
-    now = (now or datetime.now(timezone.utc)).astimezone(IST)
-    r = decision.reading
-    # The current reading, not the gate's open/closed: the gate waits for several quiet readings
-    # in a row before sending work, which is right for unattended jobs but not for "is it quiet now?".
-    good_now = r.verdict == "quiet"
-    if good_now:
-        lines = [f"Yes, now is a good time: BharatCode has spare capacity ({r.reason})."]
-    elif r.verdict == "busy":
-        lines = [f"Not right now: {r.reason}."]
-    else:
-        lines = [f"Can't tell right now ({r.reason})."]
+def trend(waits: list[Wait], now: datetime) -> str | None:
+    """'rising', 'falling' or 'steady' over the last TREND_WINDOW, or None with too few samples."""
+    window = [w.seconds for w in waits if now - w.sent_at <= TREND_WINDOW]
+    if len(window) < MIN_TREND:
+        return None
+    half = len(window) // 2
+    before, after = statistics.median(window[:half]), statistics.median(window[-half:])
+    # Waits jump around by tens of seconds from one request to the next, so only call a big move.
+    if after > max(before * 1.5, before + 5):
+        return "rising"
+    if after < min(before / 1.5, before - 5):
+        return "falling"
+    return "steady"
 
-    quiet = None
-    best_hours: list[int] = []
-    if history:
-        ranked = sorted(history.items(), key=lambda kv: (kv[1][0], kv[1][1]))
-        quiet = [h for h, _ in ranked[:3]]
-        # Hours genuinely close to the quietest one, not just the next in line.
-        best_hours = [h for h, (busy_pct, _) in ranked if busy_pct <= ranked[0][1][0] + QUIET_MARGIN_PCT]
-        busy = [h for h, _ in ranked[-3:][::-1]]
-        lines.append("Past week (BharatCode's hourly stats, IST): quietest around "
-                     + ", ".join(f"{_hour(h)} ({history[h][0]:.0f}% busy, queue {history[h][1]:.1f})" for h in quiet)
-                     + "; busiest around " + ", ".join(f"{_hour(h)} ({history[h][0]:.0f}% busy)" for h in busy) + ".")
-    else:
-        lines.append("BharatCode's history wasn't available, so there's no weekly pattern to go on.")
 
-    if waits:
-        mine = [w for ws in waits.values() for w in ws]
-        here = waits.get(now.hour, [])
-        line = (f"Your own requests waited a median {statistics.median(mine) / 1000:.1f} s in BharatCode's queue "
-                f"({len(mine)} measured)")
-        if len(here) >= 2:
-            line += f"; around {_hour(now.hour)} it was {statistics.median(here) / 1000:.1f} s"
-        lines.append(line + ".")
+def advise(waits: list[Wait], decision: Decision | None, now: datetime | None = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    recent = [w for w in waits if now - w.sent_at <= RECENT][-RECENT_COUNT:]
+    local_hour = now.astimezone(IST).hour
+    this_hour = [w for w in waits if w.sent_at.astimezone(IST).hour == local_hour]
+    hour_days = {w.sent_at.astimezone(IST).date() for w in this_hour}
 
-    if not good_now:
-        if best_hours:
-            upcoming = sorted(best_hours, key=lambda h: (h - now.hour) % 24)
-            lines.append(f"Best bet: around {_hour(upcoming[0])} IST. Or queue it now (spare_queue_work, or "
-                         "spare_run_when_free for any command) and it starts the moment a slot frees up.")
+    lines = []
+    if len(recent) >= MIN_RECENT:
+        median = statistics.median(w.seconds for w in recent)
+        basis = (f"median {_s(median)} over our last {len(recent)} requests, "
+                 f"the newest {_ago(now - recent[-1].sent_at)}")
+        if median > ELEVATED_S:
+            lines.append(f"Waits are elevated right now: {basis}. Work still runs, just slower; "
+                         "BharatCode's busy answers are retried.")
         else:
-            lines.append("Queue it now (spare_queue_work, or spare_run_when_free for any command) and it starts "
-                         "the moment a slot frees up.")
+            lines.append(f"Fine to run now: {basis}.")
+        direction = trend(waits, now)
+        if direction:
+            lines.append(f"Over the last {TREND_WINDOW.seconds // 60} minutes waits look {direction}.")
+        else:
+            lines.append("Too few requests in the last 20 minutes to tell whether waits are rising or falling.")
+    else:
+        if recent:
+            lines.append(f"Not enough recent data to say how it is right now: only {len(recent)} of our requests "
+                         f"in the last {RECENT.seconds // 60} minutes.")
+        else:
+            lines.append(f"Not enough recent data to say how it is right now: none of our requests "
+                         f"in the last {RECENT.seconds // 60} minutes.")
+
+    if len(this_hour) >= MIN_HOUR:
+        lines.append(f"Around {local_hour:02d}:00 IST our requests have waited a median "
+                     f"{_s(statistics.median(w.seconds for w in this_hour))} (worst {_s(max(w.seconds for w in this_hour))}), "
+                     f"from {len(this_hour)} requests on {len(hour_days)} day(s).")
+    elif waits:
+        lines.append(f"Too little history for {local_hour:02d}:00 IST to say what's usual then "
+                     f"({len(this_hour)} request(s)). Across all {len(waits)} measured, the median wait was "
+                     f"{_s(statistics.median(w.seconds for w in waits))}.")
+    else:
+        lines.append("No measured waits at all yet, so we don't know what's usual. spare-gpu sends anyway and "
+                     "retries busy answers, so it's safe to queue work now.")
+
+    if decision is not None:
+        r = decision.reading
+        if r.slots is not None:
+            lines.append(f"BharatCode's live stats (context, not a forecast): {r.active} of {r.slots} slots busy, "
+                         f"{r.queued} queued. In our measurements the queue count tracked waits only roughly "
+                         "with 4 slots, and not at all with 2.")
+        else:
+            lines.append(f"BharatCode's live stats aren't available ({r.reason}).")
+    lines.append("To run something: spare_queue_work for tests, docs or a review; spare_run_when_free for "
+                 "any other command.")
     return "\n".join(lines)

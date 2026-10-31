@@ -38,18 +38,6 @@ def started():
     return {"runner": [], "commands": []}
 
 
-def history(hours_busy: dict[int, float]) -> httpx.Client:
-    """A fake /api/serving/history: one bucket per IST hour, at the given % busy."""
-    day = datetime(2026, 10, 29, tzinfo=timezone.utc)
-    buckets = []
-    for ist_hour, busy in hours_busy.items():
-        start = day + timedelta(hours=ist_hour) - timedelta(hours=5, minutes=30)
-        buckets.append({"started_at": start.isoformat().replace("+00:00", "Z"), "avg_capacity_utilization_pct": busy,
-                        "avg_queue_depth": busy / 20, "avg_running_requests": 2, "sample_count": 60})
-    return httpx.Client(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"status": "ok", "buckets": buckets})))
-
-
 @pytest.fixture
 def tools(git_repo, fake, started):
     def gate(store):
@@ -64,9 +52,7 @@ def tools(git_repo, fake, started):
         started["commands"].append(cmd.command)
         return None  # no real waiter
 
-    quiet_at_3am = {h: (10.0 if h == 3 else 95.0) for h in range(24)}
-    return SpareTools(git_repo, make_gate=gate, launch=launch, start_command=start_command,
-                      http=lambda: history(quiet_at_3am))
+    return SpareTools(git_repo, make_gate=gate, launch=launch, start_command=start_command)
 
 
 def readable(text: str) -> bool:
@@ -224,28 +210,20 @@ def test_cancel_work_cancels_a_waiting_command(tools, git_repo):
 
 # --- spare_capacity_advice --------------------------------------------------------------------
 
-def test_capacity_advice_when_busy_points_at_the_quietest_hour(tools, git_repo, fake):
-    finished_review(git_repo, tools, wait_ms=31000)
+def test_capacity_advice_quotes_our_measured_waits(tools, git_repo, fake):
+    for wait in (31000, 35000, 40000):
+        finished_review(git_repo, tools, wait_ms=wait)
     fake.usage_busy(1)
     text = tools.capacity_advice()
-    assert readable(text) and text.startswith("Not right now:")
-    assert "quietest around 03:00 (10% busy" in text and "Best bet: around 03:00 IST" in text
-    assert "Your own requests waited a median 31.0 s" in text and "spare_run_when_free" in text
+    assert readable(text) and text.startswith("Waits are elevated right now: median 35.0 s over our last 3 requests")
+    assert "4 of 4 slots busy" in text and "context, not a forecast" in text and "spare_run_when_free" in text
 
 
-def test_capacity_advice_when_quiet_says_go_at_once(tools, fake):
-    # one quiet reading is enough for advice; the gate's several-readings rule is for sending jobs
-    fake.usage(times=5, active=1, queued=0)
-    text = tools.capacity_advice()
-    assert text.startswith("Yes, now is a good time") and "Best bet" not in text
-
-
-def test_capacity_advice_without_history_or_a_store(git_repo, fake):
+def test_capacity_advice_without_a_store_says_it_does_not_know(git_repo, fake):
     gate = lambda store: Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
                               http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
-    broken = lambda: httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
-    text = SpareTools(git_repo, make_gate=gate, http=broken).capacity_advice()
-    assert "history wasn't available" in text
+    text = SpareTools(git_repo, make_gate=gate).capacity_advice()
+    assert text.startswith("Not enough recent data") and "No measured waits at all yet" in text
     assert not (git_repo / ".gtu").exists()  # advice needs no store and creates none
 
 
