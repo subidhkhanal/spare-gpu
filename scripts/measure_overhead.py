@@ -6,7 +6,8 @@ sent before the model saw our handful of words is the overhead.
 
 Usage (one run per variant, a few thousand to ~15k tokens each):
     python scripts/measure_overhead.py <project-folder> <empty-folder> [variant ...]
-Variants: empty, empty-mcp, project, empty-notools. Prints one JSON line per run.
+Variants: empty, empty-mcp, project, empty-notools, empty-noskills, agents-md. Prints one JSON line per run.
+agents-md needs a folder whose only content is an AGENTS.md of known size: pass it as GTU_AGENTS_MD_DIR.
 """
 
 from __future__ import annotations
@@ -27,8 +28,8 @@ MCP_OFF = {"mcp": {"spare-gpu": {"type": "local", "command": ["gtu", "mcp"], "en
 TOOLS_OFF = {**MCP_OFF, "tools": {"*": False}}
 
 
-def run(folder: Path, extra_config: dict | None) -> dict:
-    env = env_without_key()
+def run(folder: Path, extra_config: dict | None, extra_env: dict | None = None) -> dict:
+    env = {**env_without_key(), **(extra_env or {})}
     config_file = None
     if extra_config is not None:
         handle, name = tempfile.mkstemp(suffix=".json")
@@ -67,10 +68,13 @@ def main(project: str, empty: str, variants: list[str]) -> None:
         "empty-mcp": (Path(empty), None),         # plus spare-gpu's 7 MCP tool schemas (global config)
         "project": (Path(project), MCP_OFF),      # plus project context (file tree, git, AGENTS.md...)
         "empty-notools": (Path(empty), TOOLS_OFF),  # system prompt without tool schemas, if honoured
+        # without the skills it discovers in ~/.claude/skills and ~/.agents/skills
+        "empty-noskills": (Path(empty), MCP_OFF, {"OPENCODE_DISABLE_EXTERNAL_SKILLS": "1"}),
+        "agents-md": (Path(os.environ.get("GTU_AGENTS_MD_DIR", empty)), MCP_OFF),  # plus one AGENTS.md
     }
-    for name in variants or list(plans):
-        folder, config = plans[name]
-        result = run(folder, config)
+    for name in variants or [v for v in plans if v != "agents-md"]:
+        folder, config, *env = plans[name]
+        result = run(folder, config, *env)
         print(json.dumps({"variant": name, **result}), flush=True)
 
 

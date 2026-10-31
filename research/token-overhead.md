@@ -45,6 +45,29 @@ schemas, plus about 2.3k for every MCP server like spare-gpu's, plus project con
 repo has instruction files. A user's bare "hi" with spare-gpu registered measured 14,407, which
 fits: 11.5k + 2.3k + a few hundred.
 
+## Follow-up: skills and instruction files (2026-10-31, 14:30 IST)
+
+Three more one-step runs, same prompt, spare-gpu's MCP server off:
+
+| Variant | Context sent | Reading |
+|---|---|---|
+| empty (repeat) | **11,536** | Matches the first run (11,504) within noise. |
+| empty, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1` | **8,032** | The CLI lists every skill it finds in `~/.claude/skills` and `~/.agents/skills` (16 Claude Code skills on this machine) in each request: **3,504 tokens**. |
+| a folder containing only an `AGENTS.md` (this README, 5,188 bytes) | **12,959** | The file goes in whole: **+1,423 tokens**, about 3.6 bytes per token. |
+
+**Corrected breakdown** of the 14,407 tokens a bare "hi" cost with spare-gpu registered, in this repo (no `AGENTS.md`):
+
+| Part | Tokens |
+|---|---|
+| System prompt (`default.txt` plus the environment block) | ~2.0k |
+| Built-in tool schemas | ~6.0k (not 9.5k as first estimated) |
+| The user's own Claude Code skills, picked up from `~/.claude/skills` | ~3.5k (depends on the machine) |
+| spare-gpu's 7 MCP tools | ~2.3k |
+| Project context | ~0 here (no instruction file); an `AGENTS.md` adds its full size |
+| The prompt and run-to-run noise | ~0.6k |
+
+The source (BharatCode CLI 1.15.46, `packages/opencode/src/session/system.ts`) confirms that the environment block has no file tree or repo map. It has only the working directory, whether it's a git repo, the platform and the date.
+
 ## What this changed in spare-gpu
 
 - `spare_token_cost` / `gtu cost` now count the measured 11,500-token floor of each BharatCode CLI
