@@ -169,7 +169,7 @@ The next day BharatCode announced **account-level pacing**: requests from an acc
 - A queue is often present while slots are idle (it's pacing, not load), so "queued requests" alone doesn't mean "busy".
 - BharatCode reports how long it held each request (`x-bharatcode-queue-wait-ms`). In our first real tests, requests sent straight into a **full** lane waited only **3–15 seconds**, while waiting for the gate to see a free slot once took **11 minutes**.
 
-So whether waiting for capacity actually beats just sending is now an open question. A 24-hour experiment is measuring it (see [Research](#research)); the gate below is the current design, not a settled answer.
+So we measured whether waiting for capacity beats just sending ([the experiment](research/gate-vs-send-experiment.md), 30–31 Oct): every request sent when the gate said "quiet" was admitted with no wait, while requests sent when it said "busy" waited a median 14.5 s (up to 80 s), and every failure (four 503s, one timeout) happened then. It's a small sample (6 quiet sends, all after midnight), but it supports the gate below.
 
 ## How spare-gpu works
 
@@ -196,7 +196,7 @@ Instead of trusting a clock, spare-gpu reads BharatCode's live capacity before s
 - Tests against in-process fakes of the BharatCode API and CLI — no test ever calls the real service.
 
 **Coming:**
-- Real end-to-end runs against BharatCode, and the gate-vs-send experiment's results, which may change how the gate works.
+- More real end-to-end runs against BharatCode, especially daytime gate-vs-send samples (the experiment missed 14:00–22:30).
 
 ## Command-line reference
 
@@ -396,7 +396,7 @@ python -m twine upload dist/*
 
 - The finding above is a single-user, single-night measurement, not a study of BharatCode's aggregate load. It shows the premise can be false; it doesn't show how often.
 - The live stats endpoints (`/api/serving/usage`, `/api/serving/history`) are undocumented, unversioned, and could change or disappear without notice. The gate is built to fall back to our own signals when that happens.
-- Measured queue waits vary a lot. BharatCode's reported wait (`x-bharatcode-queue-wait-ms`) was 0.3–12 s overnight on 30 Oct (03:10–05:10 IST), but 31–72 s between 08:10 and 08:50 IST. That gap isn't only time of day: at 05:30 IST (00:00 UTC) BharatCode cut the Qwen API lane from 4 slots to 2, so the overnight and morning numbers come from different capacity. These are early numbers: the full 24-hour gate-vs-send experiment is still running, and its results may change how the gate works.
+- Measured queue waits vary a lot with time of day and capacity. BharatCode's Qwen API lane runs **2 slots from 05:30 to 13:30 IST and 4 otherwise** (seen on both 30 and 31 Oct); 08:00–12:00 IST was queued every minute, 00:00–01:00 IST almost never. The gate-vs-send results rest on 40 paired samples with gaps (the machine slept 13:38–22:46), and only 6 sends got a "quiet" verdict. Details in [research/gate-vs-send-experiment.md](research/gate-vs-send-experiment.md).
 - We assume the API lane's queue is the one our requests join. A free slot does not guarantee a prompt start: under pacing, BharatCode can hold a request for several seconds either way, and once answered busy (503) after holding it for 5.6 s.
 - Two assumptions in the client are unconfirmed: that HTTP 429 should be treated like 503 (BharatCode's docs only mention 503), and that `Retry-After` is honoured when sent — it was never observed in testing.
 - `gtu start` stops when the queue is empty; it does not wait for new jobs.
@@ -411,10 +411,11 @@ python -m twine upload dist/*
 ## Research
 
 - [research/livestats-endpoints.md](research/livestats-endpoints.md) — the live stats endpoints: what they return, how fresh, how trustworthy, the measurement behind the finding above, and the capacity gate design it led to.
+- [research/gate-vs-send-experiment.md](research/gate-vs-send-experiment.md) — does waiting for a free slot beat just sending? 50 sends over a day, each compared with what the gate would have said; the daily slot schedule; raw data in [research/data/](research/data/).
 - [research/token-overhead.md](research/token-overhead.md) — BharatCode CLI's fixed token overhead per step, measured: system prompt, built-in tool schemas, MCP tools and project context, with a script to reproduce it.
 - [research/bharatcode-cli-scheduling-check.md](research/bharatcode-cli-scheduling-check.md) — whether BharatCode's own CLI and Desktop app already have a scheduling feature (checked so spare-gpu doesn't duplicate one that exists). Short answer: no.
 - [scripts/livestats_log.py](scripts/livestats_log.py) — logs the live stats once a minute (Qwen and DeepSeek API lanes, plus totals) to CSV, to build a dataset of when BharatCode actually has spare capacity.
-- [scripts/gate_vs_send.py](scripts/gate_vs_send.py) — the gate-vs-send experiment: every 20 minutes it records what the gate would decide, then sends one tiny request anyway and records BharatCode's reported queue wait. Results will be in `research/gate-vs-send-experiment.md`.
+- [scripts/gate_vs_send.py](scripts/gate_vs_send.py) — the gate-vs-send experiment: every 20 minutes it records what the gate would decide, then sends one tiny request anyway and records BharatCode's reported queue wait. Results: [research/gate-vs-send-experiment.md](research/gate-vs-send-experiment.md), with the raw CSVs in [research/data/](research/data/).
 
 ## Licence and attribution
 
