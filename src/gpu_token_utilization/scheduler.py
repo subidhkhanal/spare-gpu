@@ -112,7 +112,7 @@ class Scheduler:
         self._now = now
         self._log = log
         self.isolate = isolate
-        self.ignore_gate = ignore_gate  # `gtu start --now`
+        self.ignore_gate = ignore_gate  # the default; False only with --wait-for-capacity
         # `gtu stop`: checked between steps, about once a second while waiting, and by the CLI.
         self._interruptible = should_stop is not None
         self.should_stop = should_stop or (lambda: False)
@@ -150,7 +150,7 @@ class Scheduler:
         queued = self.pending_jobs()
         if queued:
             self._log(f"{len(queued)} job(s) to run. "
-                      + ("Starting now (--now)." if self.ignore_gate else "Checking BharatCode's capacity first."))
+                      + ("Starting now." if self.ignore_gate else "Waiting for a free slot first (--wait-for-capacity)."))
         gate_was_open = False
         while not stop():
             if self.should_stop():

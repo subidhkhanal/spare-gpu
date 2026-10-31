@@ -57,7 +57,7 @@ def test_dry_run_lists_jobs_steps_and_costs_and_changes_nothing(repo):
     assert "0 tokens (runs locally, no requests)" in out
     assert re.search(r"~3[\d,]+-[\d,]+ tokens \(estimate: 3-7 CLI steps", out)
     assert f"Job {review_id}  review" in out and "estimate from the code size" in out
-    assert "Total for jobs that would run:" in out and "Gate: jobs start only when BharatCode has spare capacity" in out
+    assert "Total for jobs that would run:" in out and "Start: immediately; BharatCode's busy answers are retried politely." in out
     assert "PROBLEM" not in out
 
     assert db_counts(repo) == before  # no steps, requests or gate readings created
@@ -78,11 +78,11 @@ def test_dry_run_with_nothing_queued(repo):
     assert result.exit_code == 0 and "No queued jobs" in result.output
 
 
-def test_dry_run_with_now_says_it_would_start_immediately(repo):
+def test_dry_run_with_wait_for_capacity_says_it_would_hold_jobs(repo):
     add("review", "src/calc.py")
-    result = runner.invoke(app, ["start", "--dry-run", "--now"])
-    assert "Gate: ignored (--now); jobs would start immediately." in result.output
-    assert "--now: running queued jobs immediately" not in result.output  # the real-run note isn't printed
+    result = runner.invoke(app, ["start", "--dry-run", "--wait-for-capacity"])
+    assert "Start: only once BharatCode's live stats show a free slot (--wait-for-capacity)." in result.output
+    assert "--wait-for-capacity: jobs start only" not in result.output  # the real-run note isn't printed
 
 
 def test_partly_done_job_shows_only_remaining_steps_and_its_usage(repo):

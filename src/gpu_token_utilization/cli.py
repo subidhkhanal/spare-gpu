@@ -14,7 +14,7 @@ from .api import (API_KEY_ENV, ApiError, ApiKeyMissing, KeyRejected, clean_key, 
 from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
-from .gate import Gate, GateConfig
+from .gate import WAIT_ENV, Gate, GateConfig
 from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolve_command
 from .budget import Budgets
 from .jobs import JobConfig
@@ -68,7 +68,7 @@ def _local(stamp: str) -> str:
         return stamp
 
 app = typer.Typer(
-    help="Queue repo chores (tests, docs, code review) and run them on BharatCode's spare capacity. "
+    help="Queue repo chores (tests, docs, code review) and run them unattended through BharatCode, each on its own git branch. "
          "New here? Run `gtu demo`.",
     no_args_is_help=True,
     add_completion=False,
@@ -449,13 +449,12 @@ def demo(
         typer.echo("The answer was cut off at the demo's short limit; real review jobs allow much longer answers.")
     typer.echo(f"Saved to {outcome.saved_to}\n")
     typer.echo(
-        "That was one request, sent immediately. Real jobs run on their own git branch and are sent\n"
-        "only when BharatCode has spare capacity, so they may not start straight away:\n\n"
+        "That was one request. Real jobs run unattended, each on its own git branch:\n\n"
         f"  gtu add review {rel}   # a full review, saved as gtu-review-<id>.md\n"
         f"  gtu add tests {rel}    # tests for it; only ones that pass are kept\n"
         f"  gtu add docs {rel}     # docstrings and README additions\n"
-        "  gtu start                # runs them when there is capacity\n"
-        "  gtu why                  # what it's waiting for, if anything"
+        "  gtu start                # runs them\n"
+        "  gtu list                 # what's queued, running and done"
     )
 
 
@@ -480,17 +479,24 @@ def start(
     max_queued: int = typer.Option(
         None, "--max-queued", min=0, help="Override: queue length still counted as quiet (default GTU_MAX_QUEUED or 5)."
     ),
-    now: bool = typer.Option(
-        False, "--now", help="Ignore the capacity gate and run queued jobs immediately."
+    wait: bool = typer.Option(
+        False, "--wait-for-capacity",
+        help="Hold work until BharatCode's live stats show a free slot (also GTU_WAIT_FOR_CAPACITY=1). "
+             "Off by default: measured, waiting cost hours where sending cost seconds.",
     ),
+    now: bool = typer.Option(False, "--now", hidden=True, help="No longer needed: sending right away is the default."),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show which jobs and steps would run and roughly what they'd cost; send nothing."
     ),
 ) -> None:
-    """Run queued jobs one step at a time while BharatCode has spare capacity (or right away with --now)."""
+    """Run queued jobs one step at a time, starting now (or once there's a free slot, with --wait-for-capacity)."""
 
     def log(message: str) -> None:
         typer.echo(f"[{datetime.now():%H:%M:%S}] {message}")
+
+    if now and wait:
+        _fail("--now and --wait-for-capacity contradict each other; pick one.")
+    wait = (wait or os.environ.get(WAIT_ENV, "").strip().lower() in ("1", "true", "yes")) and not now
 
     if dry_run:
         try:
@@ -498,16 +504,14 @@ def start(
         except ValueError as exc:
             _fail(str(exc))
         with Store.open_default() as store:
-            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc), now))
+            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc), not wait))
         return
 
-    if now:
+    if wait:
         typer.echo(
-            "--now: running queued jobs immediately, without waiting for spare capacity.\n"
-            "Normally `gtu start` sends work only when BharatCode has a free slot, so your jobs use\n"
-            "capacity nobody else needs. With --now they compete with everyone else's requests and may\n"
-            "wait in BharatCode's queue. Busy answers are still retried politely (up to ~15 min), and\n"
-            "token budgets still apply.\n"
+            "--wait-for-capacity: jobs start only when BharatCode's live stats show a free slot.\n"
+            "On a busy day that can mean hours with nothing sent (see research/gate-vs-send-experiment.md);\n"
+            "without it, work starts now and BharatCode's busy answers are retried politely.\n"
         )
     with Store.open_default() as store:
         folder = store.path.parent
@@ -516,8 +520,8 @@ def start(
             _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
         try:
             # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
-            # again. --now: no gate to do that, so the client's patient retry ladder takes over.
-            client = BharatCodeClient(store=store, retry=RetryPolicy.from_env() if now else RetryPolicy(max_retries=0),
+            # again. Ungated (the default): no gate to do that, so the client's patient retry ladder takes over.
+            client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0) if wait else RetryPolicy.from_env(),
                                       on_retry=lambda message: log(f"  {message}"))
         except ApiKeyMissing as exc:
             _fail(_no_key(exc))
@@ -538,7 +542,7 @@ def start(
                 cli_missing = str(exc)
             scheduler = Scheduler(
                 store, gate, client, cli=BharatCodeCli(timeout=job_config.cli_timeout),
-                budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=now,
+                budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=not wait,
                 should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing,
             )
             steps = scheduler.run(max_steps=max_steps)

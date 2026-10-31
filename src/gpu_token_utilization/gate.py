@@ -22,7 +22,11 @@ from .store import GateReading, Store
 
 USAGE_URL = "https://bharatcode.ai/api/serving/usage"
 IST = timezone(timedelta(hours=5, minutes=30))
-SOURCE_LABELS = {"livestats": "live stats", "fallback": "fallback probes", "own": "own request", "bypass": "--now"}
+SOURCE_LABELS = {"livestats": "live stats", "fallback": "fallback probes", "own": "own request", "bypass": "not waiting"}
+# Waiting for a free slot is opt-in: measured, it cost hours where sending cost seconds
+# (research/gate-vs-send-experiment.md).
+WAIT_ENV = "GTU_WAIT_FOR_CAPACITY"
+BYPASS_PREFIX = "not waiting for capacity; "
 
 
 # Only the fields the gate relies on. Strict: a changed type means the shape changed.
@@ -116,7 +120,7 @@ class Decision:
     reading: GateReading
     next_check: float
     config: GateConfig = field(repr=False)
-    bypassed: bool = False  # made by check_bypassed (`gtu start --now`)
+    bypassed: bool = False  # made by check_bypassed (`gtu start` without --wait-for-capacity)
 
     @property
     def gate_info(self) -> dict:
@@ -128,9 +132,11 @@ class Decision:
         r = self.reading
         via = "" if r.source in ("livestats", "bypass") else f" ({SOURCE_LABELS.get(r.source, r.source)})"
         if self.open:
-            return f"Gate {'ignored (--now)' if self.bypassed else 'open'}{via}: {r.reason.removeprefix('gate ignored (--now); ')}."
+            if self.bypassed:
+                return f"Sending now (not waiting for capacity): {r.reason.removeprefix(BYPASS_PREFIX)}."
+            return f"Gate open{via}: {r.reason}."
         if self.bypassed:
-            return f"Paused: {r.reason}. Trying again in {self.next_check:.0f}s (--now ignores capacity, not busy answers)."
+            return f"Paused: {r.reason}. Trying again in {self.next_check:.0f}s (busy answers are still respected)."
         need = self.config.quiet_needed
         return (
             f"Gate closed{via}: {r.reason}. Next check in {self.next_check:.0f}s "
@@ -198,9 +204,9 @@ class Gate:
         return self._record(self._now(), Signal("own", "busy", reason), force_close=True)
 
     def check_bypassed(self) -> Decision:
-        """For `gtu start --now`: always open, but still read live stats (at most once per poll
-        interval) so every request records the capacity it was sent into. The only pause is a
-        poll interval after BharatCode answered one of our requests busy, so --now never hammers."""
+        """For `gtu start` without --wait-for-capacity: always open, but still read live stats (at
+        most once per poll interval) so every request records the capacity it was sent into. The
+        only pause is a poll interval after BharatCode answered one of our requests busy, so it never hammers."""
         now = self._now()
         last = self.store.last_gate_reading()
         if last is not None:
@@ -215,7 +221,7 @@ class Gate:
         reading = self.store.add_gate_reading(
             GateReading(
                 taken_at=now.isoformat(), source="bypass", verdict=verdict, decision="open",
-                quiet_streak=0, busy_streak=0, reason=f"gate ignored (--now); {live.reason}",
+                quiet_streak=0, busy_streak=0, reason=BYPASS_PREFIX + live.reason,
                 model=self.cfg.model, active=live.active, queued=live.queued, slots=live.slots,
             )
         )

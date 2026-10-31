@@ -25,11 +25,11 @@ from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Command, Store, StoreError
 
 INSTRUCTIONS = (
-    "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo in the "
-    "background when BharatCode has spare capacity, each on its own git branch gtu/<job-id>, never "
-    "touching the user's branch, and keeps going after BharatCode closes. It also knows BharatCode's "
-    "load, so it can say whether now is a good time for heavy work and run any command when there's "
-    "capacity. Relay the tools' answers to the user as they are."
+    "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo, "
+    "unattended in the background, each on its own git branch gtu/<job-id>, never touching the "
+    "user's branch, and keeps going after BharatCode closes. It also knows BharatCode's load, so it "
+    "can say whether now is a busy time and run any command once there's a free slot. Relay the "
+    "tools' answers to the user as they are."
 )
 LAST_NIGHT_HOURS = 24
 
@@ -97,7 +97,7 @@ class SpareTools:
         """Start the background runner unless it's already going. Returns what to tell the user."""
         pid = runstate.running_pid(store.path.parent)
         if pid:
-            return f"spare-gpu's runner (process {pid}) is already going; it picks this up when there's capacity."
+            return f"spare-gpu's runner (process {pid}) is already going; it picks this up next."
         try:
             if find_api_key() is None:
                 return "It can't run yet: no BharatCode API key is set up. Run `gtu setup` in a terminal."
@@ -107,8 +107,8 @@ class SpareTools:
             pid = self._launch(repo)
         except (runner.RunnerError, OSError) as exc:
             return f"Couldn't start the background runner: {exc}"
-        return (f"Started spare-gpu's runner in the background (process {pid}). It sends work only when BharatCode "
-                "has spare capacity, keeps going after you close BharatCode, and stops when the queue is empty.")
+        return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
+                "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
     # --- the seven tools -------------------------------------------------------------------
 
@@ -259,10 +259,10 @@ def build_server(base: Path, tools: SpareTools | None = None):
     def spare_queue_work(type: Literal["tests", "docs", "review"], path: str, note: str | None = None) -> str:
         """Queue a coding chore for spare-gpu to do in the background: write tests, write
         documentation, or review code, for a file or folder in this git repo. The work happens
-        later, on BharatCode's spare capacity, on its own git branch; it doesn't happen in this chat.
+        in the background, unattended, on its own git branch; it doesn't happen in this chat.
 
-        Use it when the user wants tests, docs or a review done later, tonight, overnight or
-        "when there's capacity". Examples: "queue tests for the payments module", "write tests for
+        Use it when the user wants tests, docs or a review done in the background, later, tonight
+        or overnight. Examples: "queue tests for the payments module", "write tests for
         src/payments tonight", "get docs written for utils overnight", "queue a code review of
         app/api.py", "review app/api.py later". Call it straight away: it is the whole job, and it
         checks the path itself.

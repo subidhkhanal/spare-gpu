@@ -57,7 +57,7 @@ def test_scheduler_narrates_the_gate_and_each_step(fake, store, client, make_gat
 
     Scheduler(store, make_gate(), client, plans={"review": [("review", review)]}, sleep=fake.clock.sleep,
               isolate=False, log=logs.append).run()
-    assert logs[0] == "1 job(s) to run. Checking BharatCode's capacity first."
+    assert logs[0] == "1 job(s) to run. Waiting for a free slot first (--wait-for-capacity)."
     closed = [line for line in logs if line.startswith("Gate closed")]
     assert len(closed) == 4  # 2 busy readings, then 2 quiet ones before the third opens it
     assert "Next check in 60s" in closed[0] and "0 so far" in closed[0]

@@ -147,11 +147,12 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
     out.append(f"Total for jobs that would run: ~{_rough(low)}-{_rough(high)} tokens. "
                f"Tonight so far: {night:,} of {budgets.per_night:,}.")
     if ignore_gate:
-        out.append("Gate: ignored (--now); jobs would start immediately.")
+        out.append("Start: immediately; BharatCode's busy answers are retried politely. "
+                   "Add --wait-for-capacity to hold jobs for a free slot instead.")
     else:
         last = store.last_gate_reading()
         seen = f" Last reading ({last.taken_at[11:16]} UTC): {last.reason}." if last else ""
-        out.append(f"Gate: jobs start only when BharatCode has spare capacity.{seen} Use --now to skip waiting.")
+        out.append(f"Start: only once BharatCode's live stats show a free slot (--wait-for-capacity).{seen}")
     try:
         key_found = find_api_key() is not None
     except ApiKeyMissing:

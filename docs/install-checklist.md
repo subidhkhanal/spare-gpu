@@ -42,19 +42,19 @@ In a folder with a small git repo of your own:
    under a minute; a real morning run (08:00–11:00 IST) took 73 s, 60 s of it in BharatCode's queue.
 5. [ ] `gtu add review <that file>` then `gtu start --dry-run` shows the job and a token estimate,
    and sends nothing.
-6. [ ] `gtu start --now` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
+6. [ ] `gtu start` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
    own branch and files are unchanged (`git status` is clean).
 7. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
 
 ## D. Tests and docs jobs (need BharatCode's own CLI)
 
 1. [ ] Before installing the CLI: `gtu add tests <file>` queues the job and says it won't run yet,
-   with the install steps; `gtu check` says "BharatCode CLI: not available"; `gtu start --now`
+   with the install steps; `gtu check` says "BharatCode CLI: not available"; `gtu start`
    runs any review jobs and leaves the tests job **queued** (`gtu list`), not failed.
 2. [ ] Node.js is installed, then (new terminal) `npm.cmd install -g bharatcode` and
    `bharatcode.cmd auth login`. Note whether plain `npm` says "running scripts is disabled".
 3. [ ] `gtu check` says "BharatCode CLI: installed (...) and signed in".
-4. [ ] `gtu start --now`: the queued tests job finishes and its branch contains only passing
+4. [ ] `gtu start`: the queued tests job finishes and its branch contains only passing
    tests (`git show gtu/<job-id> --stat`).
 5. [ ] In another terminal while a job runs: `gtu stop` says it stopped, and `gtu list` shows the
    job as paused, not failed.

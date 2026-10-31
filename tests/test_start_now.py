@@ -1,4 +1,4 @@
-"""`gtu start --now`: ignore the capacity gate, but keep recording capacity and stay polite."""
+"""`gtu start` (the default, once `--now`): ignore the capacity gate, but keep recording capacity and stay polite."""
 
 from datetime import datetime, timezone
 
@@ -45,7 +45,7 @@ def test_bypass_pauses_one_interval_after_a_busy_answer(fake, make_gate):
     gate.force_busy("503 from BharatCode")
     paused = gate.check_bypassed()
     assert not paused.open and paused.next_check == pytest.approx(60)
-    assert "--now ignores capacity, not busy answers" in paused.describe()
+    assert "busy answers are still respected" in paused.describe()
     fake.clock.advance(60)
     assert gate.check_bypassed().open
 
@@ -106,7 +106,7 @@ def full_lane():
 
 
 @respx.mock
-def test_start_now_explains_itself_and_runs_a_review_into_a_full_lane(repo):
+def test_start_runs_a_review_into_a_full_lane_by_default(repo):
     respx.get(USAGE_URL).mock(side_effect=lambda request: full_lane())
     respx.post(f"{BASE_URL}/chat/completions").mock(return_value=httpx.Response(
         200, headers={"x-request-id": "req-now-1"},
@@ -118,15 +118,22 @@ def test_start_now_explains_itself_and_runs_a_review_into_a_full_lane(repo):
     assert added.exit_code == 0, added.output
     job_id = added.output.split()[2].rstrip(":")
 
-    result = runner.invoke(app, ["start", "--now"])
+    result = runner.invoke(app, ["start"])
     assert result.exit_code == 0, result.output
-    assert "--now: running queued jobs immediately" in result.output
-    assert "Normally `gtu start` sends work only when BharatCode has a free slot" in result.output
+    assert "Starting now." in result.output and "Sending now (not waiting for capacity)" in result.output
     assert "Paused" not in result.output
     assert f"gtu-review-{job_id}.md" in git(repo, "ls-tree", "--name-only", "-r", f"gtu/{job_id}")
 
 
-def test_start_without_now_does_not_print_the_note(repo, monkeypatch):
+def test_wait_for_capacity_is_opt_in_and_explains_itself(repo, monkeypatch):
     monkeypatch.delenv("BHARATCODE_API_KEY")
-    result = runner.invoke(app, ["start"])
-    assert "--now: running" not in result.output
+    assert "--wait-for-capacity: jobs start only" not in runner.invoke(app, ["start"]).output
+    assert "--wait-for-capacity: jobs start only" in runner.invoke(app, ["start", "--wait-for-capacity"]).output
+    monkeypatch.setenv("GTU_WAIT_FOR_CAPACITY", "1")
+    assert "--wait-for-capacity: jobs start only" in runner.invoke(app, ["start"]).output
+    assert "--wait-for-capacity: jobs start only" not in runner.invoke(app, ["start", "--now"]).output
+
+
+def test_now_and_wait_for_capacity_together_is_an_error(repo):
+    result = runner.invoke(app, ["start", "--now", "--wait-for-capacity"])
+    assert result.exit_code == 1 and "contradict" in result.output
