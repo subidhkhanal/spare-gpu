@@ -22,7 +22,7 @@ A fixed schedule fires blindly into that. spare-gpu doesn't: it watches BharatCo
 Install BharatCode's CLI if you haven't already (`npm.cmd install -g bharatcode`, `bharatcode.cmd auth login`), then:
 
 ```powershell
-pipx install spare-gpu
+pipx install git+https://github.com/subidhkhanal/spare-gpu
 gtu setkey        # save your BharatCode API key
 gtu integrate      # registers spare-gpu as an MCP server inside BharatCode
 ```
