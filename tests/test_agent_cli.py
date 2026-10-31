@@ -112,3 +112,44 @@ def test_missing_cli_is_a_clear_error(monkeypatch):
     monkeypatch.setattr(agent_cli.shutil, "which", lambda name: None)
     with pytest.raises(CliNotFound, match="npm install -g bharatcode"):
         agent_cli.resolve_command()
+
+
+CRED = agent_cli.CREDENTIAL_ERROR + "."
+
+
+def calls(record):
+    return [json.loads(line) for line in record.read_text().splitlines()]
+
+
+def test_a_credential_error_continues_the_same_session_and_keeps_the_work(tmp_path, scenario):
+    record = scenario(steps=[{"tokens": 1000}], error=CRED, fail_first=1, text="all done")
+    retried = []
+    result = BharatCodeCli(command=FAKE_CLI).run(tmp_path, "write tests", on_retry=retried.append)
+    assert result.ok and result.retries == 1 and retried == [1]
+    assert result.tokens == 2000 and result.text == "all done"  # steps from both calls count
+    first, second = calls(record)
+    assert "--session" not in first["args"] and first["args"][-1] == "write tests"
+    assert second["args"][second["args"].index("--session") + 1] == "ses_fake"
+    assert second["args"][-1] == agent_cli.CONTINUE_PROMPT
+    assert second["config"] == first["config"]  # the permission rules still apply on the retry
+    assert not (tmp_path / agent_cli.CONFIG_FILE).exists()
+
+
+def test_a_credential_error_that_keeps_happening_fails_after_the_last_retry(tmp_path, scenario):
+    record = scenario(steps=[{"tokens": 500}], error=CRED)
+    result = BharatCodeCli(command=FAKE_CLI).run(tmp_path, "write tests")
+    assert not result.ok and agent_cli.CREDENTIAL_ERROR in result.error
+    assert result.retries == agent_cli.CREDENTIAL_RETRIES and len(calls(record)) == agent_cli.CREDENTIAL_RETRIES + 1
+
+
+def test_other_errors_are_not_retried(tmp_path, scenario):
+    record = scenario(steps=[{"tokens": 500}], error="model overloaded", fail_first=1)
+    result = BharatCodeCli(command=FAKE_CLI).run(tmp_path, "write tests")
+    assert not result.ok and result.error == "model overloaded" and result.retries == 0
+    assert len(calls(record)) == 1
+
+
+def test_the_token_budget_covers_the_retries_too(tmp_path, scenario):
+    scenario(steps=[{"tokens": 1000}], error=CRED, fail_first=1)
+    result = BharatCodeCli(command=FAKE_CLI).run(tmp_path, "write tests", token_budget=1500)
+    assert result.stopped == "budget" and result.tokens == 2000

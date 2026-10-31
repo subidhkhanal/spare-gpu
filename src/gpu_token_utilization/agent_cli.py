@@ -7,6 +7,8 @@ Safeguards, all enforced here:
 - a deny-first opencode.json allows editing plus an allowlist of commands only, and no web
   fetching. BharatCode applies the last matching rule, so "*": "deny" must come first;
 - one CLI call per job step, killed if it runs past its timeout;
+- if BharatCode fails to read its own sign-in mid-step, the same session is continued
+  (`--session`, up to 8 times) instead of failing the job and losing its work;
 - tokens are read from each `step_finish` event as it streams in, reported straight away,
   and the CLI is killed as soon as the budget for the step is used up.
 
@@ -34,6 +36,12 @@ from .api import env_without_key
 DEFAULT_MODEL = "bharatcode/qwen-3.8-27b"
 CMD_ENV = "GTU_BHARATCODE_CMD"
 CONFIG_FILE = "opencode.json"
+
+# BharatCode's CLI (1.15.46) sometimes fails this way at the start of a step, reading its own
+# sign-in, while the session itself is fine. Seen on 31 Oct even without --pure.
+CREDENTIAL_ERROR = "Credential store permissions or access could not be verified"
+CREDENTIAL_RETRIES = 8  # each continued process often gets only a step or two done; budget and timeout still cap it
+CONTINUE_PROMPT = "Continue the task from where you left off."
 
 
 CLI_KINDS = ("tests", "docs")  # job kinds that run the CLI; review talks to the API directly
@@ -139,6 +147,7 @@ class CliResult:
     tools: list[str] = field(default_factory=list)
     error: str | None = None
     stopped: str | None = None  # "timeout", "budget" or "stop" when we killed it
+    retries: int = 0  # times the session was continued after BharatCode's credential error
 
     @property
     def tokens(self) -> int:
@@ -183,12 +192,39 @@ class BharatCodeCli:
         token_budget: int | None = None,
         on_step: Callable[[CliStep], None] = lambda step: None,
         should_stop: Callable[[], bool] = lambda: False,
+        on_retry: Callable[[int], None] = lambda attempt: None,
     ) -> CliResult:
         workdir = Path(workdir)
         command = self.command or resolve_command()
         config = workdir / CONFIG_FILE
         config.write_text(json.dumps(permission_config(edit, commands), indent=2), encoding="utf-8")
-        args = [*command, "run", "--dir", str(workdir), "-m", self.model, "--format", "json", prompt]
+        result = CliResult(exit_code=None, text="")
+        texts: list[str] = []
+        deadline = time.monotonic() + self.timeout
+        try:
+            session = self._attempt(command, workdir, prompt, None, result, texts, deadline, token_budget,
+                                    on_step, should_stop)
+            # BharatCode sometimes fails to read its own sign-in at the start of a step. The work so
+            # far is in its session, so carry on there instead of failing the job.
+            while (result.retries < CREDENTIAL_RETRIES and session and not result.stopped
+                   and CREDENTIAL_ERROR in (result.error or "")):
+                result.retries += 1
+                result.error = None
+                on_retry(result.retries)
+                session = self._attempt(command, workdir, CONTINUE_PROMPT, session, result, texts, deadline,
+                                        token_budget, on_step, should_stop) or session
+        finally:
+            config.unlink(missing_ok=True)
+        result.text = "\n".join(t for t in texts if t).strip()
+        return result
+
+    def _attempt(self, command, workdir, message, session, result, texts, deadline, token_budget,
+                 on_step, should_stop) -> str | None:
+        """One `bharatcode run`, adding to `result`. Returns the CLI session id it reported."""
+        args = [*command, "run", "--dir", str(workdir), "-m", self.model, "--format", "json"]
+        if session:
+            args += ["--session", session]
+        args.append(message)
         kwargs: dict = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -203,10 +239,8 @@ class BharatCodeCli:
         threading.Thread(target=_pump, args=(proc.stdout, lines), daemon=True).start()
         threading.Thread(target=lambda: stderr.extend(proc.stderr), daemon=True).start()
 
-        result = CliResult(exit_code=None, text="")
-        texts: list[str] = []
+        seen_session: str | None = None
         step_started: float | None = None
-        deadline = time.monotonic() + self.timeout
         try:
             while True:
                 left = deadline - time.monotonic()
@@ -227,6 +261,7 @@ class BharatCodeCli:
                 except ValueError:
                     continue
                 kind, part = event.get("type"), event.get("part") or {}
+                seen_session = event.get("sessionID") or part.get("sessionID") or seen_session
                 if kind == "step_start":
                     step_started = event.get("timestamp")
                 elif kind == "step_finish":
@@ -262,8 +297,6 @@ class BharatCodeCli:
             except subprocess.TimeoutExpired:
                 _kill_tree(proc)
                 result.exit_code = proc.wait()
-            config.unlink(missing_ok=True)
-        result.text = "\n".join(t for t in texts if t).strip()
         if result.exit_code not in (0, None) and not result.error and not result.stopped:
             result.error = ("".join(stderr).strip() or f"exited with code {result.exit_code}")[:300]
-        return result
+        return seen_session

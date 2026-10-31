@@ -4,7 +4,11 @@ A real process that prints the same JSON events and edits files in --dir, script
 JSON scenario file named in GTU_FAKE_CLI_SCENARIO:
 
   {"steps": [{"tokens": 1000, "writes": {"tests/test_x.py": "..."}, "sleep": 0}],
-   "error": null, "exit": 0, "text": "done", "record": "<file to append each call's args and config to>"}
+   "error": null, "exit": 0, "text": "done", "record": "<file to append each call's args and config to>",
+   "fail_first": 0}
+
+With "fail_first": n, the first n calls end with "error" and the later ones succeed, like
+BharatCode's intermittent credential error followed by a continued session (needs "record").
 
 Run it as: python -m gpu_token_utilization.fakecli run --dir <dir> ... <prompt>
 """
@@ -48,6 +52,8 @@ def main(args: list[str]) -> int:
             fh.write(json.dumps(entry) + "\n")
 
     session = "ses_fake"
+    calls = len(Path(scenario["record"]).read_text(encoding="utf-8").splitlines()) if scenario.get("record") else 1
+    failing = bool(scenario.get("error")) and (not scenario.get("fail_first") or calls <= scenario["fail_first"])
     for step in scenario.get("steps", [{"tokens": 1000}]):
         emit({"type": "step_start", "timestamp": int(time.time() * 1000), "sessionID": session, "part": {}})
         for path, content in (step.get("writes") or {}).items():
@@ -62,7 +68,7 @@ def main(args: list[str]) -> int:
         emit({"type": "step_finish", "timestamp": int(time.time() * 1000), "sessionID": session,
               "part": {"reason": "tool-calls", "tokens": {"total": total, "input": total - 50, "output": 50,
                                                           "reasoning": 0, "cache": {"read": 0, "write": 0}}}})
-    if scenario.get("error"):
+    if failing:
         emit({"type": "error", "sessionID": session, "error": {"name": "UnknownError", "data": {"message": scenario["error"]}}})
         return scenario.get("exit", 1)
     emit({"type": "text", "sessionID": session, "part": {"text": scenario.get("text", "done")}})

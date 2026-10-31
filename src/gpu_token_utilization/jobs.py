@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import worktree
-from .agent_cli import CONFIG_FILE, CliNotFound, CliResult
+from .agent_cli import CONFIG_FILE, CREDENTIAL_RETRIES, CliNotFound, CliResult
 from .api import env_without_key
 from .budget import BudgetExceeded
 from .client import BharatCodeError, BusyError
@@ -190,8 +190,12 @@ def run_cli(ctx: StepContext, prompt: str, *, edit: bool, commands: tuple[str, .
     budget = ctx.budget_remaining()
     if budget <= 0:
         raise BudgetExceeded("token budget used up before the CLI could start")
-    result = ctx.cli.run(ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget,
-                         on_step=ctx.log_cli_step, should_stop=ctx.should_stop)
+    result = ctx.cli.run(
+        ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget, on_step=ctx.log_cli_step,
+        should_stop=ctx.should_stop,
+        on_retry=lambda n: ctx.log(f"  BharatCode couldn't read its own sign-in; continuing the same session "
+                                   f"(retry {n} of {CREDENTIAL_RETRIES})."),
+    )
     if result.stopped == "stop":
         raise StopRequested("stopped by `gtu stop`")
     if result.stopped == "budget":
