@@ -68,6 +68,18 @@ Three more one-step runs, same prompt, spare-gpu's MCP server off:
 
 The source (BharatCode CLI 1.15.46, `packages/opencode/src/session/system.ts`) confirms that the environment block has no file tree or repo map. It has only the working directory, whether it's a git repo, the platform and the date.
 
+### Claude Code skills ride along in every request
+
+BharatCode's CLI is a fork of OpenCode, and it inherits OpenCode's Claude Code compatibility.
+
+- **Where it looks.** At startup it scans `~/.claude/skills` and `~/.agents/skills`, plus any `.claude/skills` or `.agents/skills` folder between the working directory and the repo root (`packages/opencode/src/skill/index.ts`).
+- **What it sends.** Every skill it finds is listed in each request: once in the system prompt, in a verbose form, and again in the `skill` tool's description.
+- **When.** This happens whether or not the task has anything to do with the skills. A user who has installed Claude Code skills pays for them on every BharatCode CLI step, often without knowing.
+
+**Cost on this machine.** 16 skills cost **3,504 tokens per step**: 11,536 tokens with them, 8,032 without. That's about **30% of the fixed per-step overhead**. Over a 7-step job it comes to roughly 24k tokens. The cost grows with the number of skills and the length of their descriptions, so it varies by machine.
+
+**Turning it off.** The CLI reads `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, which turns off both folders. `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` turns off only `~/.claude/skills`. Skills in BharatCode's own config folder still load either way.
+
 ## What this changed in spare-gpu
 
 - `spare_token_cost` / `gtu cost` now count the measured 11,500-token floor of each BharatCode CLI
@@ -75,6 +87,13 @@ The source (BharatCode CLI 1.15.46, `packages/opencode/src/session/system.ts`) c
   `GTU_CLI_OVERHEAD_TOKENS` to use your own measurement.
 - spare-gpu's tests and docs jobs run BharatCode's CLI with spare-gpu's own MCP server switched
   off. Before this, every job step paid the extra ~2.3k for tools the job never needed.
+- Since 31 Oct, job runs also set `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`. A job never uses the
+  user's Claude Code skills, and on the machine measured they cost 3,504 tokens per step, about
+  30% of the per-step overhead (11.5k down to 8.0k). Users who run `bharatcode` themselves keep
+  their skills; only spare-gpu's job runs drop them.
+- `gtu cost` still counts 11,500 tokens per step as fixed overhead by default. Since this change,
+  job steps start nearer 8,000, so for new jobs set `GTU_CLI_OVERHEAD_TOKENS=8000` to avoid
+  overstating overhead.
 
 ## Limits
 

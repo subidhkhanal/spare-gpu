@@ -6,6 +6,8 @@ Safeguards, all enforced here:
   permissions or access could not be verified" (checked on 31 Oct, CLI 1.15.46);
 - a deny-first opencode.json allows editing plus an allowlist of commands only, and no web
   fetching. BharatCode applies the last matching rule, so "*": "deny" must come first;
+- the CLI's skills from ~/.claude/skills and ~/.agents/skills are switched off: it lists every one
+  in every request (3.5k tokens a step on the machine measured), and a job never uses them;
 - one CLI call per job step, killed if it runs past its timeout;
 - if BharatCode fails to read its own sign-in mid-step, the same session is continued
   (`--session`, up to 8 times) instead of failing the job and losing its work;
@@ -42,6 +44,9 @@ CONFIG_FILE = "opencode.json"
 CREDENTIAL_ERROR = "Credential store permissions or access could not be verified"
 CREDENTIAL_RETRIES = 8  # each continued process often gets only a step or two done; budget and timeout still cap it
 CONTINUE_PROMPT = "Continue the task from where you left off."
+# Measured 31 Oct: 16 Claude Code skills cost 3,504 tokens per step, about 30% of the fixed overhead
+# (research/token-overhead.md). spare-gpu's own MCP server is switched off in permission_config.
+JOB_ENV = {"OPENCODE_DISABLE_EXTERNAL_SKILLS": "1"}
 
 
 CLI_KINDS = ("tests", "docs")  # job kinds that run the CLI; review talks to the API directly
@@ -232,7 +237,7 @@ class BharatCodeCli:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             args, cwd=workdir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", env=env_without_key(), **kwargs,
+            text=True, encoding="utf-8", errors="replace", env={**env_without_key(), **JOB_ENV}, **kwargs,
         )
         lines: queue.Queue = queue.Queue()
         stderr: list[str] = []

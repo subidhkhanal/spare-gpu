@@ -64,6 +64,13 @@ def test_no_commands_means_no_shell_at_all():
     assert permission_config(edit=False, commands=())["permission"]["edit"] == "deny"
 
 
+def test_jobs_switch_the_users_external_skills_off(tmp_path, scenario):
+    # measured: 16 Claude Code skills from ~/.claude/skills add ~3.5k tokens to every CLI step
+    record = scenario()
+    BharatCodeCli(command=FAKE_CLI).run(tmp_path, "x")
+    assert json.loads(record.read_text().splitlines()[0])["skills_off"] is True
+
+
 def test_jobs_switch_spare_gpus_own_mcp_server_off():
     # measured: its tool schemas add ~2.3k tokens to every CLI step, and a job shouldn't queue jobs
     assert permission_config(edit=True, commands=())["mcp"]["spare-gpu"]["enabled"] is False
