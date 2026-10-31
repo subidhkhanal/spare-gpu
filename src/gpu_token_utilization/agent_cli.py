@@ -1,7 +1,9 @@
 """Drives BharatCode's own CLI (`bharatcode run`) as the worker for tests and docs jobs.
 
 Safeguards, all enforced here:
-- it only ever runs in the job's worktree (`--dir`), with `--pure` (no global plugins);
+- it only ever runs in the job's worktree (`--dir`). Not with `--pure`: that also drops the
+  plugin BharatCode signs in with, and every step after the first fails with "Credential store
+  permissions or access could not be verified" (checked on 31 Oct, CLI 1.15.46);
 - a deny-first opencode.json allows editing plus an allowlist of commands only, and no web
   fetching. BharatCode applies the last matching rule, so "*": "deny" must come first;
 - one CLI call per job step, killed if it runs past its timeout;
@@ -186,7 +188,7 @@ class BharatCodeCli:
         command = self.command or resolve_command()
         config = workdir / CONFIG_FILE
         config.write_text(json.dumps(permission_config(edit, commands), indent=2), encoding="utf-8")
-        args = [*command, "run", "--pure", "--dir", str(workdir), "-m", self.model, "--format", "json", prompt]
+        args = [*command, "run", "--dir", str(workdir), "-m", self.model, "--format", "json", prompt]
         kwargs: dict = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP

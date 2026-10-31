@@ -34,12 +34,13 @@ def test_reports_tokens_text_and_tools(tmp_path, scenario):
     assert result.tools[0].startswith("edit ") and (tmp_path / "a.py").exists()
 
 
-def test_runs_pure_in_the_given_dir_and_passes_the_prompt_untouched(tmp_path, scenario):
+def test_runs_in_the_given_dir_and_passes_the_prompt_untouched(tmp_path, scenario):
     record = scenario()
     prompt = 'Write tests & docs | for "x" > y %PATH% $(rm -rf /)'
     BharatCodeCli(command=FAKE_CLI, model="bharatcode/qwen-3.8-27b").run(tmp_path, prompt)
     args = json.loads(record.read_text().splitlines()[0])["args"]
-    assert args[:2] == ["run", "--pure"]
+    assert args[0] == "run"
+    assert "--pure" not in args  # it drops BharatCode's sign-in plugin; later steps then fail
     assert args[args.index("--dir") + 1] == str(tmp_path)
     assert args[args.index("-m") + 1] == "bharatcode/qwen-3.8-27b"
     assert args[args.index("--format") + 1] == "json"
