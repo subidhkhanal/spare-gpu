@@ -1,6 +1,6 @@
 """MCP server: spare-gpu as tools an agent can call (BharatCode's CLI, or any MCP client).
 
-Started with `gtu mcp`, over stdio. Eight tools, each shaped around a task the user wants done
+Started with `gtu mcp`, over stdio. Seven tools, each shaped around a task the user wants done
 rather than around our internal functions. Selection accuracy drops as tool count grows and when
 tools overlap, so related questions are merged (one status tool answers "what's queued", "is it
 done" and "why isn't it running"). Each tool is a thin wrapper over the code the matching `gtu`
@@ -32,6 +32,9 @@ INSTRUCTIONS = (
     "Relay the tools' answers to the user as they are."
 )
 LAST_NIGHT_HOURS = 24
+# Desktop already shows each session's tokens in detail; spare-gpu points there rather than estimate.
+SESSION_DETAIL = ("Each job runs as a BharatCode Desktop session named \"spare-gpu: ...\"; open it in Desktop "
+                  "for its full token breakdown.")
 
 
 class NoStore(Exception):
@@ -52,7 +55,7 @@ def db_path(root: Path) -> Path:
 
 
 class SpareTools:
-    """The eight tools as plain functions returning text, for one project folder."""
+    """The seven tools as plain functions returning text, for one project folder."""
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
@@ -122,7 +125,7 @@ class SpareTools:
         return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
                 "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
-    # --- the eight tools -------------------------------------------------------------------
+    # --- the seven tools -------------------------------------------------------------------
 
     def queue_work(self, kind: str, path: str, note: str | None = None, start: bool = True) -> str:
         try:
@@ -179,6 +182,8 @@ class SpareTools:
                          "starts it, or run `gtu start`.")
         if decision is not None:
             lines.append(("Capacity: " if decision.open else "Why it isn't running yet: ") + decision.describe())
+        if jobs:
+            lines.append(SESSION_DETAIL)
         return "\n".join(lines)
 
     def last_night(self, hours: float | None = None) -> str:
@@ -207,10 +212,11 @@ class SpareTools:
                 f"took {reporting._span(r.duration)}, {r.tokens:,} tokens. Produced: {made or 'nothing committed'}."
                 + tests + (f" See it with: git diff HEAD...{worktree.branch_name(j.id)}" if r.files else "")
             )
-        waits = sorted(w for r in reports for w in r.queue_waits_ms)
-        if waits:
-            lines.append(f"BharatCode held these requests in its queue for {waits[len(waits) // 2] / 1000:.1f} s "
-                         f"(median), {waits[-1] / 1000:.1f} s at most.")
+        held = sorted(w for r in reports for w in r.queue_waits_ms)
+        if held:
+            lines.append(f"BharatCode held these requests in its queue for {held[len(held) // 2] / 1000:.1f} s "
+                         f"(median), {held[-1] / 1000:.1f} s at most.")
+        lines.append(SESSION_DETAIL)
         return "\n".join(lines)
 
     def cancel_work(self, work_id: str) -> str:
@@ -268,13 +274,6 @@ class SpareTools:
             lines.append(outcome.note)
         lines += [runner_line, "spare_work_status shows progress; spare_last_night shows what it produced."]
         return "\n".join(lines)
-
-    def token_cost(self, scope: str | None = None) -> str:
-        try:
-            with self._open() as store:
-                return costs.describe(store, scope)
-        except NoStore as exc:
-            return str(exc)
 
     def run_when_free(self, command: str) -> str:
         try:
@@ -342,7 +341,8 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
         Use it for a summary of results: "what did spare-gpu do last night?", "what got done?",
         "show me the overnight results". For one job's state ("is my tests job done?") or work still
-        queued or running, use spare_work_status; for a token breakdown, spare_token_cost.
+        queued or running, use spare_work_status. Also answers "what did last night cost?": it gives
+        the token totals and the budget used.
 
         Args:
             hours: How far back to look. Leave it out for the last 24 hours ("last night", "today");
@@ -402,22 +402,6 @@ def build_server(base: Path, tools: SpareTools | None = None):
                 "deepseek-v4.1-flash"); it's the one the task would otherwise use.
         """
         return tools.delegate(type, path, note, your_model)
-
-    @server.tool(annotations=notes(True))
-    def spare_token_cost(scope: str | None = None) -> str:
-        """What spare-gpu's work actually consumed in tokens, split into BharatCode CLI overhead
-        (the input the CLI re-sends on every step, mostly its own system prompt) and the work
-        itself, with the biggest jobs listed.
-
-        Use it when the question is about tokens or cost rather than results: "how many tokens did
-        that cost?", "what did last night cost?", "how much of it was CLI overhead?", "how expensive
-        was job 1a2b3c4d?". For what the work produced, use spare_last_night.
-
-        Args:
-            scope: A job id for one job; a number of hours, e.g. "24" (the default, also for "last
-                night" or "today") or "168" for a week; or "all".
-        """
-        return tools.token_cost(scope)
 
     @server.tool(annotations=notes(False, world=True))
     def spare_run_when_free(command: str) -> str:

@@ -46,12 +46,13 @@ Then restart BharatCode Desktop. No API key is needed: jobs run through Desktop'
 | "write tests for src/pay.py on whichever model is free", "get this reviewed now, don't wait in the queue" | `spare_delegate`: hands the task to the model that will start it sooner, if that's safe for the task type; returns the branch and why that model |
 | "how long is DeepSeek's queue?", "is now a good time for a big refactor?" | `spare_waits`: each model's measured waits, free slots, your own recent waits and what's usual at this hour, then which would start sooner |
 | "what's queued?", "is my tests job done?" | Queued, running and finished work, and which model each job runs on |
-| "what did spare-gpu do last night?" | What ran, what it produced, what it cost |
+| "what did spare-gpu do last night?", "what did it cost?" | What ran, what it produced, its tokens, and how much of tonight's token budget is used |
 | "cancel the docs job" | Cancels it |
-| "how much of that was overhead?" | Tokens per job, split into fixed per-step overhead and the actual task |
 | "run the test suite when BharatCode is free" | Runs a test, build or lint command once BharatCode shows a free slot |
 
 Every job lands on its own git branch (`gtu/<job-id>`). Your checkout is only ever read, and nothing touches `main` until you say so.
+
+For one job's token detail (input, output, cached, reasoning, and a breakdown by message type), open its "spare-gpu: …" session in Desktop: Desktop measures that itself. spare-gpu adds the totals across jobs and nights, and per-job and per-night token budgets that stop a job rather than just report it.
 
 ## Wait-aware routing
 

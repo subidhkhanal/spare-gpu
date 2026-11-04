@@ -82,18 +82,18 @@ BharatCode's CLI is a fork of OpenCode, and it inherits OpenCode's Claude Code c
 
 ## What this changed in spare-gpu
 
-- `spare_token_cost` / `gtu cost` now count the measured 11,500-token floor of each BharatCode CLI
-  step as overhead and report the overhead multiplier (total / task). Set
-  `GTU_CLI_OVERHEAD_TOKENS` to use your own measurement.
+- `spare_token_cost` / `gtu cost` used to count the measured 11,500-token floor of each BharatCode
+  CLI step as overhead and report an overhead multiplier. Removed on 4 Nov: jobs now run as
+  BharatCode Desktop sessions, and Desktop shows each session's tokens measured (input, output,
+  cached, reasoning, by message type), where this split was an estimate.
 - spare-gpu's tests and docs jobs run BharatCode's CLI with spare-gpu's own MCP server switched
   off. Before this, every job step paid the extra ~2.3k for tools the job never needed.
 - Since 31 Oct, job runs also set `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`. A job never uses the
   user's Claude Code skills, and on the machine measured they cost 3,504 tokens per step, about
   30% of the per-step overhead (11.5k down to 8.0k). Users who run `bharatcode` themselves keep
   their skills; only spare-gpu's job runs drop them.
-- `gtu cost` still counts 11,500 tokens per step as fixed overhead by default. Since this change,
-  job steps start nearer 8,000, so for new jobs set `GTU_CLI_OVERHEAD_TOKENS=8000` to avoid
-  overstating overhead.
+- Inside Desktop the environment variable can't be set for the server, so the job's permission
+  file denies "skill" instead, which also drops the skill list from the prompt.
 
 ## Limits
 

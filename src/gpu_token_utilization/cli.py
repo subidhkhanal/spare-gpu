@@ -652,15 +652,6 @@ def report(
     typer.echo(f"Saved to {out}")
 
 
-@app.command()
-def cost(scope: str = typer.Argument(None, help="A job id, a number of hours (default 24), or 'all'.")) -> None:
-    """What work cost in tokens, including BharatCode CLI overhead."""
-    from . import costs
-
-    with Store.open_default() as store:
-        typer.echo(costs.describe(store, scope))
-
-
 def waits_cmd() -> None:
     """How long work would wait on each BharatCode model right now, and which would start sooner."""
     from .mcp_server import SpareTools
