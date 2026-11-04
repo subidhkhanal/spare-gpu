@@ -58,10 +58,15 @@ def repo_root(path: Path) -> Path:
     return Path(proc.stdout.strip())
 
 
+# spare-gpu's own folder never counts as a change to the user's repo. It normally ignores itself
+# (.gtu/.gitignore), but a user can create it first, e.g. to write .gtu/switch-safe.
+OWN_FILES = ("--", ".", ":(exclude).gtu")
+
+
 def ensure_clean(repo: Path) -> None:
     """Refuse to start work on a repo with uncommitted changes or untracked files."""
     repo_root(repo)
-    status = _git(Path(repo), "status", "--porcelain").stdout.strip()
+    status = _git(Path(repo), "status", "--porcelain", *OWN_FILES).stdout.strip()
     if status:
         shown = "\n".join("  " + line for line in status.splitlines()[:10])
         raise GitError(

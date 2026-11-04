@@ -77,7 +77,7 @@ def test_cli_steps_are_narrated_as_they_finish(git_repo, store, client, make_gat
     logs = []
     Scheduler(store, make_gate(), client, cli=BharatCodeCli(command=FAKE_CLI, timeout=60), budgets=Budgets(),
               config=JobConfig(), sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
-    assert any("step 1 of 2 (write) started: the BharatCode CLI is working on it" in line for line in logs)
+    assert any("step 1 of 2 (write) started: BharatCode CLI is working on it (Qwen 3.8 27B)" in line for line in logs)
     cli_lines = [line for line in logs if "BharatCode CLI finished a step" in line]
     assert len(cli_lines) == 2 and "(11,500 tokens)" in cli_lines[0] and "(300 tokens)" in cli_lines[1]
     assert any("step 2 of 2 (verify) started: running locally." in line for line in logs)

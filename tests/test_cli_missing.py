@@ -99,4 +99,4 @@ def test_without_the_cli_tests_and_docs_jobs_wait_and_review_still_runs(fake, st
     assert git(git_repo, "branch", "--list", f"gtu/{tests_job.id}") == ""
     text = "\n".join(logs)
     assert f"Job {tests_job.id} (tests): skipped" in text and "stays queued" in text
-    assert "2 job(s) are waiting for BharatCode's CLI" in text and "npm install -g bharatcode" in text
+    assert "2 job(s) are waiting for BharatCode Desktop" in text and "npm install -g bharatcode" in text

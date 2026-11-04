@@ -15,15 +15,15 @@ import httpx
 import mcp
 import pytest
 
-from gpu_token_utilization import freerun
+from gpu_token_utilization import freerun, waits
 from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 from conftest import git
 
-TOOLS = {"spare_queue_work", "spare_work_status", "spare_last_night", "spare_cancel_work",
-         "spare_capacity_advice", "spare_token_cost", "spare_run_when_free"}
+TOOLS = {"spare_queue_work", "spare_delegate", "spare_waits", "spare_work_status", "spare_last_night",
+         "spare_cancel_work", "spare_run_when_free"}
 KEY = "bc_live_test_key_not_real"
 
 
@@ -52,7 +52,9 @@ def tools(git_repo, fake, started):
         started["commands"].append(cmd.command)
         return None  # no real waiter
 
-    return SpareTools(git_repo, make_gate=gate, launch=launch, start_command=start_command)
+    # wait figures from the fake too: its live stats, and no queue-waits endpoint (so "no data")
+    return SpareTools(git_repo, make_gate=gate, launch=launch, start_command=start_command,
+                      http=lambda: httpx.Client(transport=fake.transport()))
 
 
 def readable(text: str) -> bool:
@@ -208,44 +210,27 @@ def test_cancel_work_cancels_a_waiting_command(tools, git_repo):
         assert store.get_command(cmd.id).status == "cancelled"
 
 
-# --- spare_capacity_advice --------------------------------------------------------------------
+# --- spare_waits -------------------------------------------------------------------------------
 
-def test_capacity_advice_quotes_our_measured_waits(tools, git_repo, fake):
-    for wait in (31000, 35000, 40000):
-        finished_review(git_repo, tools, wait_ms=wait)
+@pytest.fixture
+def fresh_waits():
+    waits._cache.clear()
+    yield
+    waits._cache.clear()
+
+
+def test_waits_report_the_live_lane_and_say_when_they_cant_compare(tools, fake, fresh_waits):
     fake.usage_busy(1)
-    text = tools.capacity_advice()
-    assert readable(text) and text.startswith("Waits are elevated right now: median 35.0 s over our last 3 requests")
-    assert "4 of 4 slots busy" in text and "context, not a forecast" in text and "spare_run_when_free" in text
+    text = tools.waits()
+    assert readable(text) and "Qwen 3.8 27B: no free slot (4/4 busy, 6 queued)." in text
+    assert "DeepSeek V4.1 Flash: no data right now." in text and "Not enough data to compare" in text
 
 
-def test_capacity_advice_without_a_store_says_it_does_not_know(git_repo, fake):
+def test_waits_need_no_store_and_create_none(git_repo, fake, fresh_waits):
     gate = lambda store: Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
                               http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
-    text = SpareTools(git_repo, make_gate=gate).capacity_advice()
-    assert text.startswith("Not enough recent data") and "No measured waits at all yet" in text
-    assert not (git_repo / ".gtu").exists()  # advice needs no store and creates none
-
-
-# --- spare_token_cost -------------------------------------------------------------------------
-
-def test_token_cost_splits_cli_overhead_from_the_work(tools, git_repo):
-    review = finished_review(git_repo, tools, tokens=500)
-    tools.queue_work("tests", "src")
-    with Store(db_path(git_repo)) as store:
-        tests = store.list_jobs()[-1]
-        for _ in range(2):
-            store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, status_code=None, prompt_tokens=11500,
-                                         completion_tokens=300, total_tokens=11800, job_id=tests.id))
-    text = tools.token_cost()
-    assert readable(text) and "Tokens used in the last 24 hours: 24,100. Overhead 23,000, task 1,100" in text
-    assert "overhead multiplier 21.9x" in text  # 24,100 / 1,100
-    assert "BharatCode CLI (tests and docs jobs): 23,600 over 2 step(s)" in text and "~11,500 tokens per step" in text
-    assert "Direct requests (reviews, checks): 500 over 1 request(s)" in text and "about 1.0x" in text
-    assert f"{tests.id} 23,600 (39.3x)" in text and "Can't separate exactly" in text
-    assert tools.token_cost(review.id).startswith(f"Tokens used in job {review.id} (review src): 500.")
-    assert "Tokens used in all time" in tools.token_cost("all")
-    assert "Give a job id" in tools.token_cost("nope1234")
+    text = SpareTools(git_repo, make_gate=gate, http=lambda: httpx.Client(transport=fake.transport())).waits()
+    assert readable(text) and not (git_repo / ".gtu").exists()
 
 
 # --- spare_run_when_free ----------------------------------------------------------------------
@@ -344,7 +329,7 @@ def test_a_command_cancelled_while_waiting_never_runs(tools, git_repo, fake):
 # --- missing store ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("call", [lambda t: t.work_status(), lambda t: t.last_night(),
-                                  lambda t: t.cancel_work("1234abcd"), lambda t: t.token_cost()])
+                                  lambda t: t.cancel_work("1234abcd")])
 def test_without_a_store_tools_explain_and_create_nothing(call, git_repo, tools):
     text = call(tools)
     assert "hasn't been used in this project yet" in text and "spare_queue_work" in text
@@ -367,10 +352,10 @@ def test_protocol_offers_exactly_seven_task_shaped_tools(tools, git_repo):
     for name, phrase, neighbour in [
         ("spare_queue_work", "queue tests for the payments module", "spare_run_when_free"),
         ("spare_work_status", "why hasn't my job started?", "spare_last_night"),
-        ("spare_last_night", "what did spare-gpu do last night?", "spare_token_cost"),
+        ("spare_last_night", "what did spare-gpu do last night?", "spare_work_status"),
         ("spare_cancel_work", "cancel the docs job", "spare_work_status"),
-        ("spare_capacity_advice", "is now a good time to run a big refactor?", "spare_run_when_free"),
-        ("spare_token_cost", "how much of it was CLI overhead?", "spare_last_night"),
+        ("spare_waits", "is now a good time to run a big refactor?", "spare_delegate"),
+        ("spare_delegate", "write tests for src/pay.py on whichever model is free", "spare_queue_work"),
         ("spare_run_when_free", "run the test suite when BharatCode is free", "spare_queue_work"),
     ]:
         description = " ".join(listed[name].description.split())

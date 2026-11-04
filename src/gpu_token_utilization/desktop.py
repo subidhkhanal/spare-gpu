@@ -37,6 +37,7 @@ HEALTH = "/global/health"
 # runner -> its launcher -> MCP server -> its launcher -> Desktop's server process -> Desktop
 ANCESTORS = 6
 WEAK_CANDIDATES = 8  # ports with little evidence of being a server, tried after the likely ones
+POLL_RETRIES = 5  # dropped connections in a row while following a session before giving up
 
 
 DESKTOP_NEEDED = ("Tests and docs jobs run inside BharatCode Desktop: open this project in Desktop and ask "
@@ -275,14 +276,25 @@ class DesktopAgent:
     def _follow(self, http, session, where, result, token_budget, on_step, should_stop) -> None:
         deadline = self._clock() + self.timeout
         seen: set[str] = set()
+        dropped = 0
         while True:
-            self._sleep(self.poll)
-            messages = http.get(f"/session/{session}/message", params=where)
-            messages.raise_for_status()
-            finished = self._read(messages.json(), seen, result, on_step)
-            # Each step is its own assistant message, so a completed one doesn't mean the agent is
-            # done; the session's status does. Idle sessions are left out of the status map.
-            busy = finished and session in self._statuses(http, where)
+            self._sleep(self.poll * (2 ** dropped))
+            try:
+                messages = http.get(f"/session/{session}/message", params=where)
+                messages.raise_for_status()
+                finished = self._read(messages.json(), seen, result, on_step)
+                # Each step is its own assistant message, so a completed one doesn't mean the agent
+                # is done; the session's status does. Idle sessions are left out of the status map.
+                busy = finished and session in self._statuses(http, where)
+            except httpx.TransportError:
+                # A dropped local connection (seen 4 Nov: WinError 10054 mid-job while Desktop's
+                # server carried on) isn't a failed job: the session keeps going, so look again.
+                dropped += 1
+                if dropped > POLL_RETRIES:
+                    self._abort(http, session, where)
+                    raise
+                continue
+            dropped = 0
             done = finished and not busy
             if token_budget is not None and result.tokens >= token_budget:
                 result.stopped = "budget"
@@ -291,10 +303,18 @@ class DesktopAgent:
             elif self._clock() > deadline:
                 result.stopped = "timeout"
             if result.stopped:
-                http.post(f"/session/{session}/abort", params=where)
+                self._abort(http, session, where)
                 return
             if done:
                 return
+
+    @staticmethod
+    def _abort(http, session, where) -> None:
+        """Stop the session, best effort: a job spare-gpu gave up on shouldn't keep spending tokens."""
+        try:
+            http.post(f"/session/{session}/abort", params=where)
+        except httpx.HTTPError:
+            pass
 
     @staticmethod
     def _statuses(http, where) -> dict:

@@ -402,7 +402,8 @@ class Scheduler:
         if not self.isolate:
             return None
         repo = Path(job.repo)
-        return worktree._git(repo, "rev-parse", "HEAD").stdout, worktree._git(repo, "status", "--porcelain").stdout
+        return (worktree._git(repo, "rev-parse", "HEAD").stdout,
+                worktree._git(repo, "status", "--porcelain", *worktree.OWN_FILES).stdout)
 
     def _undo_step(self, job: Job, workdir: Path) -> None:
         """Put an unfinished step back to pending and drop its edits, so it reruns cleanly."""

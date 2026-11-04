@@ -197,6 +197,27 @@ def test_integrate_prints_the_snippet_when_it_cannot_edit_safely(config_dir):
     assert config.read_text(encoding="utf-8") == '{"theme": "dark",, }'
 
 
+def test_integrate_registers_in_every_installed_desktop_channel(config_dir):
+    dev = config_dir / "BharatCode Dev"  # under the override, where tests keep the other channels
+    dev.mkdir()
+    result = cli.invoke(app, ["integrate"])
+    assert result.exit_code == 0, result.output
+    assert "BharatCode stable:" in result.output and "BharatCode dev:" in result.output
+    assert "BharatCode Desktop's dev channel" in result.output and "Restart BharatCode Desktop" in result.output
+    assert entry_in(config_dir / "opencode.jsonc") is not None and entry_in(dev / "opencode.jsonc") is not None
+    assert "BharatCode beta:" not in result.output  # not installed here
+
+
+def test_integrate_one_channel_and_uninstall_it(config_dir):
+    dev = config_dir / "BharatCode Dev"
+    dev.mkdir()
+    assert cli.invoke(app, ["integrate", "--channel", "dev"]).exit_code == 0
+    assert entry_in(dev / "opencode.jsonc") is not None and entry_in(config_dir / "opencode.jsonc") is None
+    removed = cli.invoke(app, ["integrate", "--uninstall", "--channel", "dev"])
+    assert removed.exit_code == 0 and entry_in(dev / "opencode.jsonc") is None
+    assert cli.invoke(app, ["integrate", "--channel", "nightly"]).exit_code == 1
+
+
 def test_integrate_without_bharatcodes_cli_uses_the_default_location(tmp_path, monkeypatch):
     monkeypatch.delenv("GTU_BHARATCODE_CMD")
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
