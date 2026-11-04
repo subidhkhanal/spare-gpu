@@ -198,12 +198,13 @@ def run_cli(ctx: StepContext, prompt: str, *, edit: bool, commands: tuple[str, .
     )
     if result.stopped == "stop":
         raise StopRequested("stopped by `gtu stop`")
+    label = getattr(ctx.cli, "label", "BharatCode CLI")
     if result.stopped == "budget":
-        raise BudgetExceeded(f"stopped the BharatCode CLI after {result.tokens} tokens: budget reached")
+        raise BudgetExceeded(f"stopped {label} after {result.tokens} tokens: budget reached")
     if result.stopped == "timeout":
-        raise BusyError(f"the BharatCode CLI did not finish within {ctx.cli.timeout:.0f} s")
+        raise BusyError(f"{label} did not finish within {ctx.cli.timeout:.0f} s")
     if not result.ok:
-        raise BharatCodeError(f"the BharatCode CLI failed: {result.error or 'unknown error'}")
+        raise BharatCodeError(f"{label} failed: {result.error or 'unknown error'}")
     return result
 
 

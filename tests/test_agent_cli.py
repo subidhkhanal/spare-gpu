@@ -55,6 +55,7 @@ def test_writes_a_deny_first_allowlist_and_removes_it_afterwards(tmp_path, scena
     assert list(bash) == ["*", "python -m pytest*", "pytest*"]  # deny first: last match wins
     assert bash["*"] == "deny" and bash["pytest*"] == "allow"
     assert config["permission"]["webfetch"] == "deny"
+    assert config["permission"]["skill"] == "deny"  # and with it the skill list, ~3.5k tokens a step
     assert not (tmp_path / "opencode.json").exists()
 
 

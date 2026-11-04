@@ -108,7 +108,8 @@ ADDED_COLUMNS = {
         "queue_wait_ms": "INTEGER", "scheduler_requested_at_ms": "INTEGER", "scheduler_admitted_at_ms": "INTEGER",
         "slots_at_send": "INTEGER", "usage_json": "TEXT",
     },
-    "jobs": {"base_commit": "TEXT"},
+    "jobs": {"base_commit": "TEXT", "model": "TEXT", "preferred_model": "TEXT", "route_reason": "TEXT",
+             "fallback": "INTEGER"},
 }
 
 
@@ -131,6 +132,12 @@ class Job:
     created_at: str
     updated_at: str
     base_commit: str | None = None  # the commit the job's branch started from
+    # Wait-aware routing (router.py): the model the job runs on for all its steps, the model the
+    # user would otherwise have used, why it was chosen, and whether it fell back after a failed check.
+    model: str | None = None
+    preferred_model: str | None = None
+    route_reason: str | None = None
+    fallback: int | None = None
 
 
 @dataclass
@@ -282,6 +289,13 @@ class Store:
         with self.conn:
             self.conn.execute("UPDATE jobs SET base_commit = ? WHERE id = ?", (commit, job_id))
 
+    def set_route(self, job_id: str, model: str, preferred: str, reason: str, fallback: bool = False) -> None:
+        """Record the model a job runs on (sticky: every step and retry uses it) and why."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE jobs SET model = ?, preferred_model = ?, route_reason = ?, fallback = ? WHERE id = ?",
+                (model, preferred, reason, int(fallback), job_id))
+
     def cancel_job(self, job_id: str) -> Job:
         """Cancel in one statement, so a runner finishing the job at the same moment can't
         leave it both done and cancelled."""
@@ -323,6 +337,12 @@ class Store:
 
     def steps(self, job_id: str) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM job_steps WHERE job_id = ? ORDER BY seq", (job_id,)).fetchall()
+
+    def reset_steps(self, job_id: str) -> None:
+        """Make every step of a job pending again (the router's one fallback rerun)."""
+        with self.conn:
+            self.conn.execute("UPDATE job_steps SET status = 'pending', started_at = NULL, finished_at = NULL "
+                              "WHERE job_id = ?", (job_id,))
 
     def reset_interrupted_steps(self, job_id: str) -> int:
         """Steps left 'running' by a killed process never finished; make them pending again."""

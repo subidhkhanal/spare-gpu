@@ -54,6 +54,27 @@ def config_dir() -> Path:
     return locate_config_dir()[0]
 
 
+# BharatCode keeps one config folder per release channel, named after the product (core's
+# storage-paths.ts): the CLI and the released Desktop app share "BharatCode"; Desktop's beta,
+# dev and local builds use their own. A Desktop build from source runs as "dev" by default.
+CHANNELS = {"stable": "BharatCode", "beta": "BharatCode Beta", "dev": "BharatCode Dev", "local": "BharatCode Local"}
+
+
+def channel_config_dir(channel: str) -> Path:
+    if channel == "stable":
+        return config_dir()  # what the CLI reports, or the override
+    override = os.environ.get(CONFIG_DIR_ENV, "").strip()
+    if override:  # tests: the other channels' folders sit under the override
+        return Path(override) / CHANNELS[channel]
+    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(base) / CHANNELS[channel] / "Config"
+
+
+def installed_channels() -> list[str]:
+    """Channels with a config folder on this machine; stable always (the CLI and released app)."""
+    return ["stable"] + [c for c in CHANNELS if c != "stable" and channel_config_dir(c).is_dir()]
+
+
 def snippet(command: list[str]) -> str:
     """What to paste by hand when the file can't be edited automatically."""
     return json.dumps({"mcp": {SERVER_NAME: server_entry(command)}}, indent=2)

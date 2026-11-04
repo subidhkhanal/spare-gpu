@@ -11,14 +11,16 @@ Token budgets (per job and per night) pause work when reached; they never fail a
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import worktree
+from . import router, waits, worktree
 from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, CliStep
+from .router import Choice
 from .budget import BudgetExceeded, Budgets
 from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult, Usage
 from .gate import Decision, Gate
@@ -50,6 +52,8 @@ class StepContext:
     def chat(self, messages: list[dict], **kwargs) -> ChatResult:
         if self.client is None:  # inside BharatCode Desktop: no API key, ask through a Desktop session
             return self._ask_desktop(messages, kwargs.get("max_tokens"))
+        if self.job.model:  # the model the router chose for this job
+            kwargs.setdefault("model", waits.model_id(self.job.model))
         self.log("  Sending request to BharatCode...")
         result = self.client.chat(
             messages, job_id=self.job.id, step_id=self.step_id, gate=self.decision.gate_info, **kwargs
@@ -78,9 +82,9 @@ class StepContext:
                           request_id=None, elapsed_ms=(time.monotonic() - started) * 1000, attempts=1)
 
     def log_cli_step(self, step: CliStep) -> None:
-        """Record one BharatCode CLI step like a request, so budgets and reports include it."""
+        """Record one agent step (Desktop session or CLI) like a request, so budgets and reports include it."""
         took = f" in {step.elapsed_ms / 1000:.0f} s" if step.elapsed_ms else ""
-        self.log(f"  BharatCode CLI finished a step{took} ({step.total_tokens:,} tokens).")
+        self.log(f"  {_label(self.cli)} finished a step{took} ({step.total_tokens:,} tokens).")
         self.store.log_request(
             RequestLog(
                 endpoint=CLI_ENDPOINT, model=self.cli.model if self.cli else None, attempt=1, status_code=None,
@@ -90,6 +94,23 @@ class StepContext:
                 **self.decision.gate_info,
             )
         )
+
+
+def _label(worker) -> str:
+    return getattr(worker, "label", "BharatCode CLI")
+
+
+def _model_name(worker) -> str:
+    return waits.name(getattr(worker, "model", "") or "")
+
+
+KEPT_NOTHING = re.compile(r"^(No test files were generated|Kept 0 passing test|No documentation changes were "
+                          r"generated|Kept documentation changes in 0 file)")
+
+
+def kept_nothing(verify_output: str | None) -> bool:
+    """Whether a verify step's summary says nothing passed the check (the router's fallback trigger)."""
+    return bool(KEPT_NOTHING.match(verify_output or ""))
 
 
 StepFn = Callable[[StepContext], str]
@@ -118,8 +139,12 @@ class Scheduler:
         ignore_gate: bool = False,
         should_stop: Callable[[], bool] | None = None,
         cli_missing: str | None = None,
+        route: Callable[[Job], Choice] | None = None,
     ):
         self.store = store
+        # Picks the model for a job before its first step (router.choose with fresh wait figures);
+        # None keeps every job on the worker's own model.
+        self.route = route
         # Why the BharatCode CLI can't be used, if it can't: tests and docs jobs then stay
         # queued (not failed) and the run carries on with review jobs.
         self.cli_missing = cli_missing
@@ -182,8 +207,8 @@ class Scheduler:
                 if self.cli_missing and job.kind in CLI_KINDS:
                     if job.id not in waiting_for_cli:
                         waiting_for_cli.add(job.id)
-                        self._log(f"Job {job.id} ({job.kind}): skipped, it needs BharatCode's CLI, which "
-                                  "isn't available. It stays queued for the next `gtu start`.")
+                        self._log(f"Job {job.id} ({job.kind}): skipped, it needs BharatCode Desktop (or its CLI), "
+                                  "which isn't available here. It stays queued for the next `gtu start`.")
                     continue
                 reason = self._over_budget(job)
                 if reason is None:
@@ -194,7 +219,7 @@ class Scheduler:
                     self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
             if not runnable:
                 if waiting_for_cli:
-                    self._log(f"{len(waiting_for_cli)} job(s) are waiting for BharatCode's CLI. {self.cli_missing}")
+                    self._log(f"{len(waiting_for_cli)} job(s) are waiting for BharatCode Desktop. {self.cli_missing}")
                 elif paused_for_budget:
                     self._log("Nothing left that fits the token budgets.")
                 else:
@@ -254,6 +279,7 @@ class Scheduler:
             return "finished"
 
         fn = dict(plan).get(step["name"])
+        job, worker = self._route(job)
         self.store.set_status(job.id, "running")
         if fn is None:
             self.store.set_step(step["id"], "failed", f"unknown step {step['name']!r}")
@@ -262,10 +288,10 @@ class Scheduler:
         self.store.set_step(step["id"], "running")
         ctx = StepContext(
             job, step["id"], step["name"], self.store, self.client, decision, workdir, state_dir,
-            self.config, self.cli, lambda: self.budgets.remaining(self.store, job.id, self._now()),
+            self.config, worker, lambda: self.budgets.remaining(self.store, job.id, self._now()),
             self.should_stop, self._log,
         )
-        doing = "the BharatCode CLI is working on it; this can take several minutes" \
+        doing = f"{_label(worker)} is working on it ({_model_name(worker)}); this can take several minutes" \
             if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one request"
         self._log(f"Job {job.id}: step {step['seq']} of {len(steps)} ({step['name']}) started: {doing}.")
         main_before = self._main_state(job)
@@ -293,6 +319,20 @@ class Scheduler:
                 self._undo_step(job, workdir)
                 self.store.set_status(job.id, "paused")
                 return "stopped"
+            allowed = router.plan_refusal(str(exc))
+            if allowed and worker is not None and waits.model_id(worker.model) != allowed:
+                # The user's plan doesn't include this model: remember that, and rerun the step on
+                # the one it does include instead of failing the job.
+                self._undo_step(job, workdir)
+                folder = Path(job.repo) / ".gtu"
+                state = router.State.load(folder)
+                state.mark_unavailable(worker.model)
+                state.save(folder)
+                self.store.set_route(job.id, allowed, allowed,
+                                     f"your BharatCode plan doesn't include {waits.name(worker.model)}")
+                self._log(f"Job {job.id}: your BharatCode plan doesn't include {waits.name(worker.model)}; "
+                          f"running it on {waits.name(allowed)} instead.")
+                return "retry"
             self.store.set_step(step["id"], "failed", str(exc))
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
@@ -314,12 +354,40 @@ class Scheduler:
                 output = f"{output}\n\n[committed {commit_id[:10]} on {worktree.branch_name(job.id)}]"
         self.store.set_step(step["id"], "done", output)
         self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) done.")
+        if step["name"] == "verify" and kept_nothing(output) and self._fall_back(job):
+            return "done"
         if self.store.get_job(job.id).status == "cancelled":
             self._finish(job, "cancelled")
         elif all(s["status"] == "done" for s in self.store.steps(job.id)):
             self._finish(job, "done")
             self._log(f"Job {job.id}: finished; results are on branch {worktree.branch_name(job.id)}.")
         return "done"
+
+    def _route(self, job: Job) -> tuple[Job, BharatCodeCli | None]:
+        """The job and the worker for it, on the job's model. The model is chosen once, before the
+        first step, and stored: every later step and retry of the job uses the same one."""
+        if job.model is None and self.route is not None and self.cli is not None:
+            choice = self.route(job)
+            self.store.set_route(job.id, choice.model, choice.preferred, choice.reason)
+            self._log(f"Job {job.id}: {choice.summary()}")
+            job = self.store.get_job(job.id)
+        worker = self.cli
+        if worker is not None and job.model and waits.model_id(worker.model) != waits.model_id(job.model):
+            worker = worker.with_model(f"bharatcode/{waits.model_id(job.model)}")
+        return job, worker
+
+    def _fall_back(self, job: Job) -> bool:
+        """A routed job whose check kept nothing runs once more, on the preferred model."""
+        job = self.store.get_job(job.id)
+        if not job.model or not job.preferred_model or job.fallback or \
+                waits.model_id(job.model) == waits.model_id(job.preferred_model):
+            return False
+        self.store.set_route(job.id, job.preferred_model, job.preferred_model,
+                             f"fell back from {waits.name(job.model)}: its result kept nothing", fallback=True)
+        self.store.reset_steps(job.id)
+        self._log(f"Job {job.id}: nothing from {waits.name(job.model)} passed the check; running it once more on "
+                  f"{waits.name(job.preferred_model)}.")
+        return True
 
     def _stop_now(self) -> None:
         """`gtu stop` was requested: leave every started job paused and resumable."""

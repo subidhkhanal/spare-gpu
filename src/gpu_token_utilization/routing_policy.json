@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "date": null,
+  "note": "Which job types may run on the faster model instead of the preferred one. Nothing is switch-safe until scripts/eval_models.py has measured it: Qwen's mean score must be no worse than DeepSeek's minus 5% (paired bootstrap, 95% CI). Override for yourself with GTU_SWITCH_SAFE=tests,docs.",
+  "types": {
+    "tests": "unmeasured",
+    "docs": "unmeasured",
+    "review": "unmeasured"
+  },
+  "evidence": {}
+}

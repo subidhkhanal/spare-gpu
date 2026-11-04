@@ -1,6 +1,6 @@
 """MCP server: spare-gpu as tools an agent can call (BharatCode's CLI, or any MCP client).
 
-Started with `gtu mcp`, over stdio. Seven tools, each shaped around a task the user wants done
+Started with `gtu mcp`, over stdio. Eight tools, each shaped around a task the user wants done
 rather than around our internal functions. Selection accuracy drops as tool count grows and when
 tools overlap, so related questions are merged (one status tool answers "what's queued", "is it
 done" and "why isn't it running"). Each tool is a thin wrapper over the code the matching `gtu`
@@ -15,7 +15,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-from . import __version__, actions, advice, costs, desktop, freerun, runner, runstate, worktree
+import httpx
+
+from . import __version__, actions, costs, desktop, freerun, router, runner, runstate, waits, worktree
 from . import report as reporting
 from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
@@ -23,11 +25,11 @@ from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Command, Store, StoreError
 
 INSTRUCTIONS = (
-    "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo, "
-    "unattended in the background, each on its own git branch gtu/<job-id>, never touching the "
-    "user's branch, and keeps going after BharatCode closes. It also knows BharatCode's load, so it "
-    "can say whether now is a busy time and run any command once there's a free slot. Relay the "
-    "tools' answers to the user as they are."
+    "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo as "
+    "background BharatCode Desktop sessions, each on its own git branch gtu/<job-id>, never touching "
+    "the user's branch. It measures how long each model would wait right now, and can hand a "
+    "switch-safe task to whichever model starts it sooner, checking the result before keeping it. "
+    "Relay the tools' answers to the user as they are."
 )
 LAST_NIGHT_HOURS = 24
 
@@ -50,17 +52,19 @@ def db_path(root: Path) -> Path:
 
 
 class SpareTools:
-    """The seven tools as plain functions returning text, for one project folder."""
+    """The eight tools as plain functions returning text, for one project folder."""
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
-                 start_command: Callable[[Command], int] | None = None):
+                 start_command: Callable[[Command], int] | None = None,
+                 http: Callable[[], httpx.Client] | None = None):
         self.base = Path(base)
         # Everything that reaches outside is injectable, so tests use fakes: the gate (BharatCode's
-        # live stats), the background job runner and the run-when-free waiter.
+        # live stats), the background job runner, the run-when-free waiter, and the wait figures.
         self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
         self._launch = launch or runner.launch
         self._start_command = start_command
+        self._http = http or (lambda: httpx.Client(timeout=10.0))
 
     # --- helpers -------------------------------------------------------------------------
 
@@ -118,7 +122,7 @@ class SpareTools:
         return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
                 "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
-    # --- the seven tools -------------------------------------------------------------------
+    # --- the eight tools -------------------------------------------------------------------
 
     def queue_work(self, kind: str, path: str, note: str | None = None, start: bool = True) -> str:
         try:
@@ -157,7 +161,12 @@ class SpareTools:
                 lines.append(f"{title}:")
                 for j in chosen:
                     spent = f", {tokens[j.id]:,} tokens" if tokens[j.id] else ""
-                    lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}")
+                    on = f", on {waits.name(j.model)}" if j.model else ""
+                    if j.model and j.preferred_model and waits.model_id(j.model) != waits.model_id(j.preferred_model):
+                        on += f" instead of {waits.name(j.preferred_model)} (shorter wait)"
+                    if j.fallback:
+                        on += " (fell back after a failed check)"
+                    lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}{on}")
         if commands:
             lines.append("Commands to run when there's capacity:")
             for c in commands[-10:]:
@@ -224,12 +233,41 @@ class SpareTools:
                 f"branch {worktree.branch_name(job.id)}.")
         return text + (f"\nNote: {outcome.note}" if outcome.note else "")
 
-    def capacity_advice(self) -> str:
+    def waits(self) -> str:
         path = db_path(self._root())
-        with Store(path if path.exists() else ":memory:") as store:  # advice needs no jobs
-            decision = self._decision(store)
-            waits = advice.measured_waits(store)
-        return advice.advise(waits, decision)
+        with Store(path if path.exists() else ":memory:") as store, self._http() as http:  # needs no jobs
+            return waits.describe(waits.views(store, http))
+
+    def _preferred(self, your_model: str | None) -> str:
+        """The model the task would otherwise run on: the calling chat's own model if it said;
+        else Desktop's default model; else DeepSeek. GTU_PREFERRED_MODEL overrides all of these."""
+        if your_model:
+            return router.preferred_model(your_model)
+        try:
+            default = desktop.default_model(desktop.discover())
+        except desktop.DesktopNotFound:
+            default = None
+        return router.preferred_model(default or router.DELEGATE_PREFERRED)
+
+    def delegate(self, kind: str, path: str, note: str | None = None, your_model: str | None = None) -> str:
+        """Queue a task on whichever model starts it sooner (if its type is switch-safe), pinned to
+        that model, and start the runner. Returns a short summary, never the work itself."""
+        try:
+            outcome = actions.queue_job(lambda repo: Store(db_path(repo)), self._root(), kind, path, note)
+        except actions.ActionError as exc:
+            return f"Didn't hand it over: {exc}"
+        job = outcome.job
+        with Store(db_path(Path(job.repo))) as store:
+            preferred = self._preferred(your_model)
+            choice = router.decide(store, store.path.parent, job.kind, preferred, self._http)
+            store.set_route(job.id, choice.model, choice.preferred, choice.reason)
+            runner_line = self._ensure_runner(store, Path(job.repo))
+        lines = [f"Handed off: {job.kind} for {job.target} (job {job.id}), working in the background on branch "
+                 f"{worktree.branch_name(job.id)}. Your branch isn't touched.", choice.summary()]
+        if outcome.note:
+            lines.append(outcome.note)
+        lines += [runner_line, "spare_work_status shows progress; spare_last_night shows what it produced."]
+        return "\n".join(lines)
 
     def token_cost(self, scope: str | None = None) -> str:
         try:
@@ -272,7 +310,8 @@ def build_server(base: Path, tools: SpareTools | None = None):
         src/payments tonight", "get docs written for utils overnight", "queue a code review of
         app/api.py", "review app/api.py later". Call it straight away: it is the whole job, and it
         checks the path itself.
-        For any other command (a build, a migration, a big refactor script) use spare_run_when_free.
+        To have it done now on whichever model is free instead, use spare_delegate. For any other
+        command (a build, a migration, a big refactor script) use spare_run_when_free.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
@@ -293,7 +332,7 @@ def build_server(base: Path, tools: SpareTools | None = None):
         Use it for any "where are things" question: "what's queued?", "is my tests job done?",
         "what is spare-gpu doing?", "why hasn't my job started?", "did my command run?". Also use it
         to find a job id before cancelling. For a summary of finished work use spare_last_night;
-        for whether to start something new use spare_capacity_advice."""
+        for how long each model would wait right now use spare_waits."""
         return tools.work_status()
 
     @server.tool(annotations=notes(True))
@@ -326,18 +365,43 @@ def build_server(base: Path, tools: SpareTools | None = None):
         return tools.cancel_work(job_id)
 
     @server.tool(annotations=notes(True, world=True))
-    def spare_capacity_advice() -> str:
-        """Is now a fine time for something heavy on BharatCode? Answers from how long our own
-        requests actually waited in BharatCode's queue: the last few requests and whether waits are
-        rising or falling, what's usual at this hour, and BharatCode's live load for context. It
-        describes what was measured and says so when there isn't enough data; it doesn't forecast.
+    def spare_waits() -> str:
+        """How long work would wait on each BharatCode model right now (DeepSeek and Qwen), from
+        measured figures: BharatCode's own wait percentiles for the last hour, whether each lane has
+        a free slot, the user's own recent waits, and what's usual at this hour; then which model
+        would start sooner. Says so when there isn't enough data.
 
-        Use it before starting anything big, or when the user asks about timing: "is now a good
-        time to run a big refactor?", "is BharatCode busy right now?", "when is the quietest time
-        to run tests?", "should I wait before kicking off this migration?". It only advises; to
-        actually wait and run something, use spare_run_when_free or spare_queue_work. For why an
+        Use it for timing questions: "is now a good time to run a big refactor?", "is BharatCode
+        busy right now?", "how long is DeepSeek's queue?", "which model is faster right now?". It
+        only reports; to hand a task to the faster model use spare_delegate. For why an
         already-queued job hasn't started, use spare_work_status."""
-        return tools.capacity_advice()
+        return tools.waits()
+
+    @server.tool(annotations=notes(False, world=True))
+    def spare_delegate(type: Literal["tests", "docs", "review"], path: str, note: str | None = None,
+                       your_model: str | None = None) -> str:
+        """Hand a self-contained task (write tests, write docs, or review code for a file or folder
+        in this repo) to a background BharatCode Desktop session on whichever model will start it
+        sooner, so the user doesn't wait in DeepSeek's queue. Only task types measured as
+        switch-safe ever move to the other model; the result is checked before it's kept, and if
+        the check keeps nothing it reruns once on the preferred model. Returns at once with a short
+        summary and the git branch; the work itself never comes back into this chat.
+
+        Use it when the user wants the task done now without waiting: "write tests for src/pay.py
+        on whichever model is free", "get this reviewed now, don't wait in the queue", "delegate the
+        docs for utils". For work that can simply wait in the background (later, tonight), use
+        spare_queue_work.
+
+        Args:
+            type: "tests" writes new passing tests; "docs" adds docstrings and README text without
+                changing code; "review" writes a code review.
+            path: File or folder relative to the repo root, e.g. "src/pay.py". Pass the user's path
+                exactly as given; spare-gpu says if it doesn't exist.
+            note: Optional extra instructions in the user's words.
+            your_model: The model you are running on, as your system prompt names it (e.g.
+                "deepseek-v4.1-flash"); it's the one the task would otherwise use.
+        """
+        return tools.delegate(type, path, note, your_model)
 
     @server.tool(annotations=notes(True))
     def spare_token_cost(scope: str | None = None) -> str:

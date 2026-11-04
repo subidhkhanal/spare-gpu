@@ -1,0 +1,11 @@
+[
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "tests", "target": "src/gpu_token_utilization/budget.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "tests", "target": "src/gpu_token_utilization/runstate.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "tests", "target": "src/gpu_token_utilization/costs.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "docs", "target": "src/gpu_token_utilization/budget.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "docs", "target": "src/gpu_token_utilization/worktree.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "docs", "target": "src/gpu_token_utilization/freerun.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "review", "target": "src/gpu_token_utilization/gate.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "review", "target": "src/gpu_token_utilization/store.py"},
+  {"repo": "https://github.com/subidhkhanal/spare-gpu", "sha": "859d576", "kind": "review", "target": "src/gpu_token_utilization/report.py"}
+]

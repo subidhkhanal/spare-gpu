@@ -127,7 +127,10 @@ def permission_config(edit: bool, commands: tuple[str, ...]) -> dict:
             bash[f"{command}*"] = "allow"
     return {
         "$schema": "https://opencode.ai/config.json",
-        "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny"},
+        # "skill": "deny" also drops the list of the user's skills (~/.claude/skills and others)
+        # from every request (session/system.ts): ~3.5k tokens a step on the machine measured.
+        # Inside Desktop it's the only way to do that; the CLI could use an env var instead.
+        "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny", "skill": "deny"},
         # spare-gpu's own MCP server is off inside jobs: its tool schemas cost ~2.3k tokens on
         # every step (measured), and a job's agent has no business queueing more jobs.
         "mcp": {"spare-gpu": {"type": "local", "command": ["gtu", "mcp"], "enabled": False}},
@@ -182,10 +185,15 @@ def _pump(stream, sink: queue.Queue) -> None:
 
 
 class BharatCodeCli:
+    label = "BharatCode CLI"
+
     def __init__(self, command: list[str] | None = None, model: str = DEFAULT_MODEL, timeout: float = 900.0):
         self.command = command
         self.model = model
         self.timeout = timeout
+
+    def with_model(self, model: str) -> BharatCodeCli:
+        return BharatCodeCli(self.command, model=model, timeout=self.timeout)
 
     def run(
         self,

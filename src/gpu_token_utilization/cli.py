@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
+import httpx
 import typer
 
 from . import __version__
@@ -15,11 +16,11 @@ from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .gate import WAIT_ENV, Gate, GateConfig
-from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolve_command
+from .agent_cli import CLI_KINDS, CMD_ENV, BharatCodeCli, CliNotFound, cli_status, resolve_command
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, desktop, dryrun, runstate, worktree
+from . import actions, bc_config, desktop, dryrun, router, runstate, waits, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -128,17 +129,37 @@ def setup(
 @app.command()
 def integrate(
     uninstall: bool = typer.Option(False, "--uninstall", help="Remove spare-gpu from BharatCode's config."),
+    channel: str = typer.Option(
+        "all", "--channel",
+        help="Which BharatCode to register with: stable (the released Desktop app and the CLI), beta, dev "
+             "(a Desktop build from source), local, or all (every one installed here; the default).",
+    ),
 ) -> None:
-    """Register spare-gpu's MCP server with BharatCode's CLI (the API key is separate: `gtu setkey`
-    or `gtu setup`). Backs the config up first, says exactly what it changed and how to undo it,
-    and is safe to run again."""
+    """Register spare-gpu's MCP server with BharatCode Desktop (and its CLI). Backs each config up
+    first, says exactly what it changed and how to undo it, and is safe to run again."""
+    if channel != "all" and channel not in bc_config.CHANNELS:
+        _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)} or all.")
+    channels = bc_config.installed_channels() if channel == "all" else [channel]
     if uninstall:
-        _uninstall()
+        for name in channels:
+            _uninstall(name)
         return
-    status = _report_cli_for_integration("")
-    if not _register("", status):
+    ok = True
+    for name in channels:
+        typer.echo(f"BharatCode {name}:")
+        ok = _register_channel("  ", name) and ok
+    typer.echo("Restart BharatCode Desktop (and close open BharatCode windows) to load spare-gpu.")
+    if not ok:
         raise typer.Exit(1)
-    typer.echo("Already-open BharatCode windows need a restart to see spare-gpu.")
+
+
+def _register_channel(pad: str, channel: str) -> bool:
+    """Register spare-gpu in one channel's config. Stable is shared with the CLI, which can confirm
+    the server connects; Desktop-only channels are checked by Desktop when it starts."""
+    if channel == "stable":
+        return _register(pad, _report_cli_for_integration(pad))
+    folder = bc_config.channel_config_dir(channel)
+    return _register(pad, None, (folder, f"BharatCode Desktop's {channel} channel"))
 
 
 def _report_cli_for_integration(pad: str):
@@ -153,10 +174,10 @@ def _report_cli_for_integration(pad: str):
     return status
 
 
-def _register(pad: str, status) -> bool:
+def _register(pad: str, status, where: tuple[Path, str] | None = None) -> bool:
     """Register spare-gpu in BharatCode's config, saying what changed and how to undo it. When the
     file can't be edited safely, print the snippet to paste instead."""
-    folder, how = bc_config.locate_config_dir()
+    folder, how = where or bc_config.locate_config_dir()
     path = bc_config.config_file(folder)
     command = bc_config.server_command()
     typer.echo(f"{pad}Config file: {path} ({how}).")
@@ -177,7 +198,7 @@ def _register(pad: str, status) -> bool:
         if backup.exists() and backup.stat().st_mtime != had_backup:
             typer.echo(f"{pad}The file as it was before is saved as {backup}.")
         typer.echo(f"{pad}To undo: gtu integrate --uninstall" + (f" (or copy {backup.name} back)" if backup.exists() else ""))
-    if not status.problem:
+    if status is not None and not status.problem:
         ok = bc_config.connected(path)
         if ok:
             typer.echo(f"{pad}BharatCode reports: spare-gpu connected.")
@@ -186,8 +207,11 @@ def _register(pad: str, status) -> bool:
     return True
 
 
-def _uninstall() -> None:
-    folder, how = bc_config.locate_config_dir()
+def _uninstall(channel: str = "stable") -> None:
+    if channel == "stable":
+        folder, how = bc_config.locate_config_dir()
+    else:
+        folder, how = bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel"
     path = bc_config.config_file(folder)
     try:
         removed = bc_config.unregister(path)
@@ -519,16 +543,17 @@ def start(
         if other:
             _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
         job_config = JobConfig.from_env()
-        # Inside BharatCode Desktop every job runs through Desktop's own server and sign-in, so
-        # spare-gpu needs no API key of its own. Outside it, the standalone CLI does the tests and
-        # docs jobs and the API (with the key) the reviews, until the Desktop path replaces both.
+        # spare-gpu runs inside BharatCode Desktop: every job is a Desktop session, on Desktop's own
+        # server and sign-in, so no API key of its own is needed. Outside Desktop, review jobs can
+        # still use the API with a key; tests and docs jobs wait until Desktop runs them. (An agent
+        # command named in GTU_BHARATCODE_CMD is used instead, for tests and debugging only.)
         client, worker, cli_missing = None, None, None
         try:
             worker = desktop.DesktopAgent(desktop.discover(), timeout=job_config.cli_timeout)
             log(f"Running jobs through BharatCode Desktop ({worker.conn.url}); no API key needed.")
         except desktop.DesktopNotFound as exc:
             if os.environ.get(desktop.PASSWORD_ENV):  # started from Desktop, yet its server wasn't found
-                log(f"Not using BharatCode Desktop: {exc}. Falling back to BharatCode's CLI.")
+                log(f"Not using BharatCode Desktop: {exc}.")
             try:
                 # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
                 # again. Ungated (the default): no gate to do that, so the client's patient retry ladder takes over.
@@ -536,11 +561,10 @@ def start(
                                           on_retry=lambda message: log(f"  {message}"))
             except ApiKeyMissing as exc:
                 _fail(_no_key(exc))
-            try:
-                resolve_command()
-            except CliNotFound as exc:
-                cli_missing = str(exc)
-            worker = BharatCodeCli(timeout=job_config.cli_timeout)
+            if os.environ.get(CMD_ENV):
+                worker = BharatCodeCli(timeout=job_config.cli_timeout)
+            else:
+                cli_missing = desktop.DESKTOP_NEEDED
         config = GateConfig.from_env()
         if quiet_readings is not None:
             config.quiet_needed = quiet_readings
@@ -549,11 +573,17 @@ def start(
         gate = Gate(store, config, client=client)
         runstate.clear(folder)  # a stop request left over from an earlier run doesn't apply to this one
         runstate.write_run(folder)
+        def route(job):
+            # A job delegated from a chat already has its model; a queued one is routed here, just
+            # before it starts, from the worker's own model (or GTU_PREFERRED_MODEL).
+            preferred = job.preferred_model or router.preferred_model(worker.model)
+            return router.decide(store, folder, job.kind, preferred, lambda: httpx.Client(timeout=10.0))
+
         try:
             scheduler = Scheduler(
                 store, gate, client, cli=worker,
                 budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=not wait,
-                should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing,
+                should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing, route=route,
             )
             steps = scheduler.run(max_steps=max_steps)
         except AuthError:
@@ -631,12 +661,15 @@ def cost(scope: str = typer.Argument(None, help="A job id, a number of hours (de
         typer.echo(costs.describe(store, scope))
 
 
-@app.command()
-def advice() -> None:
-    """Is now a fine time for heavy work on BharatCode? Answers from our own measured queue waits."""
+def waits_cmd() -> None:
+    """How long work would wait on each BharatCode model right now, and which would start sooner."""
     from .mcp_server import SpareTools
 
-    typer.echo(SpareTools(Path.cwd()).capacity_advice())
+    typer.echo(SpareTools(Path.cwd()).waits())
+
+
+app.command("waits")(waits_cmd)
+app.command("advice", hidden=True)(waits_cmd)  # the older name
 
 
 @app.command("run-when-free")

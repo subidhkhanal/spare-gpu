@@ -39,6 +39,10 @@ ANCESTORS = 6
 WEAK_CANDIDATES = 8  # ports with little evidence of being a server, tried after the likely ones
 
 
+DESKTOP_NEEDED = ("Tests and docs jobs run inside BharatCode Desktop: open this project in Desktop and ask "
+                  "spare-gpu there (or run `gtu start` from Desktop's terminal).")
+
+
 class DesktopNotFound(Exception):
     """Not running inside BharatCode Desktop, or its server didn't answer; the message says which."""
 
@@ -166,12 +170,38 @@ def discover(env: dict | None = None, candidates: Callable[[], list[str]] = cand
     raise DesktopNotFound("couldn't reach BharatCode Desktop's server" + (f" (tried {', '.join(urls)})" if urls else ""))
 
 
+def default_model(conn: Connection, transport: httpx.BaseTransport | None = None) -> str | None:
+    """The BharatCode model Desktop uses by default (e.g. 'qwen-3.8-27b'), or None."""
+    try:
+        with conn.client(timeout=10.0, transport=transport) as http:
+            data = http.get("/provider").json()
+        return (data.get("default") or {}).get("bharatcode")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+
+
 def export_url(conn: Connection) -> None:
     """Pass the found server on to processes we start (the background runner can't see Desktop)."""
     os.environ[URL_ENV] = conn.url
 
 
 # --- running a job step as a Desktop session ----------------------------------------------------
+
+def session_rules(edit: bool, commands: tuple[str, ...]) -> list[dict]:
+    """The job's permission rules as a Desktop session ruleset (last match wins, like the config's).
+    Sent with the session itself, so they apply whatever config Desktop has loaded for the folder;
+    also hides spare-gpu's own tools, so a job can't queue more jobs. The skill list in the prompt
+    follows the agent's (config) permissions only, so the opencode.json file is still written too."""
+    rules = []
+    for permission, value in permission_config(edit, commands)["permission"].items():
+        if isinstance(value, str):
+            rules.append({"permission": permission, "pattern": "*", "action": value})
+        else:
+            rules += [{"permission": permission, "pattern": pattern, "action": action}
+                      for pattern, action in value.items()]
+    rules.append({"permission": "spare-gpu_*", "pattern": "*", "action": "deny"})
+    return rules
+
 
 def _model_ref(model: str) -> dict:
     provider, _, model_id = model.partition("/")
@@ -184,6 +214,13 @@ def _error_text(error: dict) -> str:
 
 class DesktopAgent:
     """Same interface as agent_cli.BharatCodeCli.run, backed by a Desktop session."""
+
+    label = "BharatCode Desktop"
+
+    def with_model(self, model: str) -> DesktopAgent:
+        """The same agent on another model (the router picks one per job)."""
+        return DesktopAgent(self.conn, model=model, timeout=self.timeout, poll=self.poll, transport=self._transport,
+                            sleep=self._sleep, clock=self._clock)
 
     def __init__(self, conn: Connection, model: str = DEFAULT_MODEL, timeout: float = 900.0, poll: float = 2.0,
                  transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep,
@@ -207,7 +244,10 @@ class DesktopAgent:
         where = {"directory": str(workdir)}
         try:
             with self.conn.client(transport=self._transport) as http:
-                created = http.post("/session", params=where, json={"title": f"spare-gpu: {prompt.splitlines()[0][:60]}"})
+                created = http.post("/session", params=where, json={
+                    "title": f"spare-gpu: {prompt.splitlines()[0][:60]}",
+                    "permission": session_rules(edit, commands),
+                })
                 created.raise_for_status()
                 session = created.json()["id"]
                 sent = http.post(f"/session/{session}/prompt_async", params=where,
