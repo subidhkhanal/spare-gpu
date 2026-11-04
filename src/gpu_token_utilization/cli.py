@@ -19,7 +19,7 @@ from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, cli_status, resolv
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, dryrun, runstate, worktree
+from . import actions, bc_config, desktop, dryrun, runstate, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -518,13 +518,29 @@ def start(
         other = runstate.running_pid(folder)
         if other:
             _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
+        job_config = JobConfig.from_env()
+        # Inside BharatCode Desktop every job runs through Desktop's own server and sign-in, so
+        # spare-gpu needs no API key of its own. Outside it, the standalone CLI does the tests and
+        # docs jobs and the API (with the key) the reviews, until the Desktop path replaces both.
+        client, worker, cli_missing = None, None, None
         try:
-            # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
-            # again. Ungated (the default): no gate to do that, so the client's patient retry ladder takes over.
-            client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0) if wait else RetryPolicy.from_env(),
-                                      on_retry=lambda message: log(f"  {message}"))
-        except ApiKeyMissing as exc:
-            _fail(_no_key(exc))
+            worker = desktop.DesktopAgent(desktop.discover(), timeout=job_config.cli_timeout)
+            log(f"Running jobs through BharatCode Desktop ({worker.conn.url}); no API key needed.")
+        except desktop.DesktopNotFound as exc:
+            if os.environ.get(desktop.PASSWORD_ENV):  # started from Desktop, yet its server wasn't found
+                log(f"Not using BharatCode Desktop: {exc}. Falling back to BharatCode's CLI.")
+            try:
+                # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
+                # again. Ungated (the default): no gate to do that, so the client's patient retry ladder takes over.
+                client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0) if wait else RetryPolicy.from_env(),
+                                          on_retry=lambda message: log(f"  {message}"))
+            except ApiKeyMissing as exc:
+                _fail(_no_key(exc))
+            try:
+                resolve_command()
+            except CliNotFound as exc:
+                cli_missing = str(exc)
+            worker = BharatCodeCli(timeout=job_config.cli_timeout)
         config = GateConfig.from_env()
         if quiet_readings is not None:
             config.quiet_needed = quiet_readings
@@ -534,14 +550,8 @@ def start(
         runstate.clear(folder)  # a stop request left over from an earlier run doesn't apply to this one
         runstate.write_run(folder)
         try:
-            job_config = JobConfig.from_env()
-            try:
-                resolve_command()
-                cli_missing = None
-            except CliNotFound as exc:
-                cli_missing = str(exc)
             scheduler = Scheduler(
-                store, gate, client, cli=BharatCodeCli(timeout=job_config.cli_timeout),
+                store, gate, client, cli=worker,
                 budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=not wait,
                 should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing,
             )
@@ -556,7 +566,8 @@ def start(
         finally:
             runstate.clear(folder)
             gate.close()
-            client.close()
+            if client is not None:
+                client.close()
     if scheduler.stopped:
         return
     log(f"Completed {steps} step(s).")

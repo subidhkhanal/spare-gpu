@@ -24,6 +24,14 @@ def no_real_api_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_desktop(monkeypatch):
+    """No test may find a real BharatCode Desktop server (pytest run from Desktop's terminal
+    would inherit its password). Tests that need one use fakedesktop."""
+    for name in ("OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME", "GTU_DESKTOP_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def fake_bharatcode_cli(monkeypatch):
     """No test ever starts the real BharatCode CLI; tests about a missing CLI delete this."""
     monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))

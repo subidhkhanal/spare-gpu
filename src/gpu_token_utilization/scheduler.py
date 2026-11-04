@@ -20,7 +20,7 @@ from typing import Callable
 from . import worktree
 from .agent_cli import CLI_KINDS, BharatCodeCli, CliNotFound, CliStep
 from .budget import BudgetExceeded, Budgets
-from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult
+from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult, Usage
 from .gate import Decision, Gate
 from .jobs import PLANS, JobConfig
 from .runstate import StopRequested
@@ -37,7 +37,7 @@ class StepContext:
     step_id: int
     step_name: str
     store: Store
-    client: BharatCodeClient
+    client: BharatCodeClient | None  # None inside BharatCode Desktop: no API key, requests go through Desktop
     decision: Decision
     workdir: Path  # the job's worktree (or the repo itself when isolation is off, in tests)
     state_dir: Path  # per-job scratch space outside the worktree (.gtu/jobs/<id>), never committed
@@ -48,6 +48,8 @@ class StepContext:
     log: Callable[[str], None] = lambda message: None
 
     def chat(self, messages: list[dict], **kwargs) -> ChatResult:
+        if self.client is None:  # inside BharatCode Desktop: no API key, ask through a Desktop session
+            return self._ask_desktop(messages, kwargs.get("max_tokens"))
         self.log("  Sending request to BharatCode...")
         result = self.client.chat(
             messages, job_id=self.job.id, step_id=self.step_id, gate=self.decision.gate_info, **kwargs
@@ -55,6 +57,25 @@ class StepContext:
         waited = f", {result.queue_wait_ms / 1000:.1f} s of it in BharatCode's queue" if result.queue_wait_ms else ""
         self.log(f"  Answer received in {result.elapsed_ms / 1000:.1f} s ({result.usage.total_tokens:,} tokens{waited}).")
         return result
+
+    def _ask_desktop(self, messages: list[dict], max_tokens: int | None) -> ChatResult:
+        self.log("  Asking BharatCode Desktop...")
+        started = time.monotonic()
+        result = self.cli.ask(self.workdir, messages, token_budget=self.budget_remaining(),
+                              on_step=self.log_cli_step, should_stop=self.should_stop)
+        if result.stopped == "stop":
+            raise StopRequested("stopped by `gtu stop`")
+        if result.stopped == "budget":
+            raise BudgetExceeded(f"stopped BharatCode Desktop after {result.tokens} tokens: budget reached")
+        if result.stopped == "timeout":
+            raise BusyError(f"BharatCode Desktop did not finish within {self.cli.timeout:.0f} s")
+        if not result.ok:
+            raise BharatCodeError(f"BharatCode Desktop failed: {result.error or 'unknown error'}")
+        inputs = sum(s.input_tokens + s.cache_read_tokens for s in result.steps)
+        outputs = sum(s.output_tokens + s.reasoning_tokens for s in result.steps)
+        return ChatResult(content=result.text, finish_reason="stop", truncated=False,
+                          usage=Usage(prompt_tokens=inputs, completion_tokens=outputs, total_tokens=result.tokens),
+                          request_id=None, elapsed_ms=(time.monotonic() - started) * 1000, attempts=1)
 
     def log_cli_step(self, step: CliStep) -> None:
         """Record one BharatCode CLI step like a request, so budgets and reports include it."""
@@ -84,7 +105,7 @@ class Scheduler:
         self,
         store: Store,
         gate: Gate,
-        client: BharatCodeClient,
+        client: BharatCodeClient | None,
         *,
         plans: dict[str, Plan] | None = None,
         cli: BharatCodeCli | None = None,

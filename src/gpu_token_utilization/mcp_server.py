@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-from . import __version__, actions, advice, costs, freerun, runner, runstate, worktree
+from . import __version__, actions, advice, costs, desktop, freerun, runner, runstate, worktree
 from . import report as reporting
 from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
@@ -95,14 +95,26 @@ class SpareTools:
         if pid:
             return f"spare-gpu's runner (process {pid}) is already going; it picks this up next."
         try:
-            if find_api_key() is None:
-                return "It can't run yet: no BharatCode API key is set up. Run `gtu setup` in a terminal."
-        except ApiKeyMissing as exc:
-            return f"It can't run yet: {exc}. Run `gtu setup` in a terminal."
+            # Inside Desktop the runner works through Desktop's server and sign-in; it's detached
+            # and can't find that server itself, so pass it on. No API key is needed then.
+            inside = desktop.discover()
+            desktop.export_url(inside)
+        except desktop.DesktopNotFound:
+            inside = None
+        if inside is None:
+            try:
+                if find_api_key() is None:
+                    return "It can't run yet: no BharatCode API key is set up. Run `gtu setup` in a terminal."
+            except ApiKeyMissing as exc:
+                return f"It can't run yet: {exc}. Run `gtu setup` in a terminal."
         try:
             pid = self._launch(repo)
         except (runner.RunnerError, OSError) as exc:
             return f"Couldn't start the background runner: {exc}"
+        if inside is not None:
+            return (f"Started spare-gpu's runner in the background (process {pid}). Each job runs as its own "
+                    "BharatCode Desktop session, named \"spare-gpu: ...\", while Desktop is open; it stops when the "
+                    "queue is empty.")
         return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
                 "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
