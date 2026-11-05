@@ -225,7 +225,9 @@ def summary_markdown(reports: list[JobReport], store: Store, budgets: Budgets, n
             out.append(f"- Report committed to `{worktree.branch_name(j.id)}` as `gtu-report-{j.id}.md`.")
         elif j.status not in FINAL_STATUSES:
             out.append("- Still in progress; its branch report is written when it finishes.")
+        if j.output_dir:
+            out.append(f"- Edited files: `{j.output_dir}/`")
         if r.branch_exists:
-            out.append(f"- Review it: `git log {worktree.branch_name(j.id)}`, `git diff HEAD...{worktree.branch_name(j.id)}`")
+            out.append(f"- spare-gpu's record of it: `git log {worktree.branch_name(j.id)}`, `git diff HEAD...{worktree.branch_name(j.id)}`")
         out.append("")
     return "\n".join(out)

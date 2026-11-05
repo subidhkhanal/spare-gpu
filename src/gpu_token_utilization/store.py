@@ -109,7 +109,7 @@ ADDED_COLUMNS = {
         "slots_at_send": "INTEGER", "usage_json": "TEXT",
     },
     "jobs": {"base_commit": "TEXT", "model": "TEXT", "preferred_model": "TEXT", "route_reason": "TEXT",
-             "fallback": "INTEGER"},
+             "fallback": "INTEGER", "output_dir": "TEXT"},
 }
 
 
@@ -138,6 +138,7 @@ class Job:
     preferred_model: str | None = None
     route_reason: str | None = None
     fallback: int | None = None
+    output_dir: str | None = None  # where its edited files were copied: <repo>/spare-gpu/<date>_<time>
 
 
 @dataclass
@@ -295,6 +296,10 @@ class Store:
             self.conn.execute(
                 "UPDATE jobs SET model = ?, preferred_model = ?, route_reason = ?, fallback = ? WHERE id = ?",
                 (model, preferred, reason, int(fallback), job_id))
+
+    def set_output_dir(self, job_id: str, folder: str | None) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE jobs SET output_dir = ? WHERE id = ?", (folder, job_id))
 
     def cancel_job(self, job_id: str) -> Job:
         """Cancel in one statement, so a runner finishing the job at the same moment can't

@@ -360,7 +360,9 @@ class Scheduler:
             self._finish(job, "cancelled")
         elif all(s["status"] == "done" for s in self.store.steps(job.id)):
             self._finish(job, "done")
-            self._log(f"Job {job.id}: finished; results are on branch {worktree.branch_name(job.id)}.")
+            folder = self._export(job)
+            self._log(f"Job {job.id}: finished; " + (f"its edited files are in {folder}." if folder
+                                                     else "it changed no files."))
         return "done"
 
     def _route(self, job: Job) -> tuple[Job, BharatCodeCli | None]:
@@ -410,6 +412,23 @@ class Scheduler:
         self.store.reset_interrupted_steps(job.id)
         if self.isolate:
             worktree.discard_uncommitted(workdir)
+
+    def _export(self, job: Job) -> str | None:
+        """Copy the finished job's edited files to <repo>/spare-gpu/<date>_<time>/ and record the
+        folder. The path is given relative to the repo, as the user sees it there."""
+        if not self.isolate:
+            return None
+        try:
+            folder = worktree.export(Path(job.repo), job.id, job.base_commit, self._now().astimezone())
+        except (worktree.GitError, OSError) as exc:
+            self._log(f"Job {job.id}: couldn't copy its files to {worktree.OUTPUT_DIR}/: {exc}. "
+                      f"They're safe on branch {worktree.branch_name(job.id)}.")
+            return None
+        if folder is None:
+            return None
+        shown = folder.relative_to(Path(job.repo)).as_posix()
+        self.store.set_output_dir(job.id, shown)
+        return shown
 
     def _finish(self, job: Job, status: str) -> None:
         """Record the final status and remove the job's worktree. Its branch is kept."""

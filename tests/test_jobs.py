@@ -194,6 +194,12 @@ def test_docs_job_keeps_docstring_only_changes_and_reverts_the_rest(git_repo, st
     assert "docs/calc.md" in branch_files(git_repo, job.id)
     assert "reverted src/other.py" in store.steps(job.id)[1]["output"]
     assert_main_untouched(git_repo, head)
+    # what the user gets: the kept files only, in spare-gpu/<date>_<time>/, with their paths
+    folder = store.get_job(job.id).output_dir
+    assert folder and folder.startswith("spare-gpu/")
+    copied = sorted(p.relative_to(git_repo / folder).as_posix() for p in (git_repo / folder).rglob("*") if p.is_file())
+    assert copied == ["README.md", "docs/calc.md", "src/calc.py"]  # other.py was reverted, so it isn't there
+    assert '"""Return the sum of a and b."""' in (git_repo / folder / "src" / "calc.py").read_text()
 
 
 def test_docs_job_never_gets_a_shell(git_repo, store, scenario, run_jobs):
@@ -265,11 +271,21 @@ def test_job_budget_kills_the_cli_and_pauses_the_job(git_repo, store, scenario, 
     assert any("budget" in line for line in logs)
 
 
+def night_budgets(**kw):
+    """Budgets whose night began six hours ago, so usage logged "earlier tonight" stays in tonight
+    however long the suite runs (a run that crossed the default 12:00 IST start saw it as last night)."""
+    from datetime import datetime, timedelta
+
+    from gpu_token_utilization.budget import IST
+
+    return Budgets(night_start=(datetime.now(IST) - timedelta(hours=6)).time().replace(second=0, microsecond=0), **kw)
+
+
 def test_what_is_left_of_the_night_budget_caps_a_cli_run(git_repo, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 2000, "sleep": 0.3} for _ in range(6)])
     store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, total_tokens=995_000))  # earlier tonight
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs(budgets=Budgets(per_night=1_000_000, per_job=200_000))
+    run_jobs(budgets=night_budgets(per_night=1_000_000, per_job=200_000))
     assert store.get_job(job.id).status == "paused"
     assert 5000 <= store.request_summary(job.id)["total_tokens"] <= 7000  # stopped near the 5,000 left
 
@@ -279,7 +295,7 @@ def test_night_budget_pauses_every_job(git_repo, store, scenario, run_jobs):
     store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, total_tokens=950_000))
     first = store.add_job("tests", "src/calc.py", str(git_repo))
     second = store.add_job("review", "src", str(git_repo))
-    logs = run_jobs(budgets=Budgets(per_night=900_000))
+    logs = run_jobs(budgets=night_budgets(per_night=900_000))
     assert not record.exists()
     assert store.get_job(first.id).status == "paused" and store.get_job(second.id).status == "paused"
     assert any("tonight's token budget is used up" in line for line in logs)

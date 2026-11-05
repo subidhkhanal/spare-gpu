@@ -119,3 +119,50 @@ def test_recreate_after_worktree_was_removed_keeps_branch_history(git_repo):
 
 def test_remove_is_safe_when_nothing_exists(git_repo):
     worktree.remove(git_repo, "never-created")
+
+
+# --- the spare-gpu/<date>_<time>/ folder ------------------------------------------------------
+
+WHEN = __import__("datetime").datetime(2026, 11, 5, 14, 32, 7)
+
+
+def finished_job(repo, job_id="abc123"):
+    """A job that edited src/calc.py and added tests/test_calc.py, then had its worktree removed."""
+    base = git(repo, "rev-parse", "HEAD")
+    path = worktree.create(repo, job_id)
+    (path / "src" / "calc.py").write_text('def add(a, b):\n    """Add two numbers."""\n    return a + b\n')
+    (path / "tests").mkdir()
+    (path / "tests" / "test_calc.py").write_text("def test_add():\n    assert True\n")
+    worktree.commit(path, "job work")
+    worktree.remove(repo, job_id)
+    return base
+
+
+def test_a_finished_jobs_edited_files_are_copied_to_a_dated_folder(git_repo):
+    base = finished_job(git_repo)
+    folder = worktree.export(git_repo, "abc123", base, WHEN)
+    assert folder == git_repo / "spare-gpu" / "2026-11-05_14-32-07"
+    copied = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+    assert copied == ["src/calc.py", "tests/test_calc.py"]  # only what the job changed, paths kept
+    assert '"""Add two numbers."""' in (folder / "src" / "calc.py").read_text()
+    assert '"""' not in (git_repo / "src" / "calc.py").read_text()  # the user's own file is untouched
+
+
+def test_the_folder_never_makes_the_repo_dirty(git_repo):
+    worktree.export(git_repo, "abc123", finished_job(git_repo), WHEN)
+    assert git(git_repo, "status", "--porcelain") == ""
+    worktree.ensure_clean(git_repo)  # so the next job can start
+
+
+def test_two_jobs_finishing_in_the_same_second_get_their_own_folders(git_repo):
+    first = worktree.export(git_repo, "abc123", finished_job(git_repo, "abc123"), WHEN)
+    second = worktree.export(git_repo, "def456", finished_job(git_repo, "def456"), WHEN)
+    assert first.name == "2026-11-05_14-32-07" and second.name == "2026-11-05_14-32-07-2"
+
+
+def test_a_job_that_changed_nothing_gets_no_folder(git_repo):
+    base = git(git_repo, "rev-parse", "HEAD")
+    worktree.create(git_repo, "abc123")
+    worktree.remove(git_repo, "abc123")
+    assert worktree.export(git_repo, "abc123", base, WHEN) is None
+    assert not (git_repo / "spare-gpu").exists()

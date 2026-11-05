@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from .store import Store
+from .store import Store, StoreError
 
 DEFAULT_HOURS = 24
 
@@ -44,6 +44,13 @@ class Cost:
         return self.all.total
 
 
+def _job_or_none(store: Store, job_id: str):
+    try:
+        return store.get_job(job_id)
+    except StoreError:
+        return None
+
+
 def collect(store: Store, scope: str | None, now: datetime | None = None) -> tuple[Cost, str]:
     """Tokens for a scope: a job id, "all", or a number of hours (default: the last 24).
     Returns the tally and a description of what it covers."""
@@ -51,14 +58,17 @@ def collect(store: Store, scope: str | None, now: datetime | None = None) -> tup
     scope = (scope or "").strip().lower()
     if scope in ("", "last_night", "last night", "today", "session", "tonight"):
         scope = str(DEFAULT_HOURS)
+    # Job ids are 8 hex characters, so about 1 in 40 is all digits ("16170455"): a job by that id
+    # wins over reading the number as hours.
+    job = _job_or_none(store, scope) if scope != "all" else None
     if scope == "all":
         rows, label = store.conn.execute("SELECT * FROM requests").fetchall(), "all time"
-    elif scope.replace(".", "", 1).isdigit():
+    elif job is None and scope.replace(".", "", 1).isdigit():
         since = (now - timedelta(hours=float(scope))).isoformat()
         rows = store.conn.execute("SELECT * FROM requests WHERE sent_at >= ?", (since,)).fetchall()
         label = f"the last {float(scope):g} hours"
     else:
-        job = store.get_job(scope)  # StoreError for an unknown id
+        job = job or store.get_job(scope)  # StoreError for an unknown id
         rows = store.requests(job.id)
         label = f"job {job.id} ({job.kind} {job.target})"
     cost = Cost()

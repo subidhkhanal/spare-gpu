@@ -26,8 +26,8 @@ from .store import DB_ENV, FINAL_STATUSES, Command, Store, StoreError
 
 INSTRUCTIONS = (
     "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo as "
-    "background BharatCode Desktop sessions, each on its own git branch gtu/<job-id>, never touching "
-    "the user's branch. It measures how long each model would wait right now, and can hand a "
+    "background BharatCode Desktop sessions, never touching the user's checkout: each finished job's "
+    "edited files are copied to the project's spare-gpu/<date>_<time>/ folder. It measures how long each model would wait right now, and can hand a "
     "switch-safe task to whichever model starts it sooner, checking the result before keeping it. "
     "Relay the tools' answers to the user as they are."
 )
@@ -54,8 +54,22 @@ def db_path(root: Path) -> Path:
     return Path(override) if override else root / ".gtu" / "gtu.db"
 
 
+QUESTION = "question"  # the router's "kind" for spare_ask
+ASK_TIMEOUT = 600.0
+ASK_DIR_ENV = "GTU_ASK_DIR"
+
+
+def ask_folder() -> Path:
+    """Where spare_ask's Desktop sessions run: spare-gpu's own folder, so a question never writes
+    into the user's repo. Desktop lists these sessions under that folder."""
+    override = os.environ.get(ASK_DIR_ENV)
+    base = Path(override) if override else Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "spare-gpu" / "ask"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 class SpareTools:
-    """The seven tools as plain functions returning text, for one project folder."""
+    """The eight tools as plain functions returning text, for one project folder."""
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
@@ -125,7 +139,7 @@ class SpareTools:
         return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
                 "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
-    # --- the seven tools -------------------------------------------------------------------
+    # --- the eight tools -------------------------------------------------------------------
 
     def queue_work(self, kind: str, path: str, note: str | None = None, start: bool = True) -> str:
         try:
@@ -133,8 +147,8 @@ class SpareTools:
         except actions.ActionError as exc:
             return f"Didn't queue it: {exc}"
         job = outcome.job
-        lines = [f"Queued a {job.kind} job for {job.target} (job {job.id}). Results go on git branch "
-                 f"{worktree.branch_name(job.id)}; your own branch isn't touched."]
+        lines = [f"Queued a {job.kind} job for {job.target} (job {job.id}). When it finishes, its edited "
+                 f"files are copied to {worktree.OUTPUT_DIR}/<date>_<time>/ in this project; your files aren't touched."]
         if outcome.note:
             lines.append(outcome.note)
         with Store(db_path(Path(job.repo))) as store:
@@ -169,7 +183,8 @@ class SpareTools:
                         on += f" instead of {waits.name(j.preferred_model)} (shorter wait)"
                     if j.fallback:
                         on += " (fell back after a failed check)"
-                    lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}{on}")
+                    files = f". Edited files: {j.output_dir}/" if j.output_dir else ""
+                    lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}{on}{files}")
         if commands:
             lines.append("Commands to run when there's capacity:")
             for c in commands[-10:]:
@@ -210,7 +225,7 @@ class SpareTools:
             lines.append(
                 f"- {j.kind} {j.target} (job {j.id}): {j.status}; started {reporting._local(r.started)}, "
                 f"took {reporting._span(r.duration)}, {r.tokens:,} tokens. Produced: {made or 'nothing committed'}."
-                + tests + (f" See it with: git diff HEAD...{worktree.branch_name(j.id)}" if r.files else "")
+                + tests + (f" Edited files: {j.output_dir}/" if j.output_dir else "")
             )
         held = sorted(w for r in reports for w in r.queue_waits_ms)
         if held:
@@ -235,14 +250,50 @@ class SpareTools:
         except (actions.ActionError, StoreError) as exc:
             return f"Didn't cancel it: {exc}. spare_work_status lists ids and what's still running."
         job = outcome.job
-        text = (f"Cancelled job {job.id} ({job.kind} {job.target}). Anything it already committed stays on "
-                f"branch {worktree.branch_name(job.id)}.")
+        text = (f"Cancelled job {job.id} ({job.kind} {job.target}). Nothing was copied to "
+                f"{worktree.OUTPUT_DIR}/; anything it had finished stays on branch {worktree.branch_name(job.id)}.")
         return text + (f"\nNote: {outcome.note}" if outcome.note else "")
 
     def waits(self) -> str:
         path = db_path(self._root())
         with Store(path if path.exists() else ":memory:") as store, self._http() as http:  # needs no jobs
             return waits.describe(waits.views(store, http))
+
+    def ask(self, question: str, your_model: str | None = None) -> str:
+        """Answer a general question on whichever model starts it sooner, and say which and why.
+        Runs as a read-only Desktop session in spare-gpu's own folder, never in the user's repo
+        (a session writes its permission file into its folder)."""
+        question = (question or "").strip()
+        if not question:
+            return "Nothing to ask: give the question."
+        try:
+            conn = desktop.discover()
+        except desktop.DesktopNotFound as exc:
+            return f"Didn't ask: {exc}"
+        path = db_path(self._root())
+        folder = path.parent if path.exists() else None
+        with Store(path if path.exists() else ":memory:") as store, self._http() as http:
+            state = router.State.load(folder) if folder else router.State()
+            # Unlike job types, general questions have no measured quality check: the user asked for
+            # them to go to the faster model, so they're treated as switch-safe here.
+            choice = router.choose(QUESTION, self._preferred(your_model), waits.views(store, http), state,
+                                   {"types": {QUESTION: "switch-safe"}})
+            if folder:
+                state.save(folder)
+        workdir = ask_folder()
+        prompt = f"{question}\n\nAnswer directly and briefly. Don't use any tools."
+        result = desktop.DesktopAgent(conn, model=f"bharatcode/{choice.model}", timeout=ASK_TIMEOUT).run(
+            workdir, prompt, edit=False, commands=())
+        how = f"Answered by {waits.name(choice.model)}: {choice.reason}."
+        if result.error or not result.text:
+            refused = router.plan_refusal(result.error)
+            if refused and refused != choice.model:  # the plan doesn't include it: ask the one it does
+                result = desktop.DesktopAgent(conn, model=f"bharatcode/{refused}", timeout=ASK_TIMEOUT).run(
+                    workdir, prompt, edit=False, commands=())
+                how = f"Answered by {waits.name(refused)}: your plan doesn't include {waits.name(choice.model)}."
+            if result.error or not result.text:
+                return f"Couldn't get an answer: {result.error or 'the model returned nothing'}. ({how})"
+        return f"{result.text}\n\n({how})"
 
     def _preferred(self, your_model: str | None) -> str:
         """The model the task would otherwise run on: the calling chat's own model if it said;
@@ -268,8 +319,9 @@ class SpareTools:
             choice = router.decide(store, store.path.parent, job.kind, preferred, self._http)
             store.set_route(job.id, choice.model, choice.preferred, choice.reason)
             runner_line = self._ensure_runner(store, Path(job.repo))
-        lines = [f"Handed off: {job.kind} for {job.target} (job {job.id}), working in the background on branch "
-                 f"{worktree.branch_name(job.id)}. Your branch isn't touched.", choice.summary()]
+        lines = [f"Handed off: {job.kind} for {job.target} (job {job.id}), working in the background. When it "
+                 f"finishes, its edited files are copied to {worktree.OUTPUT_DIR}/<date>_<time>/ in this project; "
+                 "your files aren't touched.", choice.summary()]
         if outcome.note:
             lines.append(outcome.note)
         lines += [runner_line, "spare_work_status shows progress; spare_last_night shows what it produced."]
@@ -302,7 +354,8 @@ def build_server(base: Path, tools: SpareTools | None = None):
     def spare_queue_work(type: Literal["tests", "docs", "review"], path: str, note: str | None = None) -> str:
         """Queue a coding chore for spare-gpu to do in the background: write tests, write
         documentation, or review code, for a file or folder in this git repo. The work happens
-        in the background, unattended, on its own git branch; it doesn't happen in this chat.
+        in the background, unattended; when it finishes, its edited files are copied to the
+        project's spare-gpu/<date>_<time>/ folder. It doesn't happen in this chat.
 
         Use it when the user wants tests, docs or a review done in the background, later, tonight
         or overnight. Examples: "queue tests for the payments module", "write tests for
@@ -337,7 +390,7 @@ def build_server(base: Path, tools: SpareTools | None = None):
     @server.tool(annotations=notes(True))
     def spare_last_night(hours: float | None = None) -> str:
         """What spare-gpu got done recently: which jobs ran, when, how long, what each produced
-        (files on its branch, tests kept or discarded) and what it cost in tokens.
+        (the edited files in its spare-gpu/<date>_<time>/ folder, tests kept or discarded) and what it cost in tokens.
 
         Use it for a summary of results: "what did spare-gpu do last night?", "what got done?",
         "show me the overnight results". For one job's state ("is my tests job done?") or work still
@@ -353,7 +406,7 @@ def build_server(base: Path, tools: SpareTools | None = None):
     @server.tool(annotations=notes(False, destructive=True))
     def spare_cancel_work(job_id: str) -> str:
         """Cancel a queued or running spare-gpu job, or a command waiting in spare_run_when_free.
-        Anything a job already committed stays on its branch.
+        Nothing of a cancelled job is copied to the spare-gpu/ folder.
 
         Use it for "cancel the docs job", "drop job 1a2b3c4d", "don't run that command after all",
         "stop the tests for payments".
@@ -377,6 +430,23 @@ def build_server(base: Path, tools: SpareTools | None = None):
         already-queued job hasn't started, use spare_work_status."""
         return tools.waits()
 
+    @server.tool(annotations=notes(True, world=True))
+    def spare_ask(question: str, your_model: str | None = None) -> str:
+        """Answer a general question (not a coding chore) on whichever BharatCode model will start
+        it sooner, so the user doesn't sit in DeepSeek's queue for a quick answer. Waits for the
+        answer and returns it, with which model answered and why. The answering model has no tools
+        and no web access, so it answers from what it knows.
+
+        Use it when the user asks a question through /auto, or says "ask whichever model is free:
+        ...". Pass the answer on as it comes back. For tests, docs or a code review of files in the
+        repo use spare_delegate instead.
+
+        Args:
+            question: The user's question, in their words.
+            your_model: The model the question would otherwise go to, e.g. "deepseek-v4.1-flash".
+        """
+        return tools.ask(question, your_model)
+
     @server.tool(annotations=notes(False, world=True))
     def spare_delegate(type: Literal["tests", "docs", "review"], path: str, note: str | None = None,
                        your_model: str | None = None) -> str:
@@ -385,7 +455,8 @@ def build_server(base: Path, tools: SpareTools | None = None):
         sooner, so the user doesn't wait in DeepSeek's queue. Only task types measured as
         switch-safe ever move to the other model; the result is checked before it's kept, and if
         the check keeps nothing it reruns once on the preferred model. Returns at once with a short
-        summary and the git branch; the work itself never comes back into this chat.
+        summary; when it finishes, its edited files are in spare-gpu/<date>_<time>/ in the project.
+        The work itself never comes back into this chat.
 
         Use it when the user wants the task done now without waiting: "write tests for src/pay.py
         on whichever model is free", "get this reviewed now, don't wait in the queue", "delegate the

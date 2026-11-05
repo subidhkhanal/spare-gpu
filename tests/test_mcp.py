@@ -1,4 +1,4 @@
-"""spare-gpu's MCP server: each of the seven tools against fakes (BharatCode's API, live stats and
+"""spare-gpu's MCP server: each of the eight tools against fakes (BharatCode's API, live stats and
 history, and the background processes), missing-store handling, the real protocol (in memory and
 over stdio, the way BharatCode's CLI runs it), and sharing the store between processes."""
 
@@ -23,7 +23,7 @@ from gpu_token_utilization.store import RequestLog, Store
 from conftest import git
 
 TOOLS = {"spare_queue_work", "spare_delegate", "spare_waits", "spare_work_status", "spare_last_night",
-         "spare_cancel_work", "spare_run_when_free"}
+         "spare_cancel_work", "spare_run_when_free", "spare_ask"}
 KEY = "bc_live_test_key_not_real"
 
 
@@ -79,7 +79,7 @@ def finished_review(git_repo, tools, tokens=355, wait_ms=12500):
 
 def test_queue_work_writes_to_the_same_store_as_the_cli(tools, git_repo):
     text = tools.queue_work("tests", "src", note="cover negative numbers")
-    assert readable(text) and "Queued a tests job for src" in text and "gtu/" in text
+    assert readable(text) and "Queued a tests job for src" in text and "spare-gpu/<date>_<time>/" in text
     with Store(git_repo / ".gtu" / "gtu.db") as store:  # exactly where `gtu add` puts it
         (job,) = store.list_jobs()
     assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "queued")
@@ -338,7 +338,7 @@ def test_without_a_store_tools_explain_and_create_nothing(call, git_repo, tools)
 
 # --- the real protocol -----------------------------------------------------------------------
 
-def test_protocol_offers_exactly_seven_task_shaped_tools(tools, git_repo):
+def test_protocol_offers_exactly_eight_task_shaped_tools(tools, git_repo):
     async def go():
         async with mcp.Client(build_server(git_repo, tools)) as client:
             return (await client.list_tools()).tools
@@ -357,6 +357,7 @@ def test_protocol_offers_exactly_seven_task_shaped_tools(tools, git_repo):
         ("spare_waits", "is now a good time to run a big refactor?", "spare_delegate"),
         ("spare_delegate", "write tests for src/pay.py on whichever model is free", "spare_queue_work"),
         ("spare_run_when_free", "run the test suite when BharatCode is free", "spare_queue_work"),
+        ("spare_ask", "ask whichever model is free", "spare_delegate"),
     ]:
         description = " ".join(listed[name].description.split())
         assert phrase in description, name

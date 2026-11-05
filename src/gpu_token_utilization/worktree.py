@@ -3,6 +3,10 @@
 The user's checkout is only ever read (status, HEAD). Worktrees live under
 <repo>/.gtu/worktrees/, which gitignores itself, so creating one never makes the
 repo look dirty. Commits go to the job's branch only; nothing is ever pushed.
+
+What the user gets is a plain folder: when a job finishes, the files it changed are copied to
+<repo>/spare-gpu/<date>_<time>/, keeping their paths. That folder gitignores itself too, so
+the repo stays clean; the branch stays behind as spare-gpu's own record.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import stat
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 BRANCH_PREFIX = "gtu/"
@@ -60,7 +65,8 @@ def repo_root(path: Path) -> Path:
 
 # spare-gpu's own folder never counts as a change to the user's repo. It normally ignores itself
 # (.gtu/.gitignore), but a user can create it first, e.g. to write .gtu/switch-safe.
-OWN_FILES = ("--", ".", ":(exclude).gtu")
+OUTPUT_DIR = "spare-gpu"  # <repo>/spare-gpu/<date>_<time>/: each finished job's edited files
+OWN_FILES = ("--", ".", ":(exclude).gtu", f":(exclude){OUTPUT_DIR}")
 
 
 def ensure_clean(repo: Path) -> None:
@@ -183,6 +189,47 @@ def add_file_to_branch(repo: Path, branch: str, path: str, content: str, message
         commit = run(*AUTHOR, "commit-tree", tree, "-p", parent, "-m", message)
         run("update-ref", f"refs/heads/{branch}", commit, parent)
     return commit
+
+
+def changed_files(repo: Path, job_id: str, base: str | None) -> list[str]:
+    """Files the job's branch added or changed since `base` (deleted files are left out: there's
+    nothing to copy). Empty if the branch is gone or changed nothing."""
+    branch = branch_name(job_id)
+    if _git(Path(repo), "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode != 0:
+        return []
+    base = base or _git(Path(repo), "merge-base", "HEAD", branch).stdout.strip()
+    out = _git(Path(repo), "diff", "--name-only", "--diff-filter=d", "-z", base, branch).stdout
+    return [name for name in out.split("\0") if name]
+
+
+def export(repo: Path, job_id: str, base: str | None, when: datetime) -> Path | None:
+    """Copy the files the job changed, as they are on its branch, into
+    <repo>/spare-gpu/<date>_<time>/ with their paths. Returns that folder, or None if the job
+    changed nothing. Read straight from git, so it works with or without the worktree."""
+    repo = Path(repo)
+    files = changed_files(repo, job_id, base)
+    if not files:
+        return None
+    root = repo / OUTPUT_DIR
+    root.mkdir(exist_ok=True)
+    marker = root / ".gitignore"
+    if not marker.exists():
+        marker.write_text("*\n", encoding="utf-8")  # never part of the user's repo
+    stamp = when.strftime("%Y-%m-%d_%H-%M-%S")
+    folder, n = root / stamp, 1
+    while folder.exists():  # two jobs finishing in the same second
+        n += 1
+        folder = root / f"{stamp}-{n}"
+    folder.mkdir()
+    branch = branch_name(job_id)
+    for name in files:
+        target = folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        blob = subprocess.run([*GIT, "show", f"{branch}:{name}"], cwd=repo, capture_output=True)
+        if blob.returncode != 0:
+            raise GitError(f"couldn't read {name} from {branch}: {blob.stderr.decode('utf-8', 'replace')[:200]}")
+        target.write_bytes(blob.stdout)  # bytes: exactly what the job wrote, line endings included
+    return folder
 
 
 def remove(repo: Path, job_id: str) -> None:
