@@ -29,18 +29,39 @@ your-project/
             └── mathx.py
 ```
 
-## Use it
+## `/auto` mode
 
-Type in any Desktop chat:
+### Turn it on
 
-```
-/auto write docs for src/utils.py
-/auto what does a race condition mean?
-```
+`/auto` is a slash command that `gtu integrate` adds to BharatCode Desktop. Nothing else is needed:
 
-Chores (tests, docs, reviews) run in the background. Questions are answered right there in the chat, by whichever model starts sooner.
+1. Run `gtu integrate`. If you set up spare-gpu before `/auto` existed, update first: `pipx install --force git+https://github.com/subidhkhanal/spare-gpu`.
+2. Restart BharatCode Desktop.
+3. Open a chat in your project and type `/`. `/auto` appears in the command list.
 
-Or just ask:
+### Use it
+
+Type `/auto` and then what you want, in plain words:
+
+| You type | What happens |
+|---|---|
+| `/auto write tests for src/payments.py` | Writes tests in the background and keeps only the ones that pass |
+| `/auto write docs for src/utils.py` | Adds docstrings and README text in the background, without changing code |
+| `/auto review src/gate.py` | Writes a code review in the background |
+| `/auto what does a race condition mean?` | Answers the question right in the chat |
+| `/auto` | Shows how long each model would wait right now |
+
+Each time, `/auto` picks the model that will start sooner: DeepSeek V4.1 Flash, or Qwen 3.8 27B when DeepSeek has a queue. The reply says which model it used and why. For tests, docs and reviews, it only moves to Qwen for task types measured to be just as good on Qwen (docs today).
+
+Background work lands in `spare-gpu/<date>_<time>/` when it's done. Ask "is my job done?" to check on it.
+
+### Turn it off
+
+`gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
+
+## Or just ask
+
+You don't have to use `/auto`. spare-gpu also understands plain requests in any Desktop chat:
 
 | You say | What happens |
 |---|---|
