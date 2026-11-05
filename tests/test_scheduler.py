@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -116,26 +117,33 @@ def writing_plan(names, calls, crash_on=None):
     return {kind: [(n, make(n)) for n in names] for kind in ("tests", "docs", "review")}
 
 
-def test_job_runs_on_its_own_branch_and_never_touches_main(fake, store, client, make_gate, git_repo):
+def result_files(store, job_id):
+    job = store.get_job(job_id)
+    if not job.output_dir:
+        return set()
+    root = Path(job.repo) / job.output_dir
+    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+
+
+def test_job_works_on_its_own_copy_and_never_touches_main(fake, store, client, make_gate, git_repo):
     main_head = git(git_repo, "rev-parse", "main")
     job = store.add_job("docs", "src/calc.py", str(git_repo))
     plans = writing_plan(["one", "two"], [])
     make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
 
     assert store.get_job(job.id).status == "done"
-    branch = f"gtu/{job.id}"
-    assert git(git_repo, "log", "--format=%s", f"main..{branch}").splitlines() == [
-        f"gtu docs src/calc.py: two (job {job.id})",
-        f"gtu docs src/calc.py: one (job {job.id})",
-    ]
-    assert git(git_repo, "show", f"{branch}:one.txt") == f"one for job {job.id}"
+    # what it produced is in spare-gpu/<date>_<time>/
+    folder = git_repo / store.get_job(job.id).output_dir
+    assert result_files(store, job.id) == {"one.txt", "two.txt"}
+    assert (folder / "one.txt").read_text().strip() == f"one for job {job.id}"
     # main: same commit, same checkout, nothing new in the working tree
     assert git(git_repo, "rev-parse", "main") == main_head
     assert git(git_repo, "branch", "--show-current") == "main"
     assert git(git_repo, "status", "--porcelain") == ""
     assert not (git_repo / "one.txt").exists()
-    # worktree cleaned up, branch kept
+    # the job's copy is gone and no branch was ever made
     assert not (git_repo / ".gtu" / "worktrees" / job.id).exists()
+    assert git(git_repo, "branch", "--list", "gtu/*") == ""
 
 
 def test_crash_mid_step_discards_partial_edits_and_resumes(fake, store, client, make_gate, git_repo):
@@ -149,22 +157,22 @@ def test_crash_mid_step_discards_partial_edits_and_resumes(fake, store, client, 
 
     make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
     assert calls == ["one", "two", "two", "three"]
-    branch = f"gtu/{job.id}"
-    files = git(git_repo, "ls-tree", "--name-only", "-r", branch).splitlines()
-    assert "half-done.txt" not in files
-    assert {"one.txt", "two.txt", "three.txt"} <= set(files)
-    assert len(git(git_repo, "log", "--format=%H", f"main..{branch}").splitlines()) == 3
+    assert result_files(store, job.id) == {"one.txt", "two.txt", "three.txt"}  # not half-done.txt
 
 
-def test_dirty_repo_fails_the_job_clearly(fake, store, client, make_gate, git_repo):
+def test_unsaved_changes_are_what_the_job_starts_from(fake, store, client, make_gate, git_repo):
     job = store.add_job("docs", "src/calc.py", str(git_repo))
     (git_repo / "src" / "calc.py").write_text("edited but not committed\n")
-    logs = []
-    sched = Scheduler(store, make_gate(), client, plans=writing_plan(["one"], []), sleep=fake.clock.sleep, log=logs.append)
-    sched.run()
-    assert store.get_job(job.id).status == "failed"
-    assert any("uncommitted changes" in line for line in logs)
-    assert git(git_repo, "branch", "--list", "gtu/*") == ""
+    seen = []
+
+    def step(ctx):
+        seen.append((ctx.workdir / "src" / "calc.py").read_text())
+        return "ok"
+
+    plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
+    make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+    assert store.get_job(job.id).status == "done" and seen == ["edited but not committed\n"]
+    assert (git_repo / "src" / "calc.py").read_text() == "edited but not committed\n"  # still the user's
 
 
 def test_opencode_config_is_never_committed(fake, store, client, make_gate, git_repo):
@@ -177,5 +185,4 @@ def test_opencode_config_is_never_committed(fake, store, client, make_gate, git_
 
     plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
     make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
-    files = git(git_repo, "ls-tree", "--name-only", "-r", f"gtu/{job.id}").splitlines()
-    assert "test_calc.py" in files and "opencode.json" not in files
+    assert result_files(store, job.id) == {"test_calc.py"}  # never opencode.json

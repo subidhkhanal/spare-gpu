@@ -129,9 +129,7 @@ def test_high_estimate_over_the_remaining_budget_is_flagged(repo, monkeypatch):
 
 def test_problems_that_would_stop_a_job_are_flagged(repo, monkeypatch):
     add("tests", "src/calc.py")
-    (repo / "src" / "calc.py").write_text("changed\n")  # dirty after queueing
     monkeypatch.delenv("GTU_BHARATCODE_CMD")
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     out = runner.invoke(app, ["start", "--dry-run"]).output
-    assert "PROBLEM: the repo has uncommitted changes" in out
     assert "PROBLEM: BharatCode's CLI isn't installed" in out

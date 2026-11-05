@@ -120,16 +120,15 @@ def test_queue_work_refusals_are_explained(tools, git_repo, path, problem):
     assert text.startswith("Didn't queue it:") and problem in text
 
 
-def test_queue_work_in_a_dirty_repo_creates_nothing(tools, git_repo):
+def test_queue_work_with_unsaved_changes(tools, git_repo):
     (git_repo / "scratch.txt").write_text("wip")
-    text = tools.queue_work("review", "src")
-    assert "Didn't queue it" in text and "uncommitted changes" in text
-    assert not (git_repo / ".gtu").exists()
+    assert tools.queue_work("review", "src").startswith("Queued a review job")
 
 
-def test_queue_work_outside_any_git_repo(tmp_path):
+def test_queue_work_in_a_folder_that_is_not_a_git_repo(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\n")
     text = SpareTools(tmp_path, launch=lambda repo: 1).queue_work("review", ".")
-    assert "Didn't queue it" in text and "not inside a git repository" in text
+    assert text.startswith("Queued a review job"), text
 
 
 # --- spare_work_status ------------------------------------------------------------------------

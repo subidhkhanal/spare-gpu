@@ -67,8 +67,9 @@ def score(store: Store, job_id: str, kind: str, repo: Path) -> float:
     if kind == "docs":
         m = re.search(r"Kept documentation changes in (\d+) file", steps.get("verify", ""))
         return float(m.group(1)) if m else 0.0
-    report = worktree._git(repo, "show", f"{worktree.branch_name(job_id)}:gtu-review-{job_id}.md").stdout \
-        if steps.get("review") else ""
+    folder = store.get_job(job_id).output_dir
+    review = repo / folder / f"gtu-review-{job_id}.md" if folder else None
+    report = review.read_text(encoding="utf-8") if review and review.is_file() else ""
     good = bad = 0
     for path, line in FINDING.findall(report):
         file = repo / path

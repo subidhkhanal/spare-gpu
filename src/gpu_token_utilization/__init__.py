@@ -1,3 +1,3 @@
-"""spare-gpu: queue repo work and run it unattended through BharatCode, on its own git branch."""
+"""spare-gpu: queue project chores and run them unattended through BharatCode; results land in spare-gpu/."""
 
 __version__ = "0.1.0"

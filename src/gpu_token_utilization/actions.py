@@ -24,7 +24,7 @@ class Outcome:
 
 def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target: str,
               note: str | None = None) -> Outcome:
-    """Queue a job on `target` (relative to `base`, or absolute) in the git repo containing it.
+    """Queue a job on `target` (relative to `base`, or absolute) in the project containing it (its git repo, if it's in one, else `base`).
     The store is only opened (and so only created) once the request has passed every check;
     `open_store` gets the repo root."""
     try:

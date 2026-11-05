@@ -87,7 +87,7 @@ def test_demo_reviews_a_file_and_explains_next_steps(project):
     assert "Reviewing src/calc.py" in out and "skips the capacity gate" in out
     assert "mean([]) divides by zero" in out
     assert "360 tokens" in out and "4.2 s waiting in BharatCode's queue" in out and "req-demo-1" in out
-    assert "gtu add tests src/calc.py" in out and "gtu start" in out and "own git branch" in out
+    assert "gtu add tests src/calc.py" in out and "gtu start" in out and "own copy of the project" in out
     sent = json.loads(route.calls.last.request.content)
     assert "src/calc.py:1| def add(a, b):" in sent["messages"][1]["content"]
     assert sent["max_tokens"] == 700

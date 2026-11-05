@@ -81,7 +81,8 @@ You don't have to use `/auto`. spare-gpu also understands plain requests in any 
 
 - Windows only, and jobs run while BharatCode Desktop is open.
 - The `spare-gpu/` folder ignores itself in git, so it never shows up as a change in your repo.
-- Your project must be a git repo with no uncommitted changes when a job starts: each job works on a separate copy, so what you see is exactly what it starts from. That copy uses a `gtu/<job-id>` branch internally; you never need it.
+- Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project.
+- Needs git installed on your PC, since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
 - Which task types may switch models comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/).
 - More detail and the measurements behind it: [research/](research/).
 

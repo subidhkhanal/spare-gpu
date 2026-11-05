@@ -1,8 +1,9 @@
 """Runs queued jobs one step at a time, only while the capacity gate is open.
 
-Each job works in its own git worktree on branch gtu/<job-id>; the user's checkout
-is never modified. Progress is saved after every step: the step is committed on the
-job's branch and marked done. A step left 'running' by a killed process never
+Each job works on its own private copy of the project (worktree.py); the user's files
+are never modified. Progress is saved after every step: the step is saved in the copy's
+private history and marked done. A finished job's edited files are copied to
+spare-gpu/<date>_<time>/ and its copy is deleted. A step left 'running' by a killed process never
 finished, so on restart its partial edits are discarded and it runs again; finished
 steps never do.
 
@@ -257,7 +258,7 @@ class Scheduler:
         if self.isolate:
             try:
                 workdir = worktree.create(Path(job.repo), job.id)
-                if not job.base_commit:  # first run: remember where the branch started, for reports
+                if not job.base_commit:  # first run: remember the copy's starting point, for reports
                     self.store.set_base_commit(job.id, worktree._git(workdir, "rev-parse", "HEAD").stdout.strip())
             except worktree.GitError as exc:
                 self.store.set_status(job.id, "failed")
@@ -275,7 +276,7 @@ class Scheduler:
         steps = self.store.steps(job.id)
         step = next((s for s in steps if s["status"] == "pending"), None)
         if step is None:
-            self._finish(job, "done")
+            self._complete(job)
             return "finished"
 
         fn = dict(plan).get(step["name"])
@@ -294,7 +295,6 @@ class Scheduler:
         doing = f"{_label(worker)} is working on it ({_model_name(worker)}); this can take several minutes" \
             if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one request"
         self._log(f"Job {job.id}: step {step['seq']} of {len(steps)} ({step['name']}) started: {doing}.")
-        main_before = self._main_state(job)
         try:
             output = fn(ctx)
         except StopRequested:
@@ -338,20 +338,10 @@ class Scheduler:
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
             return "failed"
 
-        if main_before is not None and self._main_state(job) != main_before:
-            message = "your main checkout changed while this step ran; stopping the job to be safe"
-            self.store.set_step(step["id"], "failed", message)
-            self._finish(job, "failed")
-            self._log(f"Job {job.id}: {message}. Check `git status` in {job.repo}.")
-            return "failed"
-
         if self.isolate:
-            # Commit before marking the step done, so "done" always means "saved on the branch".
-            commit_id = worktree.commit(
-                workdir, f"gtu {job.kind} {job.target}: {step['name']} (job {job.id})", exclude=NEVER_COMMIT
-            )
-            if commit_id:
-                output = f"{output}\n\n[committed {commit_id[:10]} on {worktree.branch_name(job.id)}]"
+            # Save before marking the step done, so "done" always means "kept in the job's copy".
+            worktree.commit(workdir, f"gtu {job.kind} {job.target}: {step['name']} (job {job.id})",
+                            exclude=NEVER_COMMIT)
         self.store.set_step(step["id"], "done", output)
         self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) done.")
         if step["name"] == "verify" and kept_nothing(output) and self._fall_back(job):
@@ -359,10 +349,7 @@ class Scheduler:
         if self.store.get_job(job.id).status == "cancelled":
             self._finish(job, "cancelled")
         elif all(s["status"] == "done" for s in self.store.steps(job.id)):
-            self._finish(job, "done")
-            folder = self._export(job)
-            self._log(f"Job {job.id}: finished; " + (f"its edited files are in {folder}." if folder
-                                                     else "it changed no files."))
+            self._complete(job)
         return "done"
 
     def _route(self, job: Job) -> tuple[Job, BharatCodeCli | None]:
@@ -399,31 +386,32 @@ class Scheduler:
                 self.store.set_status(job.id, "paused")
         self._log("Stopped by `gtu stop`. Progress is saved; run `gtu start` to resume.")
 
-    def _main_state(self, job: Job) -> tuple[str, str] | None:
-        """HEAD and status of the user's checkout, to prove a step left it alone."""
-        if not self.isolate:
-            return None
-        repo = Path(job.repo)
-        return (worktree._git(repo, "rev-parse", "HEAD").stdout,
-                worktree._git(repo, "status", "--porcelain", *worktree.OWN_FILES).stdout)
-
     def _undo_step(self, job: Job, workdir: Path) -> None:
         """Put an unfinished step back to pending and drop its edits, so it reruns cleanly."""
         self.store.reset_interrupted_steps(job.id)
         if self.isolate:
             worktree.discard_uncommitted(workdir)
 
+    def _complete(self, job: Job) -> None:
+        """A finished job: its edited files go to spare-gpu/<date>_<time>/, then its copy is deleted.
+        If copying fails, the copy is kept so nothing is lost."""
+        try:
+            folder = self._export(job)
+        except (worktree.GitError, OSError) as exc:
+            self.store.set_status(job.id, "done")
+            self._log(f"Job {job.id}: finished, but couldn't copy its files to {worktree.OUTPUT_DIR}/: {exc}. "
+                      f"They're kept in {worktree.worktree_path(Path(job.repo), job.id)}.")
+            return
+        self._finish(job, "done")
+        self._log(f"Job {job.id}: finished; " + (f"its edited files are in {folder}." if folder
+                                                 else "it changed no files."))
+
     def _export(self, job: Job) -> str | None:
         """Copy the finished job's edited files to <repo>/spare-gpu/<date>_<time>/ and record the
         folder. The path is given relative to the repo, as the user sees it there."""
         if not self.isolate:
             return None
-        try:
-            folder = worktree.export(Path(job.repo), job.id, job.base_commit, self._now().astimezone())
-        except (worktree.GitError, OSError) as exc:
-            self._log(f"Job {job.id}: couldn't copy its files to {worktree.OUTPUT_DIR}/: {exc}. "
-                      f"They're safe on branch {worktree.branch_name(job.id)}.")
-            return None
+        folder = worktree.export(Path(job.repo), job.id, job.base_commit, self._now().astimezone())
         if folder is None:
             return None
         shown = folder.relative_to(Path(job.repo)).as_posix()
@@ -431,7 +419,7 @@ class Scheduler:
         return shown
 
     def _finish(self, job: Job, status: str) -> None:
-        """Record the final status and remove the job's worktree. Its branch is kept."""
+        """Record the final status and delete the job's copy of the project."""
         if status != "cancelled":
             self.store.set_status(job.id, status)
         if self.isolate:

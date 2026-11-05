@@ -2,10 +2,11 @@
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
-from gpu_token_utilization import jobs
+from gpu_token_utilization import jobs, worktree
 from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.fakeapi import Reply
@@ -57,14 +58,28 @@ def run_jobs(store, client, make_gate, fake):
     return run
 
 
-def branch_files(repo, job_id):
-    return set(git(repo, "ls-tree", "--name-only", "-r", f"gtu/{job_id}").splitlines())
+def result_files(store, job_id):
+    """The files a finished job left in its spare-gpu/<date>_<time>/ folder (empty if none)."""
+    job = store.get_job(job_id)
+    if not job.output_dir:
+        return set()
+    root = Path(job.repo) / job.output_dir
+    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+
+
+def result(store, job_id, path):
+    job = store.get_job(job_id)
+    return (Path(job.repo) / job.output_dir / path).read_text(encoding="utf-8")
 
 
 def assert_main_untouched(repo, head):
+    """Same commit, same branch, nothing changed, and no branch or copy of the job left behind."""
     assert git(repo, "rev-parse", "main") == head
     assert git(repo, "branch", "--show-current") == "main"
+    assert git(repo, "branch", "--list", "gtu/*") == ""
     assert git(repo, "status", "--porcelain") == ""
+    worktrees = Path(repo) / ".gtu" / "worktrees"
+    assert not worktrees.exists() or not any(worktrees.iterdir())
 
 
 # --- tests job ---------------------------------------------------------------------------
@@ -83,16 +98,12 @@ def test_tests_job_keeps_only_passing_tests(git_repo, store, scenario, run_jobs)
     run_jobs()
 
     assert store.get_job(job.id).status == "done"
-    files = branch_files(git_repo, job.id)
-    assert "tests/test_gtu_calc.py" in files and "tests/test_gtu_broken.py" not in files
-    assert not any("__pycache__" in f or f.endswith(".pyc") for f in files)  # test runs leave no caches behind
-    kept = git(git_repo, "show", f"gtu/{job.id}:tests/test_gtu_calc.py")
+    # only the kept test file: the broken one was dropped and the sneaky source change reverted,
+    # and test runs leave no caches behind
+    assert result_files(store, job.id) == {"tests/test_gtu_calc.py"}
+    kept = result(store, job.id, "tests/test_gtu_calc.py")
     assert "test_adds_numbers" in kept and "test_adds_negatives" in kept
     assert "test_wrong_on_purpose" not in kept
-    assert git(git_repo, "show", f"gtu/{job.id}:src/calc.py") == "def add(a, b):\n    return a + b"
-    # one commit, made by the verify step; the unchecked CLI output was never committed
-    subjects = git(git_repo, "log", "--format=%s", f"main..gtu/{job.id}").splitlines()
-    assert subjects == [f"gtu tests src/calc.py: verify (job {job.id})"]
     verify = store.steps(job.id)[1]["output"]
     assert "Kept 2 passing test(s), dropped 1" in verify and "reverted src/calc.py" in verify
     assert_main_untouched(git_repo, head)
@@ -114,7 +125,7 @@ def test_tests_job_with_no_tests_generated_finishes_cleanly(git_repo, store, sce
     run_jobs()
     assert store.get_job(job.id).status == "done"
     assert "nothing to keep" in store.steps(job.id)[1]["output"]
-    assert git(git_repo, "log", "--format=%s", f"main..gtu/{job.id}") == ""
+    assert store.get_job(job.id).output_dir is None and not (git_repo / "spare-gpu").exists()
 
 
 def test_cli_is_given_the_test_allowlist_and_the_worktree(git_repo, store, scenario, run_jobs):
@@ -148,17 +159,8 @@ def test_crash_during_verify_resumes_without_rerunning_the_cli(git_repo, store, 
     run_jobs()  # a fresh start
     assert store.get_job(job.id).status == "done"
     assert len(record.read_text().splitlines()) == 1  # the CLI ran once, its work was kept in the patch
-    kept = git(git_repo, "show", f"gtu/{job.id}:tests/test_gtu_calc.py")
+    kept = result(store, job.id, "tests/test_gtu_calc.py")
     assert "test_adds_numbers" in kept and "test_wrong_on_purpose" not in kept
-
-
-def test_cli_touching_the_main_checkout_stops_the_job(git_repo, store, scenario, run_jobs):
-    scenario(steps=[{"tokens": 100, "writes": {"../../../src/calc.py": "def add(a, b):\n    return 0\n"}}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
-    logs = run_jobs()
-    assert store.get_job(job.id).status == "failed"
-    assert any("main checkout changed" in line for line in logs)
-    git(git_repo, "checkout", "--", "src/calc.py")  # tidy up what the "rogue" CLI did
 
 
 def test_cli_failure_fails_the_job_with_its_message(git_repo, store, scenario, run_jobs):
@@ -187,11 +189,8 @@ def test_docs_job_keeps_docstring_only_changes_and_reverts_the_rest(git_repo, st
     run_jobs()
 
     assert store.get_job(job.id).status == "done"
-    branch = f"gtu/{job.id}"
-    assert '"""Return the sum of a and b."""' in git(git_repo, "show", f"{branch}:src/calc.py")
-    assert git(git_repo, "show", f"{branch}:src/other.py") == 'def double(x):\n    """Twice x."""\n    return x * 2'
-    assert "## calc" in git(git_repo, "show", f"{branch}:README.md")
-    assert "docs/calc.md" in branch_files(git_repo, job.id)
+    assert '"""Return the sum of a and b."""' in result(store, job.id, "src/calc.py")
+    assert "## calc" in result(store, job.id, "README.md")
     assert "reverted src/other.py" in store.steps(job.id)[1]["output"]
     assert_main_untouched(git_repo, head)
     # what the user gets: the kept files only, in spare-gpu/<date>_<time>/, with their paths
@@ -238,8 +237,8 @@ def test_review_job_writes_a_report_and_changes_no_source(git_repo, store, scena
     assert store.get_job(job.id).status == "done"
     assert not record.exists()  # the review uses our own client, never the CLI
     name = f"gtu-review-{job.id}.md"
-    assert branch_files(git_repo, job.id) == {"src/calc.py", name}
-    report = git(git_repo, "show", f"gtu/{job.id}:{name}")
+    assert result_files(store, job.id) == {name}  # the report only: no source file changed
+    report = result(store, job.id, name)
     assert report.startswith("# Code review: `src`") and "`src/calc.py:2`" in report
     sent = json.loads([r for r in fake.requests if r.url.path.endswith("/chat/completions")][0].content)
     assert "src/calc.py:1| def add(a, b):" in sent["messages"][1]["content"]
@@ -252,7 +251,7 @@ def test_review_job_keeps_a_cut_off_report_and_says_so(git_repo, store, scenario
     fake.truncated("## Likely bugs\n- `src/calc.py:1` something")
     job = store.add_job("review", "src/calc.py", str(git_repo))
     run_jobs()
-    report = git(git_repo, "show", f"gtu/{job.id}:gtu-review-{job.id}.md")
+    report = result(store, job.id, f"gtu-review-{job.id}.md")
     assert "something" in report and "cut off at the output token limit" in report
 
 
@@ -267,7 +266,8 @@ def test_job_budget_kills_the_cli_and_pauses_the_job(git_repo, store, scenario, 
     assert [s["status"] for s in store.steps(job.id)] == ["pending", "pending"]
     used = store.request_summary(job.id)["total_tokens"]
     assert 5000 <= used <= 7000
-    assert git(git_repo, "log", "--format=%s", f"main..gtu/{job.id}") == ""  # nothing half-done committed
+    # nothing half-done was kept: the paused job's copy has nothing saved beyond its starting point
+    assert worktree.changed_files(worktree.worktree_path(git_repo, job.id), None) == []
     assert any("budget" in line for line in logs)
 
 

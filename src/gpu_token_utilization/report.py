@@ -4,21 +4,18 @@ For each job: what ran and when, how long it took, tokens, what it produced, and
 capacity it was sent into (queue depth and busy slots at send time, BharatCode's reported
 queue wait, and the share of sends that went into a free slot).
 
-The overall summary is printed and saved under .gtu/reports/. Each finished job also gets
-gtu-report-<job-id>.md committed to its branch, without checking anything out. Job reports
-contain no "generated at" time, so running the report twice doesn't add a second commit.
+The overall summary is printed and saved under .gtu/reports/. What each job produced is read
+from its spare-gpu/<date>_<time>/ folder.
 """
 
 from __future__ import annotations
 
 import re
 import statistics
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import worktree
 from .budget import IST, Budgets
 from .store import FINAL_STATUSES, Job, Store
 
@@ -43,7 +40,6 @@ class JobReport:
     queue_depths: list[int] = field(default_factory=list)
     queue_waits_ms: list[int] = field(default_factory=list)
     busy_answers: int = 0
-    branch_exists: bool = False
 
     @property
     def duration(self) -> timedelta | None:
@@ -61,22 +57,17 @@ def _ts(text: str | None) -> datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
-def _git(repo: Path, *args: str) -> str | None:
-    proc = subprocess.run([*worktree.GIT, *args], cwd=repo, capture_output=True, text=True, encoding="utf-8",
-                          errors="replace")
-    return proc.stdout.strip() if proc.returncode == 0 else None
-
-
-def _branch_files(job: Job) -> tuple[bool, list[tuple[str, str]]]:
-    repo, branch = Path(job.repo), worktree.branch_name(job.id)
-    if not Path(job.repo).exists() or _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}") is None:
-        return False, []
-    base = job.base_commit or _git(repo, "merge-base", branch, "HEAD")
-    if not base:
-        return True, []
-    out = _git(repo, "diff", "--name-status", base, branch) or ""
-    files = [(line.split("\t")[0][0], line.split("\t")[-1]) for line in out.splitlines() if "\t" in line]
-    return True, [f for f in files if not f[1].startswith("gtu-report-")]
+def _output_files(job: Job) -> list[tuple[str, str]]:
+    """(A/M, path) for each file in the job's spare-gpu/<date>_<time>/ folder: M if the project
+    has a file at that path (the job changed it), A if not (the job added it)."""
+    if not job.output_dir:
+        return []
+    repo = Path(job.repo)
+    folder = repo / job.output_dir
+    if not folder.is_dir():
+        return []
+    names = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+    return [("M" if (repo / name).is_file() else "A", name) for name in names]
 
 
 def build_job(store: Store, job: Job) -> JobReport:
@@ -107,7 +98,7 @@ def build_job(store: Store, job: Job) -> JobReport:
         if m := re.search(r"Kept (\d+) passing test\(s\), dropped (\d+)", output):
             report.tests_kept, report.tests_dropped = int(m[1]), int(m[2])
         report.reverted += len(re.findall(r"^- reverted ", output, flags=re.M))
-    report.branch_exists, report.files = _branch_files(job)
+    report.files = _output_files(job)
     return report
 
 
@@ -161,23 +152,6 @@ def job_markdown(r: JobReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_to_branch(r: JobReport) -> str | None:
-    """Commit the job's report to its branch if the job is finished and has one.
-
-    Returns the new commit, "unchanged" if the branch already has this exact report, or None
-    if there is nothing to write to (job still running, or no branch)."""
-    j = r.job
-    if j.status not in FINAL_STATUSES or not r.branch_exists:
-        return None
-    if worktree.worktree_path(Path(j.repo), j.id).exists():
-        return None  # a live worktree has the branch checked out; don't move it underneath
-    commit = worktree.add_file_to_branch(
-        Path(j.repo), worktree.branch_name(j.id), f"gtu-report-{j.id}.md", job_markdown(r),
-        f"gtu report for job {j.id}",
-    )
-    return commit or "unchanged"
-
-
 def select_jobs(store: Store, since: datetime | None, job_id: str | None) -> list[Job]:
     if job_id:
         return [store.get_job(job_id)]
@@ -190,7 +164,7 @@ def select_jobs(store: Store, since: datetime | None, job_id: str | None) -> lis
 
 
 def summary_markdown(reports: list[JobReport], store: Store, budgets: Budgets, now: datetime,
-                     since: datetime | None, written: dict[str, str | None]) -> str:
+                     since: datetime | None) -> str:
     period = f"since {_local(since)}" if since else "all time"
     out = [f"# spare-gpu morning report ({period})", ""]
     if not reports:
@@ -220,14 +194,10 @@ def summary_markdown(reports: list[JobReport], store: Store, budgets: Budgets, n
         j = r.job
         out.append(f"### `{j.id}`: {j.kind} `{j.target}` ({j.status})")
         out += [f"- `{path}` ({ {'A': 'added', 'M': 'changed', 'D': 'deleted'}.get(code, code)})" for code, path in r.files] \
-            or ["- Nothing committed."]
-        if written.get(j.id):
-            out.append(f"- Report committed to `{worktree.branch_name(j.id)}` as `gtu-report-{j.id}.md`.")
-        elif j.status not in FINAL_STATUSES:
-            out.append("- Still in progress; its branch report is written when it finishes.")
+            or ["- No files changed."]
         if j.output_dir:
             out.append(f"- Edited files: `{j.output_dir}/`")
-        if r.branch_exists:
-            out.append(f"- spare-gpu's record of it: `git log {worktree.branch_name(j.id)}`, `git diff HEAD...{worktree.branch_name(j.id)}`")
+        elif j.status not in FINAL_STATUSES:
+            out.append("- Still in progress; its edited files are copied to `spare-gpu/` when it finishes.")
         out.append("")
     return "\n".join(out)

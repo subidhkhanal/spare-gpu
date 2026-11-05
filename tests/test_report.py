@@ -8,7 +8,6 @@ import pytest
 from typer.testing import CliRunner
 
 from gpu_token_utilization import report as reporting
-from gpu_token_utilization import worktree
 from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.cli import app
@@ -62,52 +61,35 @@ def test_job_report_counts_what_ran(ran, store):
     assert r.queue_depths == [0]
 
 
-def test_report_is_committed_to_the_branch_without_touching_the_checkout(ran, store, git_repo):
+def test_the_report_names_the_folder_with_each_jobs_files(ran, store, git_repo):
     tests_job, _ = ran
-    (git_repo / "src" / "calc.py").write_text("def add(a, b):\n    return a + b  # my uncommitted edit\n")
-    head, status = git(git_repo, "rev-parse", "HEAD"), git(git_repo, "status", "--porcelain")
-
-    r = reporting.build_job(store, tests_job)
-    commit = reporting.write_to_branch(r)
-    branch = f"gtu/{tests_job.id}"
-    assert commit and git(git_repo, "rev-parse", branch) == commit
-    text = git(git_repo, "show", f"{branch}:gtu-report-{tests_job.id}.md")
-    assert "kept 2 passing, discarded 1 failing" in text and "`tests/test_gtu_calc.py` (added)" in text
-    assert "Sent into a free slot: 2 of 2 (100%)" in text
-    assert git(git_repo, "log", "-1", "--format=%an", branch) == "spare-gpu"
-    # the user's checkout: same commit, same uncommitted edit, no report file
-    assert git(git_repo, "rev-parse", "HEAD") == head and git(git_repo, "status", "--porcelain") == status
-    assert "my uncommitted edit" in (git_repo / "src" / "calc.py").read_text()
-    assert not (git_repo / f"gtu-report-{tests_job.id}.md").exists()
-
-    assert reporting.write_to_branch(reporting.build_job(store, tests_job)) == "unchanged"
-    assert git(git_repo, "rev-parse", branch) == commit  # no duplicate commit
+    folder = tests_job.output_dir
+    assert folder.startswith("spare-gpu/") and (git_repo / folder / "tests" / "test_gtu_calc.py").is_file()
+    reports = [reporting.build_job(store, j) for j in ran]
+    now = datetime.now(timezone.utc)
+    text = reporting.summary_markdown(reports, store, Budgets(), now, now - timedelta(hours=1))
+    assert f"- Edited files: `{folder}/`" in text
+    assert git(git_repo, "branch", "--list", "gtu/*") == ""  # no branches, ever
 
 
-def test_report_file_is_not_listed_as_job_output(ran, store):
-    tests_job, _ = ran
-    reporting.write_to_branch(reporting.build_job(store, tests_job))
-    assert reporting.build_job(store, tests_job).files == [("A", "tests/test_gtu_calc.py")]
-
-
-def test_unfinished_job_gets_no_branch_report(git_repo, store):
+def test_an_unfinished_job_says_its_files_come_later(git_repo, store):
     job = store.add_job("docs", "src/calc.py", str(git_repo))
-    worktree.create(git_repo, job.id)
     store.set_status(job.id, "paused")
-    assert reporting.write_to_branch(reporting.build_job(store, store.get_job(job.id))) is None
+    r = reporting.build_job(store, store.get_job(job.id))
+    now = datetime.now(timezone.utc)
+    text = reporting.summary_markdown([r], store, Budgets(), now, None)
+    assert r.files == [] and "copied to `spare-gpu/` when it finishes" in text
 
 
 def test_summary_covers_jobs_tokens_and_capacity(ran, store):
     reports = [reporting.build_job(store, j) for j in ran]
-    written = {r.job.id: reporting.write_to_branch(r) for r in reports}
     now = datetime.now(timezone.utc)
-    text = reporting.summary_markdown(reports, store, Budgets(), now, now - timedelta(hours=1), written)
+    text = reporting.summary_markdown(reports, store, Budgets(), now, now - timedelta(hours=1))
     assert "| Job | Kind | Target | Status | Ran | Took | Tokens | Produced |" in text
     assert "2 tests kept, 1 discarded" in text
     assert "**Tokens:** 12,340 across these jobs" in text
     assert "BharatCode's reported queue wait: median 4.2 s, max 4.2 s over 1 request(s)" in text
     assert "Sent into a free slot: 3 of 3 (100%)" in text
-    assert f"Report committed to `gtu/{ran[0].id}`" in text
 
 
 def test_job_markdown_is_deterministic(ran, store):
@@ -131,7 +113,7 @@ def test_report_command_prints_and_saves(ran, store, git_repo, monkeypatch):
     assert "spare-gpu morning report" in result.output and ran[0].id in result.output
     saved = list((store.path.parent / "reports").glob("report-*.md"))
     assert len(saved) == 1 and "## Capacity context" in saved[0].read_text()
-    assert f"gtu-report-{ran[0].id}.md" in git(git_repo, "ls-tree", "--name-only", "-r", f"gtu/{ran[0].id}")
+    assert git(git_repo, "branch", "--list", "gtu/*") == ""
 
 
 def test_report_with_nothing_in_the_period(git_repo, monkeypatch, tmp_path):
@@ -139,8 +121,3 @@ def test_report_with_nothing_in_the_period(git_repo, monkeypatch, tmp_path):
     monkeypatch.setenv("GTU_DB", str(tmp_path / "empty" / "gtu.db"))
     result = runner.invoke(app, ["report"])
     assert result.exit_code == 0 and "Nothing ran in this period." in result.output
-
-
-def test_add_file_to_branch_refuses_a_missing_branch(git_repo):
-    with pytest.raises(worktree.GitError):
-        worktree.add_file_to_branch(git_repo, "gtu/nope", "x.md", "x", "msg")

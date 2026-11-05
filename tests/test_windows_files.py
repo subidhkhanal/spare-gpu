@@ -1,8 +1,10 @@
 """Real jobs (fake CLI, real git and pytest) under the conditions Windows users actually have:
 spaces and non-ASCII in paths, long paths, CRLF line endings, byte-order marks, locked files."""
 
+import difflib
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -49,14 +51,23 @@ def run_job(store, client, make_gate, fake, tmp_path, monkeypatch):
     return run
 
 
-def blob(repo, rev, path) -> bytes:
-    import subprocess
-    return subprocess.run(["git", "show", f"{rev}:{path}"], cwd=repo, capture_output=True, check=True).stdout
+def out(job, path) -> bytes:
+    """A file as the job left it in spare-gpu/<date>_<time>/."""
+    return (Path(job.repo) / job.output_dir / path).read_bytes()
 
 
-def deletions(repo, job_id) -> int:
-    rows = git(repo, "diff", "--numstat", "main", f"gtu/{job_id}").splitlines()
-    return sum(int(r.split("\t")[1]) for r in rows if r.split("\t")[1].isdigit())
+def produced(job) -> set[str]:
+    if not job.output_dir:
+        return set()
+    root = Path(job.repo) / job.output_dir
+    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+
+
+def deletions(job, path) -> int:
+    """Lines of the user's file that the job's version no longer has, byte for byte."""
+    before = (Path(job.repo) / path).read_bytes().splitlines(keepends=True)
+    after = out(job, path).splitlines(keepends=True)
+    return sum(1 for line in difflib.ndiff(before, after) if line.startswith("- "))
 
 
 # --- paths with spaces and non-ASCII names ---------------------------------------------------
@@ -74,11 +85,10 @@ def test_every_job_kind_works_in_a_path_with_spaces(kind, tmp_path, run_job):
     }[kind]
     job, steps, logs = run_job(repo, kind, "src/my calc.py", writes)
     assert job.status == "done", "\n".join(logs) + json.dumps(steps, default=str)
-    produced = git(repo, "ls-tree", "--name-only", "-r", f"gtu/{job.id}")
     expected = {"tests": "tests/test_my_calc.py", "docs": "src/my calc.py", "review": f"gtu-review-{job.id}.md"}[kind]
-    assert expected in produced
+    assert expected in produced(job)
     if kind == "docs":
-        assert "Return the sum" in git(repo, "show", f"gtu/{job.id}:src/my calc.py")
+        assert b"Return the sum" in out(job, "src/my calc.py")
     assert git(repo, "status", "--porcelain") == ""
 
 
@@ -97,19 +107,19 @@ def test_docs_job_on_a_file_with_a_byte_order_mark(tmp_path, run_job):
     repo = make_repo(tmp_path / "repo", {"src/calc.py": (BOM + SOURCE).encode()})
     job, steps, logs = run_job(repo, "docs", "src/calc.py", {"src/calc.py": BOM + DOCUMENTED})
     assert "kept src/calc.py" in steps[1]["output"], steps[1]["output"]
-    assert blob(repo, f"gtu/{job.id}", "src/calc.py").startswith(BOM.encode())
+    assert out(job, "src/calc.py").startswith(BOM.encode())
 
 
 def test_docs_job_keeps_the_files_crlf_and_bom_when_the_cli_drops_them(tmp_path, run_job):
     # a CRLF file stored as CRLF (autocrlf off), rewritten by the CLI with LF and no BOM: the
-    # branch must show only the added docstring, not every line changed
+    # result must show only the added docstring, not every line changed
     original = (BOM + SOURCE).replace("\n", "\r\n").encode()
     repo = make_repo(tmp_path / "repo", {"src/calc.py": original})
     job, steps, logs = run_job(repo, "docs", "src/calc.py", {"src/calc.py": DOCUMENTED})
     assert "kept src/calc.py" in steps[1]["output"], steps[1]["output"]
-    kept = blob(repo, f"gtu/{job.id}", "src/calc.py")
+    kept = out(job, "src/calc.py")
     assert kept.startswith(BOM.encode()) and b"\r\n" in kept and b"\n" not in kept.replace(b"\r\n", b"")
-    assert deletions(repo, job.id) == 0
+    assert deletions(job, "src/calc.py") == 0
 
 
 def test_docs_job_with_autocrlf_on_shows_only_added_lines(tmp_path, run_job):
@@ -120,8 +130,8 @@ def test_docs_job_with_autocrlf_on_shows_only_added_lines(tmp_path, run_job):
                                {"src/calc.py": DOCUMENTED, "README.md": "# Calc\n\nAdds.\n\nUsage: add(1, 2).\n"})
     assert job.status == "done", "\n".join(logs)
     assert "kept src/calc.py" in steps[1]["output"] and "kept README.md" in steps[1]["output"], steps[1]["output"]
-    assert deletions(repo, job.id) == 0
-    assert b"\r\n" not in blob(repo, f"gtu/{job.id}", "src/calc.py")  # stored LF, like the rest of the repo
+    assert deletions(job, "src/calc.py") == 0 and deletions(job, "README.md") == 0
+    assert b"\r\n" not in out(job, "src/calc.py")  # LF, like the user's file
 
 
 def test_review_listing_does_not_show_the_byte_order_mark(tmp_path):
@@ -154,7 +164,7 @@ def test_without_windows_long_paths_a_too_long_repo_gets_a_fix_not_a_crash(tmp_p
     repo = make_repo(root, {rel: SOURCE.encode()})
     with pytest.raises(worktree.GitError, match="(?s)longer than Windows allows.*LongPathsEnabled"):
         worktree.create(repo, "toolong")
-    assert git(repo, "branch", "--list", "gtu/toolong") == ""  # refused before touching anything
+    assert not worktree.worktree_path(repo, "toolong").exists()  # refused before copying anything
     short = make_repo(tmp_path / "short", {"x.py": SOURCE.encode()})
     assert worktree.create(short, "fine").exists()
 
@@ -177,8 +187,6 @@ def test_a_file_held_open_for_a_moment_does_not_leave_the_worktree_behind(git_re
     finally:
         handle.close()
     assert waits and not wt.exists()
-    assert git(git_repo, "branch", "--list", "gtu/lockedjob")  # branch kept
-    assert "lockedjob" not in git(git_repo, "worktree", "list")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="only Windows refuses to delete open files")
@@ -186,6 +194,5 @@ def test_a_file_held_open_for_good_gives_a_clear_message(git_repo, monkeypatch):
     wt = worktree.create(git_repo, "stuckjob")
     monkeypatch.setattr(worktree.time, "sleep", lambda seconds: None)
     with open(wt / "src" / "calc.py", "rb"):
-        with pytest.raises(worktree.GitError, match="(?s)holding a file .* the branch is safe"):
+        with pytest.raises(worktree.GitError, match="(?s)holding a file .*delete that folder"):
             worktree.remove(git_repo, "stuckjob")
-    assert git(git_repo, "branch", "--list", "gtu/stuckjob")

@@ -95,7 +95,7 @@ def test_stop_mid_cli_step_kills_it_and_leaves_the_job_paused_and_clean(
     assert [st["status"] for st in store.steps(job.id)] == ["pending", "pending"]
     wt = worktree.worktree_path(git_repo, job.id)
     assert not (wt / "tests" / "test_gtu_x.py").exists()  # unfinished edit dropped
-    assert git(git_repo, "log", "--format=%s", f"main..gtu/{job.id}") == ""
+    assert worktree.changed_files(wt, None) == []  # nothing half-done was kept
 
     # resume: a quick, good run this time
     scenario.write_text(json.dumps({"steps": [{"tokens": 100, "writes": {

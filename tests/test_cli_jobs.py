@@ -24,18 +24,20 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_add_refuses_a_dirty_repo(repo):
+def test_add_works_with_unsaved_changes(repo):
+    # each job copies the files as they are, so nothing needs committing first
     (repo / "src" / "a.py").write_text("changed\n")
     result = runner.invoke(app, ["add", "tests", "src/a.py"])
-    assert result.exit_code == 1 and "uncommitted changes" in result.output
+    assert result.exit_code == 0, result.output
 
 
-def test_add_refuses_a_folder_that_is_not_a_git_repo(tmp_path_factory, monkeypatch):
+def test_add_works_in_a_folder_that_is_not_a_git_repo(tmp_path_factory, monkeypatch):
     plain = tmp_path_factory.mktemp("plain")
     (plain / "a.py").write_text("x = 1\n")
     monkeypatch.chdir(plain)
     result = runner.invoke(app, ["add", "tests", "a.py"])
-    assert result.exit_code == 1 and "not inside a git repository" in result.output
+    assert result.exit_code == 0, result.output
+    assert not (plain / ".git").exists()  # the folder doesn't become a repo
 
 
 def test_queueing_a_job_leaves_the_repo_clean(repo):

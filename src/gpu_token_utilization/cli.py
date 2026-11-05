@@ -69,7 +69,7 @@ def _local(stamp: str) -> str:
         return stamp
 
 app = typer.Typer(
-    help="Queue repo chores (tests, docs, code review) and run them unattended through BharatCode, each on its own git branch. "
+    help="Queue repo chores (tests, docs, code review) and run them unattended through BharatCode, each finished job's edited files copied to spare-gpu/<date>_<time>/. "
          "New here? Run `gtu demo`.",
     no_args_is_help=True,
     add_completion=False,
@@ -120,7 +120,7 @@ def setup(
     typer.echo("\n3/3  spare-gpu's MCP server in BharatCode")
     if not _register("     ", status):
         raise typer.Exit(1)
-    typer.echo("\nDone. Open BharatCode in one of your git repos and ask, for example:")
+    typer.echo("\nDone. Open BharatCode in one of your projects and ask, for example:")
     for phrase in EXAMPLE_PHRASES:
         typer.echo(f'  "{phrase}"')
     typer.echo("Already-open BharatCode windows need a restart to see spare-gpu.")
@@ -389,7 +389,7 @@ def add(
     target: Path = typer.Argument(..., help="File or folder in this repo to work on."),
     note: str = typer.Option(None, "--note", help="Extra instructions for the job."),
 ) -> None:
-    """Queue a job. It runs later with `gtu start`, on its own branch gtu/<job-id>."""
+    """Queue a job. It runs later with `gtu start`; its edited files are copied to spare-gpu/<date>_<time>/."""
     try:
         outcome = actions.queue_job(lambda repo: Store.open_default(), Path.cwd(), kind.value, str(target), note)
     except actions.ActionError as exc:
@@ -493,7 +493,7 @@ def demo(
         typer.echo("The answer was cut off at the demo's short limit; real review jobs allow much longer answers.")
     typer.echo(f"Saved to {outcome.saved_to}\n")
     typer.echo(
-        "That was one request. Real jobs run unattended, each on its own git branch:\n\n"
+        "That was one request. Real jobs run unattended, each on its own copy of the project:\n\n"
         f"  gtu add review {rel}   # a full review, saved as gtu-review-<id>.md\n"
         f"  gtu add tests {rel}    # tests for it; only ones that pass are kept\n"
         f"  gtu add docs {rel}     # docstrings and README additions\n"
@@ -658,13 +658,7 @@ def report(
             reports = [reporting.build_job(store, j) for j in reporting.select_jobs(store, start_from, job)]
         except StoreError as exc:
             _fail(str(exc))
-        written: dict[str, str | None] = {}
-        for r in reports:
-            try:
-                written[r.job.id] = reporting.write_to_branch(r)
-            except worktree.GitError as exc:
-                typer.echo(f"warning: could not write the report to {worktree.branch_name(r.job.id)}: {exc}", err=True)
-        text = reporting.summary_markdown(reports, store, budgets, now, start_from, written)
+        text = reporting.summary_markdown(reports, store, budgets, now, start_from)
         out = store.path.parent / "reports" / f"report-{now.astimezone(reporting.IST):%Y%m%d-%H%M}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
@@ -740,4 +734,4 @@ def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
     if outcome.note:
         typer.echo(f"warning: {outcome.note}", err=True)
     job = outcome.job
-    typer.echo(f"Cancelled job {job.id}. Anything it committed stays on branch {worktree.branch_name(job.id)}.")
+    typer.echo(f"Cancelled job {job.id}. Nothing was copied to {worktree.OUTPUT_DIR}/.")

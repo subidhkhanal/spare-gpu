@@ -122,7 +122,9 @@ def test_start_runs_a_review_into_a_full_lane_by_default(repo):
     assert result.exit_code == 0, result.output
     assert "Starting now." in result.output and "Sending now (not waiting for capacity)" in result.output
     assert "Paused" not in result.output
-    assert f"gtu-review-{job_id}.md" in git(repo, "ls-tree", "--name-only", "-r", f"gtu/{job_id}")
+    reports = list((repo / "spare-gpu").glob(f"*/gtu-review-{job_id}.md"))
+    assert len(reports) == 1  # the review landed in spare-gpu/<date>_<time>/
+    assert git(repo, "branch", "--list", "gtu/*") == ""
 
 
 def test_wait_for_capacity_is_opt_in_and_explains_itself(repo, monkeypatch):

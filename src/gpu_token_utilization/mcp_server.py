@@ -25,7 +25,7 @@ from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Command, Store, StoreError
 
 INSTRUCTIONS = (
-    "spare-gpu does coding chores (writing tests, adding docs, code review) for a git repo as "
+    "spare-gpu does coding chores (writing tests, adding docs, code review) for a project folder as "
     "background BharatCode Desktop sessions, never touching the user's checkout: each finished job's "
     "edited files are copied to the project's spare-gpu/<date>_<time>/ folder. It measures how long each model would wait right now, and can hand a "
     "switch-safe task to whichever model starts it sooner, checking the result before keeping it. "
@@ -251,7 +251,7 @@ class SpareTools:
             return f"Didn't cancel it: {exc}. spare_work_status lists ids and what's still running."
         job = outcome.job
         text = (f"Cancelled job {job.id} ({job.kind} {job.target}). Nothing was copied to "
-                f"{worktree.OUTPUT_DIR}/; anything it had finished stays on branch {worktree.branch_name(job.id)}.")
+                f"{worktree.OUTPUT_DIR}/.")
         return text + (f"\nNote: {outcome.note}" if outcome.note else "")
 
     def waits(self) -> str:
@@ -353,7 +353,7 @@ def build_server(base: Path, tools: SpareTools | None = None):
     @server.tool(annotations=notes(False))
     def spare_queue_work(type: Literal["tests", "docs", "review"], path: str, note: str | None = None) -> str:
         """Queue a coding chore for spare-gpu to do in the background: write tests, write
-        documentation, or review code, for a file or folder in this git repo. The work happens
+        documentation, or review code, for a file or folder in this project. The work happens
         in the background, unattended; when it finishes, its edited files are copied to the
         project's spare-gpu/<date>_<time>/ folder. It doesn't happen in this chat.
 
