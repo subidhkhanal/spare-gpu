@@ -65,6 +65,19 @@ def test_no_commands_means_no_shell_at_all():
     assert permission_config(edit=False, commands=())["permission"]["edit"] == "deny"
 
 
+def test_nothing_in_a_job_may_ask_since_nobody_answers():
+    # seen 5 Nov: a job's session waited 10+ minutes on a prompt to read the main repo's .git/config
+    from gpu_token_utilization.desktop import session_rules
+
+    perm = permission_config(edit=True, commands=("python -m pytest",))["permission"]
+    for name in ("external_directory", "doom_loop", "question"):
+        assert perm[name] == "deny"
+    rules = session_rules(edit=True, commands=("python -m pytest",))
+    assert all(rule["action"] in ("allow", "deny") for rule in rules)
+    read = [(r["pattern"], r["action"]) for r in rules if r["permission"] == "read"]
+    assert read == [("*", "allow"), ("*.env", "deny"), ("*.env.*", "deny"), ("*.env.example", "allow")]  # last wins
+
+
 def test_jobs_switch_the_users_external_skills_off(tmp_path, scenario):
     # measured: 16 Claude Code skills from ~/.claude/skills add ~3.5k tokens to every CLI step
     record = scenario()

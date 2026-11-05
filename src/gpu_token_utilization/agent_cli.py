@@ -130,7 +130,12 @@ def permission_config(edit: bool, commands: tuple[str, ...]) -> dict:
         # "skill": "deny" also drops the list of the user's skills (~/.claude/skills and others)
         # from every request (session/system.ts): ~3.5k tokens a step on the machine measured.
         # Inside Desktop it's the only way to do that; the CLI could use an env var instead.
-        "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny", "skill": "deny"},
+        # Nobody watches a job's session, so nothing may "ask": a prompt there waits forever (seen
+        # 5 Nov: a docs job sat for 10+ minutes on a prompt to read the main repo's .git/config).
+        # Each of these is "ask" in Desktop's defaults; a denial lets the agent carry on instead.
+        "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny", "skill": "deny",
+                       "external_directory": "deny", "doom_loop": "deny", "question": "deny",
+                       "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow"}},
         # spare-gpu's own MCP server is off inside jobs: its tool schemas cost ~2.3k tokens on
         # every step (measured), and a job's agent has no business queueing more jobs.
         "mcp": {"spare-gpu": {"type": "local", "command": ["gtu", "mcp"], "enabled": False}},
