@@ -154,3 +154,15 @@ def test_the_preferred_model_can_be_set(monkeypatch):
     assert router.preferred_model("bharatcode/" + QWEN) == QWEN
     monkeypatch.setenv(router.PREFERRED_ENV, DEEPSEEK)
     assert router.preferred_model(QWEN) == DEEPSEEK
+
+
+def test_wait_figures_that_cant_be_fetched_never_stop_a_job(tmp_path):
+    # seen in CI on 5 Nov: a fetch that raised crashed the job; routing is only an optimisation
+    from gpu_token_utilization.store import Store
+
+    def broken():
+        raise RuntimeError("no network")
+
+    with Store(tmp_path / "gtu.db") as store:
+        choice = router.decide(store, tmp_path, "review", QWEN, broken)
+    assert choice.model == QWEN and not choice.routed

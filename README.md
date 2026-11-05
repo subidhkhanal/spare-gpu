@@ -1,10 +1,11 @@
-**Hand off tests, docs and code reviews inside BharatCode Desktop, and skip DeepSeek's queue when you don't need to wait in it.**
+**Type `/auto` in BharatCode Desktop and your task runs on whichever model will start it sooner, DeepSeek or Qwen, so you don't sit in a queue.**
 
 ## What it does
 
-- **Does the chores in the background.** Ask for tests, docs or a review in plain words. spare-gpu runs the job as its own Desktop session, so your chat stays free.
-- **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. When a job finishes, the files it edited are copied to `spare-gpu/<date>_<time>/` in your project, with their paths kept (for example `spare-gpu/2026-11-05_14-32-07/src/utils.py`). No branches or `git diff` to dig through, and your own files are never touched: open the folder and copy over what you want.
 - **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen only happens for task types where Qwen was measured to be just as good: docs and questions today, while tests and reviews stay on DeepSeek.
+- **One command: `/auto`.** Type `/auto` and what you want: a question, tests, docs or a code review. The reply says which model it used and how much waiting that saved.
+- **Does the chores in the background.** Tests, docs and reviews run as their own Desktop session, so your chat stays free.
+- **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. The files a job edited are copied to `spare-gpu/<date>_<time>/` in your project. Your own files are never touched: open the folder and copy over what you want.
 - **Keeps you in control of tokens.** Every job has a token budget, and a job that crashes resumes where it stopped.
 
 ## Set up
@@ -17,13 +18,57 @@ irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 
 
 Then fully close BharatCode Desktop and open it again. That's all: no API key needed.
 
-The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop and adds the `gtu` command. Run the same line again to update.
+The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop, adds `/auto` and adds the `gtu` command. Run the same line again to update.
 
 To remove it: `gtu integrate --uninstall`, then delete `%LOCALAPPDATA%\spare-gpu`.
 
 Prefer to do it by hand? With Python 3.11+ and git installed: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate`.
 
+## `/auto` mode
+
+### Turn it on
+
+The installer adds `/auto` to BharatCode Desktop. After installing, fully close Desktop and open it again, then open a chat in your project and type `/`: `/auto` is in the command list. If you installed spare-gpu before `/auto` existed, run the install line again to update.
+
+### Use it
+
+Type `/auto` and then what you want, in plain words:
+
+| You type | What happens |
+|---|---|
+| `/auto what does a race condition mean?` | Answers the question right in the chat, on the faster model |
+| `/auto write tests for src/payments.py` | Writes tests in the background and keeps only the ones that pass |
+| `/auto write docs for src/utils.py` | Adds docstrings and README text in the background, without changing code |
+| `/auto review src/gate.py` | Writes a code review in the background |
+| `/auto` | Shows how long each model would wait right now |
+
+For example, on 5 Nov DeepSeek had a 3-minute queue while Qwen had a free slot:
+
+```
+/auto what is the name of the latest mac chip
+→ Apple M5 (M5 Pro / M5 Max for pro Macs)
+  (Answered by Qwen 3.8 27B: saves about 2m 43s of waiting over DeepSeek V4.1 Flash, and its lane has a free slot.)
+```
+
+### How it picks the model
+
+`/auto` starts from DeepSeek V4.1 Flash, the stronger model, and checks BharatCode's live queues each time:
+
+| Right now | Questions and docs run on | Tests and reviews run on |
+|---|---|---|
+| DeepSeek free | DeepSeek | DeepSeek |
+| DeepSeek queued, Qwen free | **Qwen** | DeepSeek (Qwen isn't measured as good enough yet) |
+| Qwen queued, DeepSeek free | DeepSeek | DeepSeek |
+
+It only switches when that saves at least 20 seconds and the other model has a free slot, so switched work never lands in a queue. If your plan doesn't include DeepSeek, everything runs on Qwen.
+
+### Turn it off
+
+`gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
+
 ## What you get
+
+Background work lands in your project when it's done. Ask "is my job done?" to check on it.
 
 ```
 your-project/
@@ -34,42 +79,13 @@ your-project/
             └── mathx.py
 ```
 
-## `/auto` mode
-
-### Turn it on
-
-`/auto` is a slash command that the installer adds to BharatCode Desktop. Nothing else is needed:
-
-1. Run the install line above. If you installed spare-gpu before `/auto` existed, run it again to update.
-2. Fully close BharatCode Desktop and open it again.
-3. Open a chat in your project and type `/`. `/auto` appears in the command list.
-
-### Use it
-
-Type `/auto` and then what you want, in plain words:
-
-| You type | What happens |
-|---|---|
-| `/auto write tests for src/payments.py` | Writes tests in the background and keeps only the ones that pass |
-| `/auto write docs for src/utils.py` | Adds docstrings and README text in the background, without changing code |
-| `/auto review src/gate.py` | Writes a code review in the background |
-| `/auto what does a race condition mean?` | Answers the question right in the chat |
-| `/auto` | Shows how long each model would wait right now |
-
-Each time, `/auto` picks the model that will start sooner: DeepSeek V4.1 Flash, or Qwen 3.8 27B when DeepSeek has a queue. The reply says which model it used and why. For tests, docs and reviews, it only moves to Qwen for task types measured to be just as good on Qwen (docs today).
-
-Background work lands in `spare-gpu/<date>_<time>/` when it's done. Ask "is my job done?" to check on it.
-
-### Turn it off
-
-`gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
-
 ## Or just ask
 
-You don't have to use `/auto`. spare-gpu also understands plain requests in any Desktop chat:
+You don't have to type `/auto`. spare-gpu also understands plain requests in any Desktop chat, and picks the faster model the same way, starting from your chat's model:
 
 | You say | What happens |
 |---|---|
+| "write tests for src/pay.py on whichever model is free" | Hands it to the model that starts sooner |
 | "queue tests for src/payments" | Runs it in the background; the result lands in `spare-gpu/` |
 | "how long is DeepSeek's queue?" | Shows each model's current wait |
 | "is my tests job done?" | Shows queued, running and finished jobs |
@@ -78,17 +94,18 @@ You don't have to use `/auto`. spare-gpu also understands plain requests in any 
 
 ## Why it's useful
 
-- **Less waiting.** DeepSeek's queue can reach minutes at busy times; we measured a 3½-minute wait on 5 Nov while Qwen had a free slot. For a docs task, `/auto` starts it on Qwen at once.
+- **Less waiting.** DeepSeek's queue can reach minutes at busy times, while Qwen often has a free slot, and the other way round. `/auto` sends your work to whichever is free, without you watching queues.
+- **No quality loss.** Work only moves to Qwen for task types where Qwen was measured to be just as good, and every result is checked before it's kept.
 - **Less babysitting.** Chores run on their own, get checked, and wait for you in the `spare-gpu/` folder.
 - **No surprises.** It never edits your files, never pushes, and only runs your test, build and lint commands.
 
 ## Good to know
 
 - Windows only, and jobs run while BharatCode Desktop is open.
-- The `spare-gpu/` folder ignores itself in git, so it never shows up as a change in your repo.
-- Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project.
-- Needs git installed on your PC, since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
-- Which task types may switch models comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/).
+- `/auto`'s own handoff, a single short request, always runs on Qwen. If Qwen is packed, that one request waits briefly before your task moves to DeepSeek.
+- Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project. That folder ignores itself in git, so it never shows up as a change.
+- Needs git installed on your PC (the installer adds it), since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
+- Which task types may move to Qwen comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/).
 - More detail and the measurements behind it: [research/](research/).
 
 MIT licence, see [LICENSE](LICENSE). An independent project for the BharatCode Build League, not affiliated with BharatCode.

@@ -159,8 +159,11 @@ def decide(store, folder: Path, kind: str, preferred: str, http_factory) -> Choi
     if not enabled() or not can_move:  # no need to fetch anything
         choice = choose(kind, preferred, [], state, policy)
     else:
-        with http_factory() as http:
-            current = waits.views(store, http)
+        try:
+            with http_factory() as http:
+                current = waits.views(store, http)
+        except Exception:  # noqa: BLE001 - routing is an optimisation: no figures means "don't switch", never a failed job
+            current = []
         choice = choose(kind, preferred, current, state, policy)
     state.save(folder)
     return choice
