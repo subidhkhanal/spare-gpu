@@ -1,7 +1,3 @@
-# spare-gpu
-
-[![tests](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml/badge.svg)](https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml)
-
 **Hand off tests, docs and code reviews inside BharatCode Desktop, and skip DeepSeek's queue when you don't need to wait in it.**
 
 ## What it does
