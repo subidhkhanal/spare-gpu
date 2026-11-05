@@ -1,8 +1,8 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
-from gpu_token_utilization.gate import in_window, parse_window
+from gpu_token_utilization.gate import IST, in_window, parse_window
 from gpu_token_utilization.store import RequestLog
 
 
@@ -158,17 +158,22 @@ def test_fallback_probes_when_idle_but_not_too_often(fake, store, make_gate):
     assert fake.chat_calls == 2
 
 
+def far_window(fake):
+    """A one-minute window six hours from the fake clock: closed now and a minute later. (A fixed
+    00:00-00:01 IST opened mid-test when the suite reached it just before midnight IST.)"""
+    start = (fake.clock.utcnow().astimezone(IST) + timedelta(hours=6)).replace(second=0, microsecond=0)
+    return start.time(), (start + timedelta(minutes=1)).time()
+
+
 def test_fallback_respects_the_window(fake, make_gate):
     fake.usage(status=500)
-    now = fake.clock.utcnow()
-    closed = (time(0, 0), time(0, 1)) if not in_window(now, (time(0, 0), time(0, 1))) else (time(12, 0), time(12, 1))
+    closed = far_window(fake)
     reading = make_gate(window=closed).check().reading
     assert reading.verdict == "busy" and "outside the fallback window" in reading.reason
 
 
 def test_window_is_ignored_for_live_stats_unless_asked(fake, make_gate):
-    now = fake.clock.utcnow()
-    closed = (time(0, 0), time(0, 1)) if not in_window(now, (time(0, 0), time(0, 1))) else (time(12, 0), time(12, 1))
+    closed = far_window(fake)
     fake.usage_quiet(2)
     assert make_gate(window=closed).check().reading.verdict == "quiet"
     fake.clock.advance(60)

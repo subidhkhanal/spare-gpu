@@ -198,6 +198,7 @@ def _register(pad: str, status, where: tuple[Path, str] | None = None) -> bool:
         if backup.exists() and backup.stat().st_mtime != had_backup:
             typer.echo(f"{pad}The file as it was before is saved as {backup}.")
         typer.echo(f"{pad}To undo: gtu integrate --uninstall" + (f" (or copy {backup.name} back)" if backup.exists() else ""))
+    _install_commands(pad, folder)
     if status is not None and not status.problem:
         ok = bc_config.connected(path)
         if ok:
@@ -207,12 +208,31 @@ def _register(pad: str, status, where: tuple[Path, str] | None = None) -> bool:
     return True
 
 
+def _install_commands(pad: str, folder: Path) -> None:
+    try:
+        outcome = bc_config.install_commands(folder)
+    except OSError as exc:
+        typer.echo(f"{pad}Couldn't add the /auto command ({exc}); everything else works without it.")
+        return
+    where = folder / "command"
+    for name, what in outcome.items():
+        if what == "kept-yours":
+            typer.echo(f"{pad}You already have a /{name} command ({where / (name + '.md')}); left it as it is.")
+        elif what == "unchanged":
+            typer.echo(f"{pad}The /{name} command is already there.")
+        else:
+            typer.echo(f"{pad}{'Added' if what == 'added' else 'Updated'} the /{name} command ({where / (name + '.md')}): "
+                       f"/{name} <task> hands the task to whichever model starts it sooner.")
+
+
 def _uninstall(channel: str = "stable") -> None:
     if channel == "stable":
         folder, how = bc_config.locate_config_dir()
     else:
         folder, how = bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel"
     path = bc_config.config_file(folder)
+    for name in bc_config.remove_commands(folder):
+        typer.echo(f"Removed the /{name} command from {folder / 'command'}.")
     try:
         removed = bc_config.unregister(path)
     except bc_config.ConfigError as exc:

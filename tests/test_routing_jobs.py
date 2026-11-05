@@ -107,18 +107,17 @@ def test_kept_nothing_reads_the_verify_summaries():
 
 # --- spare_delegate -------------------------------------------------------------------------------
 
-NOW = datetime.now(timezone.utc)
-
-
 def wait_figures() -> httpx.Client:
-    """DeepSeek queued (p75 125 s), Qwen idle: what the live test on 4 Nov saw."""
+    """DeepSeek queued (p75 125 s), Qwen idle: what the live test on 4 Nov saw. Stamped when asked,
+    as the real endpoint is, so the figures are never stale however long the suite has run."""
     def handle(request):
+        now = datetime.now(timezone.utc).isoformat()
         if request.url.path.endswith("/queue-waits"):
-            return httpx.Response(200, json={"window_minutes": 60, "as_of": NOW.isoformat(), "models": [
+            return httpx.Response(200, json={"window_minutes": 60, "as_of": now, "models": [
                 {"id": DEEPSEEK, "sample_count": 149, "p50_ms": 92948, "p75_ms": 124851, "p90_ms": 182107},
                 {"id": QWEN, "sample_count": 83, "p50_ms": 2, "p75_ms": 3, "p90_ms": 7}]})
         lane = lambda a, q, s: {"active_requests": a, "queued_requests": q, "slot_capacity": s, "available": True}
-        return httpx.Response(200, json={"generated_at": NOW.isoformat(), "models": [
+        return httpx.Response(200, json={"generated_at": now, "models": [
             {"id": DEEPSEEK, "api": lane(2, 8, 2)}, {"id": QWEN, "api": lane(1, 0, 4)}]})
     return httpx.Client(transport=httpx.MockTransport(handle))
 

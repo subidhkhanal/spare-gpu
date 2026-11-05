@@ -1,11 +1,39 @@
 {
   "version": 1,
-  "date": null,
-  "note": "Which job types may run on the faster model instead of the preferred one. Nothing is switch-safe until scripts/eval_models.py has measured it: Qwen's mean score must be no worse than DeepSeek's minus 5% (paired bootstrap, 95% CI). Override for yourself with GTU_SWITCH_SAFE=tests,docs.",
+  "date": "2026-11-05",
+  "note": "Measured by scripts/eval_models.py on 9 task(s); raw results in results-2026-11-05.json. Switch-safe: 95% paired-bootstrap lower bound of mean(Qwen - DeepSeek) >= -5% of DeepSeek's mean. Re-run when BharatCode changes its models.",
   "types": {
-    "tests": "unmeasured",
-    "docs": "unmeasured",
-    "review": "unmeasured"
+    "tests": "keep-preferred",
+    "docs": "switch-safe",
+    "review": "keep-preferred"
   },
-  "evidence": {}
+  "evidence": {
+    "tests": {
+      "tasks": 3,
+      "paused_runs": 0,
+      "deepseek_mean": 32.666666666666664,
+      "qwen_mean": 32.0,
+      "mean_diff": -0.6666666666666666,
+      "ci95_lower": -11.0,
+      "delta": 1.6333333333333333
+    },
+    "docs": {
+      "tasks": 3,
+      "paused_runs": 0,
+      "deepseek_mean": 2.0,
+      "qwen_mean": 2.0,
+      "mean_diff": 0.0,
+      "ci95_lower": 0.0,
+      "delta": 0.1
+    },
+    "review": {
+      "tasks": 3,
+      "paused_runs": 0,
+      "deepseek_mean": 12.666666666666666,
+      "qwen_mean": 9.0,
+      "mean_diff": -3.6666666666666665,
+      "ci95_lower": -6.0,
+      "delta": 0.6333333333333333
+    }
+  }
 }

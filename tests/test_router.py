@@ -15,8 +15,9 @@ SAFE = {"types": {"tests": "switch-safe", "docs": "keep-preferred"}}
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
+    # GTU_ROUTING_POLICY stays: conftest points it at a neutral policy, not the shipped one
     for name in (router.SWITCH_SAFE_ENV, router.PREFERRED_ENV, router.MIN_SAVING_ENV, router.ROUTE_ENV,
-                 router.POLICY_ENV, waits.MODELS_ENV):
+                 waits.MODELS_ENV):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -91,7 +92,17 @@ def test_bharatcodes_plan_refusal_is_recognised():
     assert router.plan_refusal("Model overloaded") is None and router.plan_refusal(None) is None
 
 
-def test_the_shipped_policy_routes_nothing():
+def test_the_shipped_policy_is_well_formed(monkeypatch):
+    monkeypatch.delenv(router.POLICY_ENV)
+    policy = json.loads(router.POLICY_FILE.read_text(encoding="utf-8"))
+    assert set(policy["types"]) == {"tests", "docs", "review"}
+    assert set(policy["types"].values()) <= {"switch-safe", "keep-preferred", "unmeasured"}
+    for kind, verdict in policy["types"].items():
+        # a measured verdict always comes with the evidence behind it
+        assert verdict == "unmeasured" or policy["evidence"][kind]["tasks"] >= 2
+
+
+def test_with_no_policy_or_override_nothing_routes():
     policy = router.load_policy()
     assert not any(router.switch_safe(kind, policy) for kind in ("tests", "docs", "review"))
 

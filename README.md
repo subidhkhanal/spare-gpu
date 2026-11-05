@@ -50,6 +50,10 @@ Then restart BharatCode Desktop. No API key is needed: jobs run through Desktop'
 | "cancel the docs job" | Cancels it |
 | "run the test suite when BharatCode is free" | Runs a test, build or lint command once BharatCode shows a free slot |
 
+### `/auto`
+
+`gtu integrate` also adds a `/auto` slash command to Desktop. Type `/auto write tests for src/pay.py` (or docs, or a review) and the task goes straight to `spare_delegate`: it runs on DeepSeek V4.1 Flash unless the other model would start it sooner and the task type is switch-safe. `/auto` alone shows the current waits. The handoff itself runs on Qwen 3.8 27B, so a stalled DeepSeek queue can't hold up the handoff that's meant to avoid it. The command is `command/auto.md` in Desktop's config folder. Edit it freely: once its "Installed by spare-gpu" line is gone, spare-gpu never overwrites or removes it. `gtu integrate --uninstall` removes the unedited one.
+
 Every job lands on its own git branch (`gtu/<job-id>`). Your checkout is only ever read, and nothing touches `main` until you say so.
 
 For one job's token detail (input, output, cached, reasoning, and a breakdown by message type), open its "spare-gpu: …" session in Desktop: Desktop measures that itself. spare-gpu adds the totals across jobs and nights, and per-job and per-night token budgets that stop a job rather than just report it.
@@ -58,7 +62,12 @@ For one job's token detail (input, output, cached, reasoning, and a breakdown by
 
 BharatCode Desktop only offers its own models, so spare-gpu can't change the model of your chat. It routes the work it runs itself: each job's Desktop session is started on the model chosen for it.
 
-- **Only switch-safe task types move.** A type is switch-safe when [scripts/eval_models.py](scripts/eval_models.py) has run the same tasks on both models and Qwen's checked results are no worse than DeepSeek's (95% paired-bootstrap interval above −5% of DeepSeek's mean). Until that's measured, nothing is routed ([routing_policy.json](src/gpu_token_utilization/routing_policy.json)). To override it for yourself, list the types, one per line, in your project's `.gtu/switch-safe` file (read on every decision; no restart needed), or set `GTU_SWITCH_SAFE=tests,docs`.
+- **Only switch-safe task types move.** A type is switch-safe when [scripts/eval_models.py](scripts/eval_models.py) has run the same tasks on both models and Qwen's checked results are no worse than DeepSeek's (95% paired-bootstrap interval above −5% of DeepSeek's mean). The first eval (5 Nov 2026, 3 tasks per type, every job allowed to finish) gave this result:
+  - **docs: switch-safe.** Qwen matched DeepSeek on every task.
+  - **review: stays on DeepSeek.** Qwen scored about 29% lower.
+  - **tests: stays on DeepSeek for now.** The averages were almost equal (32.0 vs 32.7 passing tests kept), but 3 tasks vary too much to prove Qwen no worse.
+
+  The verdicts are in [routing_policy.json](src/gpu_token_utilization/routing_policy.json) and the raw scores in [research/eval/](research/eval/). To override it for yourself, list the types, one per line, in your project's `.gtu/switch-safe` file (read on every decision; no restart needed), or set `GTU_SWITCH_SAFE=tests,docs`.
 - **Only models your plan includes:** BharatCode lists every model, but a Lite plan only includes Qwen. When BharatCode refuses a model for your plan, spare-gpu remembers that, reruns the step on the model your plan does include, and never routes to the refused one again.
 - **Only when it's worth it:** the other model must save at least 20 s on the estimate (`GTU_ROUTE_MIN_SAVING`), and its lane must have a free slot with nothing queued, so routed work never piles into a queue.
 - **Sticky per job:** a job keeps its model for every step, with two readings in a row needed before routing back.

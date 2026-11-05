@@ -37,7 +37,8 @@ HEALTH = "/global/health"
 # runner -> its launcher -> MCP server -> its launcher -> Desktop's server process -> Desktop
 ANCESTORS = 6
 WEAK_CANDIDATES = 8  # ports with little evidence of being a server, tried after the likely ones
-POLL_RETRIES = 5  # dropped connections in a row while following a session before giving up
+POLL_RETRIES = 5
+STALL_POLLS = 15  # polls a session may sit idle with an unfinished reply before the step gives up  # dropped connections in a row while following a session before giving up
 
 
 DESKTOP_NEEDED = ("Tests and docs jobs run inside BharatCode Desktop: open this project in Desktop and ask "
@@ -276,16 +277,17 @@ class DesktopAgent:
     def _follow(self, http, session, where, result, token_budget, on_step, should_stop) -> None:
         deadline = self._clock() + self.timeout
         seen: set[str] = set()
-        dropped = 0
+        dropped = idle_unfinished = 0
         while True:
             self._sleep(self.poll * (2 ** dropped))
             try:
                 messages = http.get(f"/session/{session}/message", params=where)
                 messages.raise_for_status()
-                finished = self._read(messages.json(), seen, result, on_step)
+                listed = messages.json()
+                finished = self._read(listed, seen, result, on_step)
                 # Each step is its own assistant message, so a completed one doesn't mean the agent
                 # is done; the session's status does. Idle sessions are left out of the status map.
-                busy = finished and session in self._statuses(http, where)
+                busy = session in self._statuses(http, where)
             except httpx.TransportError:
                 # A dropped local connection (seen 4 Nov: WinError 10054 mid-job while Desktop's
                 # server carried on) isn't a failed job: the session keeps going, so look again.
@@ -296,6 +298,14 @@ class DesktopAgent:
                 continue
             dropped = 0
             done = finished and not busy
+            # Seen 5 Nov: after a service outage Desktop marked a session idle while its reply never
+            # completed, and the job waited on it for over an hour. Idle + unfinished for a while = dead.
+            replied = any((m.get("info") or {}).get("role") == "assistant" for m in listed)
+            idle_unfinished = idle_unfinished + 1 if replied and not finished and not busy else 0
+            if idle_unfinished >= STALL_POLLS:
+                result.error = "BharatCode Desktop stopped the session without finishing its reply"
+                self._abort(http, session, where)
+                return
             if token_budget is not None and result.tokens >= token_budget:
                 result.stopped = "budget"
             elif should_stop():

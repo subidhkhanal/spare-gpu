@@ -1,0 +1,217 @@
+started 05-11-2026  0:01:09.49 
+[1/9] tests src/gpu_token_utilization/budget.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 3/4 slots busy, 0 queued.
+    Job d7eb00b6: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (8,386 tokens).
+      BharatCode Desktop finished a step (9,474 tokens).
+      BharatCode Desktop finished a step (12,230 tokens).
+      BharatCode Desktop finished a step (20,999 tokens).
+      BharatCode Desktop finished a step (22,188 tokens).
+      BharatCode Desktop finished a step (26,570 tokens).
+      BharatCode Desktop finished a step (26,801 tokens).
+      BharatCode Desktop finished a step (26,920 tokens).
+      BharatCode Desktop finished a step (27,089 tokens).
+      BharatCode Desktop finished a step (27,226 tokens).
+    Job d7eb00b6: paused, stopped BharatCode Desktop after 207883 tokens: budget reached.
+    Job d7eb00b6: paused, its token budget is used up (207883 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   deepseek: score 0.0, 207,883 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 3/4 slots busy, 0 queued.
+    Job 60152c71: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (8,322 tokens).
+      BharatCode Desktop finished a step (9,109 tokens).
+      BharatCode Desktop finished a step (15,595 tokens).
+      BharatCode Desktop finished a step (23,424 tokens).
+      BharatCode Desktop finished a step (27,457 tokens).
+      BharatCode Desktop finished a step (31,164 tokens).
+      BharatCode Desktop finished a step (52,909 tokens).
+      BharatCode Desktop finished a step (51,233 tokens).
+    Job 60152c71: paused, stopped BharatCode Desktop after 219213 tokens: budget reached.
+    Job 60152c71: paused, its token budget is used up (219213 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   qwen: score 0.0, 219,213 tokens
+[2/9] tests src/gpu_token_utilization/runstate.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job 594c2364: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (8,321 tokens).
+      BharatCode Desktop finished a step (10,493 tokens).
+      BharatCode Desktop finished a step (19,684 tokens).
+      BharatCode Desktop finished a step (21,085 tokens).
+      BharatCode Desktop finished a step (25,950 tokens).
+      BharatCode Desktop finished a step (27,056 tokens).
+      BharatCode Desktop finished a step (31,118 tokens).
+      BharatCode Desktop finished a step (31,374 tokens).
+      BharatCode Desktop finished a step (31,456 tokens).
+    Job 594c2364: paused, stopped BharatCode Desktop after 206537 tokens: budget reached.
+    Job 594c2364: paused, its token budget is used up (206537 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   deepseek: score 0.0, 206,537 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job 789ebfe6: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (8,329 tokens).
+      BharatCode Desktop finished a step (10,562 tokens).
+      BharatCode Desktop finished a step (10,641 tokens).
+      BharatCode Desktop finished a step (15,366 tokens).
+      BharatCode Desktop finished a step (22,984 tokens).
+      BharatCode Desktop finished a step (39,891 tokens).
+      BharatCode Desktop finished a step (40,226 tokens).
+      BharatCode Desktop finished a step (38,740 tokens).
+      BharatCode Desktop finished a step (40,990 tokens).
+    Job 789ebfe6: paused, stopped BharatCode Desktop after 227729 tokens: budget reached.
+    Job 789ebfe6: paused, its token budget is used up (227729 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   qwen: score 0.0, 227,729 tokens
+[3/9] tests src/gpu_token_utilization/costs.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 3/4 slots busy, 0 queued.
+    Job 3287aedc: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (8,286 tokens).
+      BharatCode Desktop finished a step (10,608 tokens).
+      BharatCode Desktop finished a step (16,785 tokens).
+      BharatCode Desktop finished a step (19,821 tokens).
+      BharatCode Desktop finished a step (27,381 tokens).
+      BharatCode Desktop finished a step (27,568 tokens).
+      BharatCode Desktop finished a step (27,632 tokens).
+      BharatCode Desktop finished a step (27,826 tokens).
+      BharatCode Desktop finished a step (27,963 tokens).
+      BharatCode Desktop finished a step (28,811 tokens).
+    Job 3287aedc: paused, stopped BharatCode Desktop after 222681 tokens: budget reached.
+    Job 3287aedc: paused, its token budget is used up (222681 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   deepseek: score 0.0, 222,681 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job 126ad51d: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (8,033 tokens).
+      BharatCode Desktop finished a step (14,275 tokens).
+      BharatCode Desktop finished a step (23,116 tokens).
+      BharatCode Desktop finished a step (29,130 tokens).
+      BharatCode Desktop finished a step (29,231 tokens).
+      BharatCode Desktop finished a step (29,411 tokens).
+      BharatCode Desktop finished a step (29,607 tokens).
+      BharatCode Desktop finished a step (29,872 tokens).
+      BharatCode Desktop finished a step (30,109 tokens).
+    Job 126ad51d: paused, stopped BharatCode Desktop after 222784 tokens: budget reached.
+    Job 126ad51d: paused, its token budget is used up (222784 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   qwen: score 0.0, 222,784 tokens
+[4/9] docs src/gpu_token_utilization/budget.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job d7903aa9: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (6,827 tokens).
+      BharatCode Desktop finished a step (7,752 tokens).
+      BharatCode Desktop finished a step (9,803 tokens).
+      BharatCode Desktop finished a step (10,076 tokens).
+      BharatCode Desktop finished a step (10,362 tokens).
+      BharatCode Desktop finished a step (10,625 tokens).
+      BharatCode Desktop finished a step (10,918 tokens).
+      BharatCode Desktop finished a step (11,051 tokens).
+      BharatCode Desktop finished a step (11,971 tokens).
+    Job d7903aa9: step 1 (write) done.
+    Job d7903aa9: step 2 of 2 (verify) started: running locally.
+    Job d7903aa9: step 2 (verify) done.
+    Job d7903aa9: finished; results are on branch gtu/d7903aa9.
+    Queue empty.
+   deepseek: score 2.0, 89,385 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 0/4 slots busy, 0 queued.
+    Job e09df42b: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (6,765 tokens).
+      BharatCode Desktop finished a step (6,734 tokens).
+      BharatCode Desktop finished a step (9,227 tokens).
+      BharatCode Desktop finished a step (10,778 tokens).
+      BharatCode Desktop finished a step (13,992 tokens).
+      BharatCode Desktop finished a step (16,023 tokens).
+      BharatCode Desktop finished a step (23,203 tokens).
+      BharatCode Desktop finished a step (25,655 tokens).
+      BharatCode Desktop finished a step (26,389 tokens).
+      BharatCode Desktop finished a step (26,466 tokens).
+      BharatCode Desktop finished a step (28,235 tokens).
+      BharatCode Desktop finished a step (28,267 tokens).
+    Job e09df42b: paused, stopped BharatCode Desktop after 221734 tokens: budget reached.
+    Job e09df42b: paused, its token budget is used up (221734 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   qwen: score 0.0, 221,734 tokens
+[5/9] docs src/gpu_token_utilization/worktree.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/4 slots busy, 0 queued.
+    Job a0e3500b: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (6,843 tokens).
+      BharatCode Desktop finished a step (10,152 tokens).
+      BharatCode Desktop finished a step (13,100 tokens).
+      BharatCode Desktop finished a step (14,873 tokens).
+      BharatCode Desktop finished a step (15,355 tokens).
+      BharatCode Desktop finished a step (15,386 tokens).
+    Job a0e3500b: step 1 (write) done.
+    Job a0e3500b: step 2 of 2 (verify) started: running locally.
+    Job a0e3500b: step 2 (verify) done.
+    Job a0e3500b: finished; results are on branch gtu/a0e3500b.
+    Queue empty.
+   deepseek: score 2.0, 75,709 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 0/4 slots busy, 0 queued.
+    Job 25374c43: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (6,543 tokens).
+      BharatCode Desktop finished a step (10,576 tokens).
+      BharatCode Desktop finished a step (12,741 tokens).
+      BharatCode Desktop finished a step (13,137 tokens).
+      BharatCode Desktop finished a step (13,234 tokens).
+      BharatCode Desktop finished a step (15,504 tokens).
+      BharatCode Desktop finished a step (18,153 tokens).
+      BharatCode Desktop finished a step (20,851 tokens).
+      BharatCode Desktop finished a step (24,725 tokens).
+      BharatCode Desktop finished a step (25,982 tokens).
+      BharatCode Desktop finished a step (25,762 tokens).
+      BharatCode Desktop finished a step (25,794 tokens).
+    Job 25374c43: paused, stopped BharatCode Desktop after 213002 tokens: budget reached.
+    Job 25374c43: paused, its token budget is used up (213002 of 200000). Raise the budget to let it continue.
+    Nothing left that fits the token budgets.
+   qwen: score 0.0, 213,002 tokens
+[6/9] docs src/gpu_token_utilization/freerun.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job 2762f467: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (6,841 tokens).
+      BharatCode Desktop finished a step (9,900 tokens).
+      BharatCode Desktop finished a step (12,716 tokens).
+      BharatCode Desktop finished a step (13,219 tokens).
+      BharatCode Desktop finished a step (13,255 tokens).
+    Job 2762f467: step 1 (write) done.
+    Job 2762f467: step 2 of 2 (verify) started: running locally.
+    Job 2762f467: step 2 (verify) done.
+    Job 2762f467: finished; results are on branch gtu/2762f467.
+    Queue empty.
+   deepseek: score 2.0, 55,931 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/4 slots busy, 0 queued.
+    Job 0cd86051: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+      BharatCode Desktop finished a step (6,546 tokens).
+      BharatCode Desktop finished a step (9,852 tokens).
+      BharatCode Desktop finished a step (17,518 tokens).
+      BharatCode Desktop finished a step (17,951 tokens).
+      BharatCode Desktop finished a step (17,979 tokens).
+    Job 0cd86051: step 1 (write) done.
+    Job 0cd86051: step 2 of 2 (verify) started: running locally.
+    Job 0cd86051: step 2 (verify) done.
+    Job 0cd86051: finished; results are on branch gtu/0cd86051.
+    Queue empty.
+   qwen: score 2.0, 69,846 tokens
+[7/9] review src/gpu_token_utilization/gate.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/4 slots busy, 0 queued.
+    Job 8a51cf1b: step 1 of 1 (review) started: one request.
+      Asking BharatCode Desktop...
+      BharatCode Desktop finished a step (16,761 tokens).
+    Job 8a51cf1b: step 1 (review) done.
+    Job 8a51cf1b: finished; results are on branch gtu/8a51cf1b.
+    Queue empty.
+   deepseek: score 29.0, 16,761 tokens
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/4 slots busy, 0 queued.
+    Job 70dfeb9b: step 1 of 1 (review) started: one request.
+      Asking BharatCode Desktop...

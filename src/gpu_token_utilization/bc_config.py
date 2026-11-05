@@ -215,6 +215,48 @@ def unregister(path: Path) -> bool:
     return True
 
 
+# Slash commands spare-gpu adds to BharatCode Desktop (it loads <config folder>/command/*.md).
+COMMANDS_DIR = Path(__file__).with_name("commands")
+COMMAND_MARKER = "# Installed by spare-gpu"
+
+
+def _ours(path: Path) -> bool:
+    try:
+        return COMMAND_MARKER in path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return False
+
+
+def install_commands(folder: Path) -> dict[str, str]:
+    """Copy spare-gpu's slash commands into <folder>/command/. A file of the same name the user
+    wrote (or edited, removing the marker) is left alone. {name: added|updated|unchanged|kept-yours}."""
+    target = folder / "command"
+    outcome = {}
+    for source in sorted(COMMANDS_DIR.glob("*.md")):
+        dest, text = target / source.name, source.read_text(encoding="utf-8")
+        if dest.exists() and not _ours(dest):
+            outcome[source.stem] = "kept-yours"
+        elif dest.exists() and dest.read_text(encoding="utf-8-sig") == text:
+            outcome[source.stem] = "unchanged"
+        else:
+            existed = dest.exists()
+            target.mkdir(parents=True, exist_ok=True)
+            dest.write_text(text, encoding="utf-8")
+            outcome[source.stem] = "updated" if existed else "added"
+    return outcome
+
+
+def remove_commands(folder: Path) -> list[str]:
+    """Remove the slash commands spare-gpu installed (only files still carrying its marker)."""
+    removed = []
+    for source in sorted(COMMANDS_DIR.glob("*.md")):
+        dest = folder / "command" / source.name
+        if dest.exists() and _ours(dest):
+            dest.unlink()
+            removed.append(source.stem)
+    return removed
+
+
 def connected(path: Path, timeout: float = 90.0) -> bool | None:
     """Ask BharatCode's CLI whether spare-gpu connects (None if the CLI can't be run). Points it
     at exactly the file we edited."""

@@ -38,6 +38,17 @@ def fake_bharatcode_cli(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def neutral_routing_policy(tmp_path_factory, monkeypatch):
+    """Tests never depend on the shipped routing_policy.json, which each model evaluation
+    rewrites: nothing is switch-safe unless a test says so."""
+    path = tmp_path_factory.getbasetemp() / "routing_policy.json"
+    if not path.exists():
+        path.write_text(json.dumps({"version": 1, "types": {k: "unmeasured" for k in ("tests", "docs", "review")}}),
+                        encoding="utf-8")
+    monkeypatch.setenv("GTU_ROUTING_POLICY", str(path))
+
+
+@pytest.fixture(autouse=True)
 def private_credential_target(monkeypatch):
     """Every test gets its own Credential Manager entry name, so no test can read (or
     overwrite) a key the user saved with `gtu setkey`. Tests that save one clean up."""

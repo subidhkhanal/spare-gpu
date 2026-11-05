@@ -1,0 +1,349 @@
+started 05-11-2026  7:18:52.90 
+[1/9] tests src/gpu_token_utilization/budget.py @ 859d576
+    1 job(s) to run. Starting now.
+    Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+    Job bea9f977: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+      BharatCode Desktop finished a step (8,328 tokens).
+      BharatCode Desktop finished a step (9,381 tokens).
+      BharatCode Desktop finished a step (12,492 tokens).
+      BharatCode Desktop finished a step (23,975 tokens).
+      BharatCode Desktop finished a step (24,494 tokens).
+      BharatCode Desktop finished a step (24,621 tokens).
+      BharatCode Desktop finished a step (25,302 tokens).
+      BharatCode Desktop finished a step (25,527 tokens).
+      BharatCode Desktop finished a step (25,744 tokens).
+      BharatCode Desktop finished a step (25,975 tokens).
+      BharatCode Desktop finished a step (26,509 tokens).
+      BharatCode Desktop finished a step (26,636 tokens).
+      BharatCode Desktop finished a step (26,674 tokens).
+    Job bea9f977: step 1 (write) done.
+    Job bea9f977: step 2 of 2 (verify) started: running locally.
+    Job bea9f977: step 2 (verify) done.
+started 05-11-2026  7:23:25.87 
+18 run(s) to do, 4 at a time.
+[1/9 tests budget.py deepseek] 1 job(s) to run. Starting now.
+[2/9 tests runstate.py qwen] 1 job(s) to run. Starting now.
+[2/9 tests runstate.py deepseek] 1 job(s) to run. Starting now.
+[1/9 tests budget.py qwen] 1 job(s) to run. Starting now.
+[1/9 tests budget.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[2/9 tests runstate.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[2/9 tests runstate.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[1/9 tests budget.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[2/9 tests runstate.py deepseek] Job c9750165: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[1/9 tests budget.py deepseek] Job 850a554b: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[1/9 tests budget.py qwen] Job 371a08ce: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[2/9 tests runstate.py qwen] Job df3535b6: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (8,272 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (8,273 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (8,339 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (9,190 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (10,154 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (16,244 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (9,553 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (10,442 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (16,878 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (13,087 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (17,427 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (18,515 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (19,294 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (21,706 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (19,377 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (19,612 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (19,839 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (26,602 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (20,009 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (27,322 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (20,142 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (20,992 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (22,565 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (27,386 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (21,187 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (23,937 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (27,603 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (22,597 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (27,816 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (22,771 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (28,043 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (23,575 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (31,300 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (23,719 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (23,951 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (31,460 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (24,095 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (33,665 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (28,878 tokens).
+[1/9 tests budget.py deepseek]   BharatCode Desktop finished a step (24,134 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (36,355 tokens).
+[1/9 tests budget.py deepseek] Job 850a554b: step 1 (write) done.
+[1/9 tests budget.py deepseek] Job 850a554b: step 2 of 2 (verify) started: running locally.
+[1/9 tests budget.py deepseek] Job 850a554b: step 2 (verify) done.
+[1/9 tests budget.py deepseek] Job 850a554b: finished; results are on branch gtu/850a554b.
+[1/9 tests budget.py deepseek] Queue empty.
+[1/9 tests budget.py deepseek] score 18.0, 375,878 tokens
+[3/9 tests costs.py deepseek] 1 job(s) to run. Starting now.
+[3/9 tests costs.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[3/9 tests costs.py deepseek] Job 0bb2cdc0: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (36,504 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (36,652 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (8,343 tokens).
+[2/9 tests runstate.py deepseek]   BharatCode Desktop finished a step (36,928 tokens).
+[2/9 tests runstate.py deepseek] Job c9750165: step 1 (write) done.
+[2/9 tests runstate.py deepseek] Job c9750165: step 2 of 2 (verify) started: running locally.
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (10,877 tokens).
+[2/9 tests runstate.py deepseek] Job c9750165: step 2 (verify) done.
+[2/9 tests runstate.py deepseek] Job c9750165: finished; results are on branch gtu/c9750165.
+[2/9 tests runstate.py deepseek] Queue empty.
+[2/9 tests runstate.py deepseek] score 41.0, 489,813 tokens
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (19,572 tokens).
+[3/9 tests costs.py deepseek] Job 0bb2cdc0: step 1 (write) failed: BharatCode Desktop failed: BharatCode authenticated request could not reach the service.
+[3/9 tests costs.py deepseek] Queue empty.
+[3/9 tests costs.py deepseek] score 0.0, 38,792 tokens
+[3/9 tests costs.py qwen] 1 job(s) to run. Starting now.
+[3/9 tests costs.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[4/9 docs budget.py deepseek] 1 job(s) to run. Starting now.
+[4/9 docs budget.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[3/9 tests costs.py qwen] Job d9261427: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[4/9 docs budget.py deepseek] Job d0577f48: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (6,833 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (8,311 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (7,764 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (10,922 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (9,802 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (17,740 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (10,248 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (10,468 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (20,360 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (10,814 tokens).
+[4/9 docs budget.py deepseek]   BharatCode Desktop finished a step (10,843 tokens).
+[4/9 docs budget.py deepseek] Job d0577f48: step 1 (write) done.
+[4/9 docs budget.py deepseek] Job d0577f48: step 2 of 2 (verify) started: running locally.
+[4/9 docs budget.py deepseek] Job d0577f48: step 2 (verify) done.
+[4/9 docs budget.py deepseek] Job d0577f48: finished; results are on branch gtu/d0577f48.
+[4/9 docs budget.py deepseek] Queue empty.
+[4/9 docs budget.py deepseek] score 2.0, 66,772 tokens
+[4/9 docs budget.py qwen] 1 job(s) to run. Starting now.
+[4/9 docs budget.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 1 queued.
+[4/9 docs budget.py qwen] Job 190a55f9: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (38,816 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (6,851 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (38,937 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (7,975 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (39,391 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (26,220 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (11,268 tokens).
+[1/9 tests budget.py qwen]   BharatCode Desktop finished a step (40,581 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (26,359 tokens).
+[1/9 tests budget.py qwen] Job 371a08ce: step 1 (write) done.
+[1/9 tests budget.py qwen] Job 371a08ce: step 2 of 2 (verify) started: running locally.
+[1/9 tests budget.py qwen] Job 371a08ce: step 2 (verify) done.
+[1/9 tests budget.py qwen] Job 371a08ce: finished; results are on branch gtu/371a08ce.
+[1/9 tests budget.py qwen] Queue empty.
+[1/9 tests budget.py qwen] score 32.0, 268,424 tokens
+[5/9 docs worktree.py deepseek] 1 job(s) to run. Starting now.
+[5/9 docs worktree.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 1/2 slots busy, 0 queued.
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (18,172 tokens).
+[5/9 docs worktree.py deepseek] Job 12ae81ec: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (6,843 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (10,149 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (12,815 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (14,122 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (21,408 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (14,689 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (15,142 tokens).
+[5/9 docs worktree.py deepseek]   BharatCode Desktop finished a step (15,171 tokens).
+[5/9 docs worktree.py deepseek] Job 12ae81ec: step 1 (write) done.
+[5/9 docs worktree.py deepseek] Job 12ae81ec: step 2 of 2 (verify) started: running locally.
+[5/9 docs worktree.py deepseek] Job 12ae81ec: step 2 (verify) done.
+[5/9 docs worktree.py deepseek] Job 12ae81ec: finished; results are on branch gtu/12ae81ec.
+[5/9 docs worktree.py deepseek] Queue empty.
+[5/9 docs worktree.py deepseek] score 2.0, 88,931 tokens
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (21,669 tokens).
+[5/9 docs worktree.py qwen] 1 job(s) to run. Starting now.
+[5/9 docs worktree.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[5/9 docs worktree.py qwen] Job 416ff92b: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (22,151 tokens).
+[5/9 docs worktree.py qwen]   BharatCode Desktop finished a step (6,847 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (22,655 tokens).
+[5/9 docs worktree.py qwen]   BharatCode Desktop finished a step (15,673 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (22,777 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (38,694 tokens).
+[5/9 docs worktree.py qwen]   BharatCode Desktop finished a step (16,098 tokens).
+[4/9 docs budget.py qwen]   BharatCode Desktop finished a step (23,993 tokens).
+[4/9 docs budget.py qwen] Job 190a55f9: step 1 (write) done.
+[4/9 docs budget.py qwen] Job 190a55f9: step 2 of 2 (verify) started: running locally.
+[4/9 docs budget.py qwen] Job 190a55f9: step 2 (verify) done.
+[4/9 docs budget.py qwen] Job 190a55f9: finished; results are on branch gtu/190a55f9.
+[4/9 docs budget.py qwen] Queue empty.
+[4/9 docs budget.py qwen] score 2.0, 178,919 tokens
+[6/9 docs freerun.py deepseek] 1 job(s) to run. Starting now.
+[6/9 docs freerun.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 2 queued.
+[6/9 docs freerun.py deepseek] Job 7c1adeca: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[6/9 docs freerun.py deepseek]   BharatCode Desktop finished a step (6,845 tokens).
+[5/9 docs worktree.py qwen]   BharatCode Desktop finished a step (16,301 tokens).
+[6/9 docs freerun.py deepseek]   BharatCode Desktop finished a step (9,907 tokens).
+[6/9 docs freerun.py deepseek]   BharatCode Desktop finished a step (12,606 tokens).
+[6/9 docs freerun.py deepseek]   BharatCode Desktop finished a step (14,055 tokens).
+[6/9 docs freerun.py deepseek]   BharatCode Desktop finished a step (14,124 tokens).
+[6/9 docs freerun.py deepseek] Job 7c1adeca: step 1 (write) done.
+[6/9 docs freerun.py deepseek] Job 7c1adeca: step 2 of 2 (verify) started: running locally.
+[6/9 docs freerun.py deepseek] Job 7c1adeca: step 2 (verify) done.
+[6/9 docs freerun.py deepseek] Job 7c1adeca: finished; results are on branch gtu/7c1adeca.
+[6/9 docs freerun.py deepseek] Queue empty.
+[6/9 docs freerun.py deepseek] score 2.0, 57,537 tokens
+[5/9 docs worktree.py qwen]   BharatCode Desktop finished a step (20,671 tokens).
+[6/9 docs freerun.py qwen] 1 job(s) to run. Starting now.
+[6/9 docs freerun.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (42,044 tokens).
+[6/9 docs freerun.py qwen] Job 1852ed68: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[5/9 docs worktree.py qwen] Job 416ff92b: step 1 (write) done.
+[5/9 docs worktree.py qwen] Job 416ff92b: step 2 of 2 (verify) started: running locally.
+[5/9 docs worktree.py qwen] Job 416ff92b: step 2 (verify) done.
+[5/9 docs worktree.py qwen] Job 416ff92b: finished; results are on branch gtu/416ff92b.
+[5/9 docs worktree.py qwen] Queue empty.
+[5/9 docs worktree.py qwen] score 2.0, 75,590 tokens
+[7/9 review gate.py deepseek] 1 job(s) to run. Starting now.
+[7/9 review gate.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[7/9 review gate.py deepseek] Job b43524bb: step 1 of 1 (review) started: one request.
+[7/9 review gate.py deepseek]   Asking BharatCode Desktop...
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (42,139 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (43,153 tokens).
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (6,801 tokens).
+[7/9 review gate.py deepseek]   BharatCode Desktop finished a step (15,161 tokens).
+[7/9 review gate.py deepseek] Job b43524bb: step 1 (review) done.
+[7/9 review gate.py deepseek] Job b43524bb: finished; results are on branch gtu/b43524bb.
+[7/9 review gate.py deepseek] Queue empty.
+[7/9 review gate.py deepseek] score 5.0, 15,161 tokens
+[7/9 review gate.py qwen] 1 job(s) to run. Starting now.
+[7/9 review gate.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[7/9 review gate.py qwen] Job c7631006: step 1 of 1 (review) started: one request.
+[7/9 review gate.py qwen]   Asking BharatCode Desktop...
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (10,178 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (45,054 tokens).
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (14,473 tokens).
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (16,646 tokens).
+[7/9 review gate.py qwen]   BharatCode Desktop finished a step (24,117 tokens).
+[7/9 review gate.py qwen] Job c7631006: step 1 (review) done.
+[7/9 review gate.py qwen] Job c7631006: finished; results are on branch gtu/c7631006.
+[7/9 review gate.py qwen] Queue empty.
+[7/9 review gate.py qwen] score 4.0, 24,117 tokens
+[8/9 review store.py deepseek] 1 job(s) to run. Starting now.
+[8/9 review store.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (17,084 tokens).
+[8/9 review store.py deepseek] Job 74fe4b34: step 1 of 1 (review) started: one request.
+[8/9 review store.py deepseek]   Asking BharatCode Desktop...
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (17,217 tokens).
+[6/9 docs freerun.py qwen]   BharatCode Desktop finished a step (21,103 tokens).
+[8/9 review store.py deepseek]   BharatCode Desktop finished a step (18,111 tokens).
+[6/9 docs freerun.py qwen] Job 1852ed68: step 1 (write) done.
+[6/9 docs freerun.py qwen] Job 1852ed68: step 2 of 2 (verify) started: running locally.
+[8/9 review store.py deepseek] Job 74fe4b34: step 1 (review) done.
+[6/9 docs freerun.py qwen] Job 1852ed68: step 2 (verify) done.
+[6/9 docs freerun.py qwen] Job 1852ed68: finished; results are on branch gtu/1852ed68.
+[6/9 docs freerun.py qwen] Queue empty.
+[6/9 docs freerun.py qwen] score 2.0, 103,502 tokens
+[8/9 review store.py deepseek] Job 74fe4b34: finished; results are on branch gtu/74fe4b34.
+[8/9 review store.py deepseek] Queue empty.
+[8/9 review store.py deepseek] score 19.0, 18,111 tokens
+[8/9 review store.py qwen] 1 job(s) to run. Starting now.
+[8/9 review store.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[9/9 review report.py deepseek] 1 job(s) to run. Starting now.
+[9/9 review report.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[8/9 review store.py qwen] Job e9cda2bc: step 1 of 1 (review) started: one request.
+[8/9 review store.py qwen]   Asking BharatCode Desktop...
+[9/9 review report.py deepseek] Job b15ddcb9: step 1 of 1 (review) started: one request.
+[9/9 review report.py deepseek]   Asking BharatCode Desktop...
+[9/9 review report.py deepseek]   BharatCode Desktop finished a step (12,952 tokens).
+[9/9 review report.py deepseek] Job b15ddcb9: step 1 (review) done.
+[9/9 review report.py deepseek] Job b15ddcb9: finished; results are on branch gtu/b15ddcb9.
+[9/9 review report.py deepseek] Queue empty.
+[9/9 review report.py deepseek] score 14.0, 12,952 tokens
+[9/9 review report.py qwen] 1 job(s) to run. Starting now.
+[9/9 review report.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 1 queued.
+[9/9 review report.py qwen] Job e62b7091: step 1 of 1 (review) started: one request.
+[9/9 review report.py qwen]   Asking BharatCode Desktop...
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (47,960 tokens).
+[8/9 review store.py qwen]   BharatCode Desktop finished a step (25,029 tokens).
+[8/9 review store.py qwen] Job e9cda2bc: step 1 (review) done.
+[8/9 review store.py qwen] Job e9cda2bc: finished; results are on branch gtu/e9cda2bc.
+[8/9 review store.py qwen] Queue empty.
+[8/9 review store.py qwen] score 13.0, 25,029 tokens
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (48,545 tokens).
+[3/9 tests costs.py qwen]   BharatCode Desktop finished a step (48,683 tokens).
+[3/9 tests costs.py qwen] Job d9261427: step 1 (write) done.
+[3/9 tests costs.py qwen] Job d9261427: step 2 of 2 (verify) started: running locally.
+[3/9 tests costs.py qwen] Job d9261427: step 2 (verify) done.
+[3/9 tests costs.py qwen] Job d9261427: finished; results are on branch gtu/d9261427.
+[3/9 tests costs.py qwen] Queue empty.
+[3/9 tests costs.py qwen] score 34.0, 466,184 tokens
+[9/9 review report.py qwen]   BharatCode Desktop finished a step (22,199 tokens).
+[9/9 review report.py qwen] Job e62b7091: step 1 (review) done.
+[9/9 review report.py qwen] Job e62b7091: finished; results are on branch gtu/e62b7091.
+[9/9 review report.py qwen] Queue empty.
+[9/9 review report.py qwen] score 10.0, 22,199 tokens
+started 05-11-2026  8:29:05.34 
+[1/9 tests budget.py deepseek] score 18.0 (saved earlier)
+[1/9 tests budget.py qwen] score 32.0 (saved earlier)
+[2/9 tests runstate.py deepseek] score 41.0 (saved earlier)
+[3/9 tests costs.py qwen] score 34.0 (saved earlier)
+[4/9 docs budget.py deepseek] score 2.0 (saved earlier)
+[4/9 docs budget.py qwen] score 2.0 (saved earlier)
+[5/9 docs worktree.py deepseek] score 2.0 (saved earlier)
+[5/9 docs worktree.py qwen] score 2.0 (saved earlier)
+[6/9 docs freerun.py deepseek] score 2.0 (saved earlier)
+[6/9 docs freerun.py qwen] score 2.0 (saved earlier)
+[7/9 review gate.py deepseek] score 5.0 (saved earlier)
+[7/9 review gate.py qwen] score 4.0 (saved earlier)
+[8/9 review store.py deepseek] score 19.0 (saved earlier)
+[8/9 review store.py qwen] score 13.0 (saved earlier)
+[9/9 review report.py deepseek] score 14.0 (saved earlier)
+[9/9 review report.py qwen] score 10.0 (saved earlier)
+2 run(s) to do, 4 at a time.
+[3/9 tests costs.py deepseek] 1 job(s) to run. Starting now.
+[3/9 tests costs.py deepseek] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[2/9 tests runstate.py qwen] 1 job(s) to run. Starting now.
+[2/9 tests runstate.py qwen] Sending now (not waiting for capacity): qwen-3.8-27b api lane 2/2 slots busy, 0 queued.
+[3/9 tests costs.py deepseek] Job e45e7986: step 1 of 2 (write) started: BharatCode Desktop is working on it (DeepSeek V4.1 Flash); this can take several minutes.
+[2/9 tests runstate.py qwen] Job 9c363a9c: step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B); this can take several minutes.
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (8,300 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (8,284 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (10,020 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (10,590 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (13,156 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (16,813 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (17,517 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (18,500 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (27,898 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (21,980 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (22,165 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (22,418 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (27,029 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (27,120 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (27,395 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (29,085 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (29,327 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (29,472 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (29,550 tokens).
+[3/9 tests costs.py deepseek]   BharatCode Desktop finished a step (29,591 tokens).
+[3/9 tests costs.py deepseek] Job e45e7986: step 1 (write) done.
+[3/9 tests costs.py deepseek] Job e45e7986: step 2 of 2 (verify) started: running locally.
+[3/9 tests costs.py deepseek] Job e45e7986: step 2 (verify) done.
+[3/9 tests costs.py deepseek] Job e45e7986: finished; results are on branch gtu/e45e7986.
+[3/9 tests costs.py deepseek] Queue empty.
+[3/9 tests costs.py deepseek] score 39.0, 349,319 tokens
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (49,736 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (49,808 tokens).
+[2/9 tests runstate.py qwen]   BharatCode Desktop finished a step (50,563 tokens).
+[2/9 tests runstate.py qwen] Job 9c363a9c: step 1 (write) done.
+[2/9 tests runstate.py qwen] Job 9c363a9c: step 2 of 2 (verify) started: running locally.
+[2/9 tests runstate.py qwen] Job 9c363a9c: step 2 (verify) done.
+[2/9 tests runstate.py qwen] Job 9c363a9c: could not remove its worktree: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\subid\\AppData\\Local\\Temp\\gtu-eval-7bt5ks0s\\repo\\.gtu\\worktrees\\9c363a9c'
+A program (often antivirus, or an editor) is holding a file in C:\Users\subid\AppData\Local\Temp\gtu-eval-7bt5ks0s\repo\.gtu\worktrees\9c363a9c. Close it and delete that folder; the branch is safe.
+[2/9 tests runstate.py qwen] Job 9c363a9c: finished; results are on branch gtu/9c363a9c.
+[2/9 tests runstate.py qwen] Queue empty.
+[2/9 tests runstate.py qwen] score 30.0, 226,998 tokens
+{
+  "tests": "keep-preferred",
+  "docs": "switch-safe",
+  "review": "keep-preferred"
+}
+exit 0 at 05-11-2026  9:03:57.88 

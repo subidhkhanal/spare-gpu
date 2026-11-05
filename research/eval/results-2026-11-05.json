@@ -1,0 +1,164 @@
+[
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "tests",
+    "target": "src/gpu_token_utilization/budget.py",
+    "scores": {
+      "deepseek": 18.0,
+      "qwen": 32.0
+    },
+    "tokens": {
+      "deepseek": 375878,
+      "qwen": 268424
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "tests",
+    "target": "src/gpu_token_utilization/runstate.py",
+    "scores": {
+      "deepseek": 41.0,
+      "qwen": 30.0
+    },
+    "tokens": {
+      "deepseek": 489813,
+      "qwen": 226998
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "tests",
+    "target": "src/gpu_token_utilization/costs.py",
+    "scores": {
+      "qwen": 34.0,
+      "deepseek": 39.0
+    },
+    "tokens": {
+      "qwen": 466184,
+      "deepseek": 349319
+    },
+    "paused": {
+      "qwen": false,
+      "deepseek": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "docs",
+    "target": "src/gpu_token_utilization/budget.py",
+    "scores": {
+      "deepseek": 2.0,
+      "qwen": 2.0
+    },
+    "tokens": {
+      "deepseek": 66772,
+      "qwen": 178919
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "docs",
+    "target": "src/gpu_token_utilization/worktree.py",
+    "scores": {
+      "deepseek": 2.0,
+      "qwen": 2.0
+    },
+    "tokens": {
+      "deepseek": 88931,
+      "qwen": 75590
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "docs",
+    "target": "src/gpu_token_utilization/freerun.py",
+    "scores": {
+      "deepseek": 2.0,
+      "qwen": 2.0
+    },
+    "tokens": {
+      "deepseek": 57537,
+      "qwen": 103502
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "review",
+    "target": "src/gpu_token_utilization/gate.py",
+    "scores": {
+      "deepseek": 5.0,
+      "qwen": 4.0
+    },
+    "tokens": {
+      "deepseek": 15161,
+      "qwen": 24117
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "review",
+    "target": "src/gpu_token_utilization/store.py",
+    "scores": {
+      "deepseek": 19.0,
+      "qwen": 13.0
+    },
+    "tokens": {
+      "deepseek": 18111,
+      "qwen": 25029
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  },
+  {
+    "repo": "https://github.com/subidhkhanal/spare-gpu",
+    "sha": "859d576",
+    "kind": "review",
+    "target": "src/gpu_token_utilization/report.py",
+    "scores": {
+      "deepseek": 14.0,
+      "qwen": 10.0
+    },
+    "tokens": {
+      "deepseek": 12952,
+      "qwen": 22199
+    },
+    "paused": {
+      "deepseek": false,
+      "qwen": false
+    }
+  }
+]

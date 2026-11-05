@@ -218,6 +218,43 @@ def test_integrate_one_channel_and_uninstall_it(config_dir):
     assert cli.invoke(app, ["integrate", "--channel", "nightly"]).exit_code == 1
 
 
+def test_integrate_adds_the_auto_command_and_uninstall_removes_it(config_dir):
+    command = config_dir / "command" / "auto.md"
+    result = cli.invoke(app, ["integrate"])
+    assert result.exit_code == 0, result.output
+    assert "Added the /auto command" in result.output and command.is_file()
+    text = command.read_text(encoding="utf-8")
+    assert text.startswith("---\n") and "description:" in text and "$ARGUMENTS" in text and "spare_delegate" in text
+    assert "The /auto command is already there" in cli.invoke(app, ["integrate"]).output
+    removed = cli.invoke(app, ["integrate", "--uninstall"])
+    assert "Removed the /auto command" in removed.output and not command.exists()
+
+
+def test_integrate_never_overwrites_or_removes_the_users_own_auto_command(config_dir):
+    command = config_dir / "command" / "auto.md"
+    command.parent.mkdir()
+    command.write_text("---\ndescription: mine\n---\nmy own /auto\n", encoding="utf-8")
+    result = cli.invoke(app, ["integrate"])
+    assert "You already have a /auto command" in result.output
+    cli.invoke(app, ["integrate", "--uninstall"])
+    assert command.read_text(encoding="utf-8") == "---\ndescription: mine\n---\nmy own /auto\n"
+
+
+def test_an_older_auto_command_from_spare_gpu_is_updated(config_dir):
+    command = config_dir / "command" / "auto.md"
+    command.parent.mkdir()
+    command.write_text("---\n# Installed by spare-gpu (old)\n---\nold text\n", encoding="utf-8")
+    assert "Updated the /auto command" in cli.invoke(app, ["integrate"]).output
+    assert "$ARGUMENTS" in command.read_text(encoding="utf-8")
+
+
+def test_the_auto_command_is_installed_in_each_desktop_channel(config_dir):
+    dev = config_dir / "BharatCode Dev"
+    dev.mkdir()
+    assert cli.invoke(app, ["integrate"]).exit_code == 0
+    assert (dev / "command" / "auto.md").is_file() and (config_dir / "command" / "auto.md").is_file()
+
+
 def test_integrate_without_bharatcodes_cli_uses_the_default_location(tmp_path, monkeypatch):
     monkeypatch.delenv("GTU_BHARATCODE_CMD")
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
