@@ -144,9 +144,28 @@ def test_delegate_routes_a_switch_safe_task_and_says_why(git_repo):
     assert (job.model, job.preferred_model) == (QWEN, DEEPSEEK)
 
 
-def test_delegate_keeps_an_unmeasured_type_on_the_callers_model(git_repo):
+def test_delegate_from_qwen_would_move_up_to_deepseek_but_its_lane_is_full(git_repo):
+    # moving up to DeepSeek is allowed for any type, but here DeepSeek's lane has a queue
     text = SpareTools(git_repo, launch=lambda repo: 4242, http=wait_figures).delegate("docs", "src", your_model=QWEN)
-    assert "Runs on Qwen 3.8 27B: docs jobs aren't marked switch-safe" in text
+    assert "Runs on Qwen 3.8 27B: no other model has a free slot right now" in text
+
+
+def test_delegate_from_qwen_moves_up_to_deepseek_when_qwen_is_packed(git_repo):
+    def flipped() -> httpx.Client:
+        """Qwen queued, DeepSeek idle: the reverse of wait_figures."""
+        def handle(request):
+            now = datetime.now(timezone.utc).isoformat()
+            if request.url.path.endswith("/queue-waits"):
+                return httpx.Response(200, json={"window_minutes": 60, "as_of": now, "models": [
+                    {"id": QWEN, "sample_count": 149, "p50_ms": 92948, "p75_ms": 124851, "p90_ms": 182107},
+                    {"id": DEEPSEEK, "sample_count": 83, "p50_ms": 2, "p75_ms": 3, "p90_ms": 7}]})
+            lane = lambda a, q, s: {"active_requests": a, "queued_requests": q, "slot_capacity": s, "available": True}
+            return httpx.Response(200, json={"generated_at": now, "models": [
+                {"id": QWEN, "api": lane(2, 8, 2)}, {"id": DEEPSEEK, "api": lane(1, 0, 4)}]})
+        return httpx.Client(transport=httpx.MockTransport(handle))
+
+    text = SpareTools(git_repo, launch=lambda repo: 4242, http=flipped).delegate("tests", "src", your_model=QWEN)
+    assert "Runs on DeepSeek V4.1 Flash: saves about 2m 05s of waiting over Qwen 3.8 27B" in text
 
 
 def test_delegate_without_the_callers_model_prefers_deepseek_outside_desktop(git_repo):

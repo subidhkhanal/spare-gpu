@@ -41,9 +41,34 @@ def test_a_switch_safe_task_moves_to_the_model_that_starts_sooner():
     assert choice.summary().startswith("Runs on Qwen 3.8 27B: saves about")
 
 
-def test_a_type_not_measured_as_switch_safe_never_moves():
+def test_a_type_not_measured_as_switch_safe_never_moves_to_the_weaker_model():
     choice = choose("docs", DEEPSEEK, [busy_deepseek(), free_qwen()], policy=SAFE)
     assert choice.model == DEEPSEEK and "aren't marked switch-safe" in choice.reason
+
+
+def busy_qwen():
+    return view(QWEN, 125, 2, 8, slots=2)
+
+
+def free_deepseek():
+    return view(DEEPSEEK, 0.003, 1, 0)
+
+
+def test_any_type_moves_up_to_the_stronger_model_when_its_own_is_packed():
+    # moving to DeepSeek never costs quality, so switch-safe doesn't matter in this direction
+    choice = choose("docs", QWEN, [busy_qwen(), free_deepseek()], policy=SAFE)
+    assert choice.model == DEEPSEEK and choice.preferred == QWEN and "saves about 2m 05s" in choice.reason
+
+
+def test_moving_up_still_needs_a_free_slot_and_a_real_saving():
+    queued_deepseek = view(DEEPSEEK, 0.003, 4, 2)
+    assert choose("docs", QWEN, [busy_qwen(), queued_deepseek], policy=SAFE).model == QWEN
+    assert choose("docs", QWEN, [view(QWEN, 12, 1, 0, slots=2), free_deepseek()], policy=SAFE).model == QWEN
+
+
+def test_the_strongest_model_is_the_first_listed():
+    assert router.stronger(DEEPSEEK, QWEN) and not router.stronger(QWEN, DEEPSEEK)
+    assert router.stronger(QWEN, "some-new-model")  # an unlisted model counts as the weakest
 
 
 def test_a_small_saving_isnt_worth_switching_for():

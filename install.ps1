@@ -1,0 +1,117 @@
+# spare-gpu installer for Windows. Paste this one line into PowerShell:
+#
+#   irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
+#
+# It installs Python and git with winget if they're missing, installs spare-gpu into its own
+# Python environment (%LOCALAPPDATA%\spare-gpu), connects it to BharatCode Desktop (`gtu
+# integrate`) and puts `gtu` on your PATH. Run it again to update. Nothing needs admin rights
+# except, possibly, the git install (Windows may ask).
+#
+# Options, as environment variables set before running it:
+#   SPARE_GPU_HOME    where to install (default %LOCALAPPDATA%\spare-gpu)
+#   SPARE_GPU_SOURCE  what to install (default: the latest version on GitHub, as a zip)
+#   SPARE_GPU_SKIP_INTEGRATE=1  install only; don't touch BharatCode's config
+#   SPARE_GPU_SKIP_PATH=1       don't add gtu to your PATH
+
+function Install-SpareGpu {
+    $ErrorActionPreference = 'Stop'
+    $home_ = if ($env:SPARE_GPU_HOME) { $env:SPARE_GPU_HOME } else { Join-Path $env:LOCALAPPDATA 'spare-gpu' }
+    $source = if ($env:SPARE_GPU_SOURCE) { $env:SPARE_GPU_SOURCE } else { 'https://github.com/subidhkhanal/spare-gpu/archive/refs/heads/master.zip' }
+
+    function Say($text) { Write-Host "spare-gpu: $text" }
+    function Fail($text) { Write-Host "spare-gpu: $text" -ForegroundColor Red; throw 'spare-gpu install stopped' }
+
+    function Update-PathFromRegistry {
+        # winget installs update PATH in the registry; this window still has the old one.
+        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                    [Environment]::GetEnvironmentVariable('Path', 'User')
+    }
+
+    function Find-Python {
+        # A Python 3.11+ that really runs. The Microsoft Store's "python" placeholder doesn't.
+        $candidates = @(@{ exe = 'py'; extra = @('-3') }, @{ exe = 'python'; extra = @() }, @{ exe = 'python3'; extra = @() })
+        foreach ($candidate in $candidates) {
+            $exe = $candidate.exe
+            if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+            $extra = $candidate.extra
+            try {
+                $out = & $exe @extra -c "import sys; print(sys.version_info >= (3, 11), sys.executable)" 2>$null
+            } catch { continue }
+            if ($LASTEXITCODE -eq 0 -and $out -match '^True (.+)$') { return $Matches[1].Trim() }
+        }
+        return $null
+    }
+
+    function Install-WithWinget($id, $what) {
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Fail "$what isn't installed, and winget (Windows' package manager) isn't available to install it. Install $what yourself, then run this again."
+        }
+        Say "installing $what with winget..."
+        & winget install --id $id --exact --silent --accept-source-agreements --accept-package-agreements | Out-Null
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {  # that code: already installed
+            Fail "winget couldn't install $what (exit code $LASTEXITCODE). Install it yourself, then run this again."
+        }
+        Update-PathFromRegistry
+    }
+
+    # 1. Python 3.11 or newer
+    $python = Find-Python
+    if (-not $python) {
+        Install-WithWinget 'Python.Python.3.12' 'Python 3.12'
+        $python = Find-Python
+        if (-not $python) {
+            $guess = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
+            if (Test-Path $guess) { $python = $guess } else { Fail 'Python was installed but this window cannot see it yet. Open a new PowerShell window and run this again.' }
+        }
+    }
+    Say "using Python at $python"
+
+    # 2. git: spare-gpu uses it to keep each job's private copy (your project doesn't need git)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Install-WithWinget 'Git.Git' 'git'
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Fail 'git was installed but this window cannot see it yet. Open a new PowerShell window and run this again.'
+        }
+    }
+
+    # 3. spare-gpu in its own environment, so it can't clash with anything else you've installed
+    $venv = Join-Path $home_ 'venv'
+    $venvPython = Join-Path $venv 'Scripts\python.exe'
+    if (-not (Test-Path $venvPython)) {
+        Say "creating its environment in $venv"
+        & $python -m venv $venv
+        if ($LASTEXITCODE -ne 0) { Fail "couldn't create a Python environment in $venv." }
+    }
+    Say 'installing spare-gpu...'
+    & $venvPython -m pip install --quiet --disable-pip-version-check --upgrade $source
+    if ($LASTEXITCODE -ne 0) { Fail 'pip could not install spare-gpu (see above).' }
+    # the same version number can carry new code: always take the latest files
+    & $venvPython -m pip install --quiet --disable-pip-version-check --force-reinstall --no-deps $source
+    if ($LASTEXITCODE -ne 0) { Fail 'pip could not install spare-gpu (see above).' }
+    $gtu = Join-Path $venv 'Scripts\gtu.exe'
+
+    # 4. `gtu` on your PATH, for new windows (`gtu integrate --uninstall`, `gtu list`, ...)
+    $scripts = Split-Path $gtu
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($env:SPARE_GPU_SKIP_PATH -ne '1' -and -not (($userPath -split ';') -contains $scripts)) {
+        [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $scripts).TrimStart(';'), 'User')
+        Say "added $scripts to your PATH (new windows will have the gtu command)"
+    }
+    $env:Path = "$scripts;$env:Path"
+
+    # 5. connect it to BharatCode Desktop: the spare-gpu tools and the /auto command
+    if ($env:SPARE_GPU_SKIP_INTEGRATE -eq '1') {
+        Say 'installed. Skipped connecting to BharatCode Desktop (SPARE_GPU_SKIP_INTEGRATE=1).'
+        return
+    }
+    & $gtu integrate
+    if ($LASTEXITCODE -ne 0) { Fail 'gtu integrate reported a problem (see above).' }
+
+    Write-Host ''
+    Write-Host 'spare-gpu is installed.' -ForegroundColor Green
+    Write-Host 'Now fully close BharatCode Desktop and open it again, then type /auto in a chat, for example:'
+    Write-Host '  /auto write docs for src/utils.py'
+    Write-Host 'To remove it later: gtu integrate --uninstall, then delete' $home_
+}
+
+try { Install-SpareGpu } catch { if ($_.Exception.Message -ne 'spare-gpu install stopped') { Write-Host "spare-gpu: $($_.Exception.Message)" -ForegroundColor Red } }

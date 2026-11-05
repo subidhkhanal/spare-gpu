@@ -1,9 +1,11 @@
 """Wait-aware model routing: run a job on whichever allowed model will start it sooner.
 
-Only for task types measured as switch-safe (routing_policy.json, written by
-scripts/eval_models.py): types where Qwen's results were shown no worse than DeepSeek's. The
-rules, in order:
-- not switch-safe, or no wait data on the preferred model -> the preferred model;
+Moving work to a weaker model is only for task types measured as switch-safe (routing_policy.json,
+written by scripts/eval_models.py): types where Qwen's results were shown no worse than
+DeepSeek's. Moving to a stronger model never costs quality, so any type may move up when that
+starts it sooner. The rules, in order:
+- not switch-safe and no stronger model to move up to, or no wait data on the preferred model
+  -> the preferred model;
 - an alternative is chosen only if it saves at least GTU_ROUTE_MIN_SAVING seconds (default 20)
   on the estimate AND its lane has a free slot with nothing queued, so routed work never piles
   into a queue (herding would erase the gain);
@@ -137,11 +139,24 @@ class Choice:
         return f"Runs on {waits.name(self.model)}: {self.reason}." + (f" Waits now: {how}." if how else "")
 
 
+def stronger(model: str, than: str) -> bool:
+    """Whether `model` is the stronger of the two. waits.models() lists the heavy model first;
+    a model not listed counts as the weakest."""
+    order = waits.models()
+
+    def rank(m: str) -> int:
+        m = waits.model_id(m)
+        return order.index(m) if m in order else len(order)
+
+    return rank(model) < rank(than)
+
+
 def decide(store, folder: Path, kind: str, preferred: str, http_factory) -> Choice:
     """choose() with fresh wait figures and this project's policy overrides and router state."""
     state = State.load(folder)
     policy = load_policy(folder)
-    if not enabled() or not switch_safe(kind, policy):  # no need to fetch anything
+    can_move = switch_safe(kind, policy) or any(stronger(m, preferred) for m in waits.models())
+    if not enabled() or not can_move:  # no need to fetch anything
         choice = choose(kind, preferred, [], state, policy)
     else:
         with http_factory() as http:
@@ -166,14 +181,18 @@ def choose(kind: str, preferred: str, views: list[View], state: State | None = N
                           estimates)
     if not enabled():
         return Choice(preferred, preferred, "routing is off (GTU_ROUTE)", estimates)
-    if not switch_safe(kind, policy):
+    # Moving to a weaker model needs the type measured as switch-safe; moving to a stronger one
+    # never costs quality, so it is allowed whenever it starts the work sooner.
+    safe = switch_safe(kind, policy)
+    if not safe and not any(stronger(m, preferred) for m in waits.models()):
         return Choice(preferred, preferred,
                       f"{kind} jobs aren't marked switch-safe, so they stay on the preferred model", estimates)
     pref = by_model.get(preferred)
     if pref is None or pref.seconds is None:
         return Choice(preferred, preferred, "no wait data on the preferred model, so not switching", estimates)
     free = {v.model: v.free_slot for v in views}
-    candidates = [e for e in estimates if e.model != preferred and e.seconds is not None and free.get(e.model)]
+    candidates = [e for e in estimates if e.model != preferred and e.seconds is not None and free.get(e.model)
+                  and (safe or stronger(e.model, preferred))]
     best = min(candidates, key=lambda e: e.seconds, default=None)
     saving = pref.seconds - best.seconds if best else 0.0
 

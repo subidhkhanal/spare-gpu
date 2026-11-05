@@ -4,19 +4,24 @@
 
 - **Does the chores in the background.** Ask for tests, docs or a review in plain words. spare-gpu runs the job as its own Desktop session, so your chat stays free.
 - **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. When a job finishes, the files it edited are copied to `spare-gpu/<date>_<time>/` in your project, with their paths kept (for example `spare-gpu/2026-11-05_14-32-07/src/utils.py`). No branches or `git diff` to dig through, and your own files are never touched: open the folder and copy over what you want.
-- **Picks the faster model.** When DeepSeek has a queue, spare-gpu can run the task on Qwen instead. It only does that for task types where Qwen was measured to be just as good: docs today. Tests and reviews stay on DeepSeek.
+- **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen only happens for task types where Qwen was measured to be just as good: docs and questions today, while tests and reviews stay on DeepSeek.
 - **Keeps you in control of tokens.** Every job has a token budget, and a job that crashes resumes where it stopped.
 
 ## Set up
 
-With BharatCode Desktop installed and signed in:
+With BharatCode Desktop installed and signed in, paste this into PowerShell:
 
 ```powershell
-pipx install git+https://github.com/subidhkhanal/spare-gpu
-gtu integrate
+irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
 ```
 
-Then restart BharatCode Desktop. No API key is needed. To remove it: `gtu integrate --uninstall`.
+Then fully close BharatCode Desktop and open it again. That's all: no API key needed.
+
+The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop and adds the `gtu` command. Run the same line again to update.
+
+To remove it: `gtu integrate --uninstall`, then delete `%LOCALAPPDATA%\spare-gpu`.
+
+Prefer to do it by hand? With Python 3.11+ and git installed: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate`.
 
 ## What you get
 
@@ -33,10 +38,10 @@ your-project/
 
 ### Turn it on
 
-`/auto` is a slash command that `gtu integrate` adds to BharatCode Desktop. Nothing else is needed:
+`/auto` is a slash command that the installer adds to BharatCode Desktop. Nothing else is needed:
 
-1. Run `gtu integrate`. If you set up spare-gpu before `/auto` existed, update first: `pipx install --force git+https://github.com/subidhkhanal/spare-gpu`.
-2. Restart BharatCode Desktop.
+1. Run the install line above. If you installed spare-gpu before `/auto` existed, run it again to update.
+2. Fully close BharatCode Desktop and open it again.
 3. Open a chat in your project and type `/`. `/auto` appears in the command list.
 
 ### Use it
