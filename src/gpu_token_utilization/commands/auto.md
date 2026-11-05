@@ -6,20 +6,21 @@
 description: Run a task or question on whichever model starts it sooner
 model: bharatcode/qwen-3.8-27b
 ---
-Hand this to spare-gpu instead of doing it yourself in this chat:
+The user's request is between the markers:
+<<<$ARGUMENTS>>>
 
-$ARGUMENTS
+Follow exactly one of these, checked in this order, and call exactly one tool:
 
-If it asks for tests, docs or a code review of files in this project, call `spare_delegate`:
-- type: "tests" (write tests), "docs" (docstrings and README text, no code changes) or "review" (a code review).
-- path: the file or folder it names, exactly as written.
-- note: any other instruction in it, in its own words.
-- your_model: "deepseek-v4.1-flash" (it runs there unless the other model would start it sooner).
-Then reply with spare_delegate's summary as it comes back (the job, which model and why, the branch). Don't do the work yourself and don't wait for it to finish.
+1. Empty request (nothing between <<< and >>>): call `spare_waits` and show its answer as it comes back. Call no other tool. Never queue any work for an empty request.
 
-Anything else (a question, an explanation, a quick piece of writing): call `spare_ask` with
-- question: the whole text above, as written.
-- your_model: "deepseek-v4.1-flash".
-Then reply with spare_ask's answer as it comes back, including the line saying which model answered. Don't answer it yourself.
+2. The request asks for tests, docs or a code review of a file or folder in this project, and names it: call `spare_delegate` with
+   - type: "tests" (write tests), "docs" (docstrings and README text, no code changes) or "review" (a code review);
+   - path: the file or folder the request names, exactly as written;
+   - note: any other instruction in the request, in its own words;
+   - your_model: "deepseek-v4.1-flash" (it runs there unless the other model would start it sooner).
+   Then reply with spare_delegate's summary as it comes back: the job, which model and why, and where its files will land. Don't do the work yourself and don't wait for it to finish.
 
-If nothing was given after /auto, call `spare_waits` and show the current waits.
+3. Anything else (a question, an explanation, a quick piece of writing): call `spare_ask` with
+   - question: the request, exactly as written between the markers;
+   - your_model: "deepseek-v4.1-flash".
+   Then reply with spare_ask's answer as it comes back, including the line saying which model answered. Don't answer it yourself.
