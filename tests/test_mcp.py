@@ -20,7 +20,7 @@ from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter"}  # only for a server started with `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "context_report"}  # only for a server started with `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -260,6 +260,18 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert "sources.json" in listed["verify_refs"].description and "DROP" in listed["verify_refs"].description
     assert listed["scholar_search"].input_schema["required"] == ["query"]
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
+    assert "never invent any" in listed["context_report"].description and not listed["context_report"].input_schema.get("required")
+
+
+def test_context_report_through_the_tool(git_repo, fake, monkeypatch):
+    monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(git_repo.parent / "cfg"))
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
+    text = tools.context_report()
+    assert text.startswith(f"Per-step overhead in {git_repo.resolve()}") and "isn't installed here" in text
+    scenario = git_repo.parent / "scenario.json"
+    scenario.write_text(json.dumps({"steps": [{"tokens": 9_000}], "text": "OK"}))
+    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
+    assert "Measured just now with one tiny run: 8,950 tokens" in tools.context_report(measure=True)
 
 
 def test_security_filter_through_the_tool(git_repo, fake):

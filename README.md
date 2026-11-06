@@ -68,9 +68,11 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 `gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
 
-## The pack (in progress)
+## The pack
 
-`gtu integrate --pack` adds a pack of commands for BharatCode Desktop that split each job between the two models: DeepSeek plans, judges and verifies; Qwen does the many quick, parallel, self-contained steps. It uses only BharatCode's own extension points (Markdown commands and agents, spare-gpu's MCP tools, and a config file of the pack's own next to yours, which is never edited). Components, chosen with `--only`: `split` (titles and the explore subagent run on Qwen), `research` (`/deep-research`), `review` (`/code-review`), `security` (`/security-review`), `simplify` (`/simplify`) and `context` (`/context-report`). The commands land one by one; `split` is in. `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added. Model ids are read from bharatcode.ai's model list at install time.
+`gtu integrate --pack` adds a pack of commands for BharatCode Desktop that split each job between the two models: DeepSeek plans, judges and verifies; Qwen does the many quick, parallel, self-contained steps. It uses only BharatCode's own extension points (Markdown commands and agents, spare-gpu's MCP tools, and a config file of the pack's own next to yours, which is never edited). Components, chosen with `--only`: `split` (titles and the explore subagent run on Qwen), `research` (`/deep-research`), `review` (`/code-review`), `security` (`/security-review`), `simplify` (`/simplify`) and `context` (`/context-report`). `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added. Model ids are read from bharatcode.ai's model list at install time. Every command ends with a cost summary: the model per phase, the helper runs, and the queue time saved as estimated from live waits; none claims a number it didn't measure. The pack's helper agents and tools are hidden from every other agent, so a normal chat pays nothing for them. What the pack reuses and under which licence is in `src/gpu_token_utilization/pack/ATTRIBUTION.md`; `pack/capability.json` is the same pack in BharatCode's marketplace format, for a later proposal. For BharatCode; not affiliated with BharatCode or Anthropic.
+
+The checks that need BharatCode Desktop on Windows, and the benchmarks each command must pass before it stops being experimental, are written out in `research/<command>/manual-check.md` and `benchmark.md`; none has been run yet.
 
 ### `/deep-research` (experimental until the benchmark in research/deep-research/ is run)
 
@@ -87,6 +89,12 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 ### `/simplify` (experimental until the benchmark in research/simplify/ is run)
 
 `/simplify [file or folder]` (nothing means the files in your uncommitted diff) has finders on Qwen propose reuse, simplification and efficiency cleanups with no behaviour change; a lead on DeepSeek accepts the safe ones and hands them to a `fix` job, which applies them in a private copy on DeepSeek, runs your test command, and keeps them only if it passes. The result is one set of changed files in `spare-gpu/<date>_<time>/` to accept or ignore.
+
+### `/context-report`
+
+`/context-report [--days N] [--measure]` says what every request in this project carries before your words, item by item: BharatCode's system prompt and built-in tools, each MCP server, the skills found on the machine, instruction files such as `AGENTS.md`, and the pack itself (0 by design: its helpers and tools are denied for every agent but its own). The counts come from the config and files, the per-item costs from the measurement in [research/token-overhead.md](research/token-overhead.md); `--measure` runs one tiny `bharatcode run` for the real total. It lists the top savings with the exact config switch for each, and `gtu context-report --apply N` makes the change after asking and after a timestamped backup. The summary is written on Qwen from the tool's numbers; the same report is `gtu context-report` in a terminal.
+
+**Overhead budget.** With the pack installed, a normal session must carry at most 1,500 extra tokens per step. By construction it carries none (tests/test_overhead_budget.py); the measured proof is recorded with scripts/check_overhead_budget.py once run on Windows (research/context-report/manual-check.md, check 5).
 
 ## What you get
 

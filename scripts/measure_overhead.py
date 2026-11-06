@@ -65,7 +65,7 @@ def run(folder: Path, extra_config: dict | None, extra_env: dict | None = None) 
 def main(project: str, empty: str, variants: list[str]) -> None:
     plans = {
         "empty": (Path(empty), MCP_OFF),          # the harness alone: system prompt + built-in tools
-        "empty-mcp": (Path(empty), None),         # plus spare-gpu's 7 MCP tool schemas (global config)
+        "empty-mcp": (Path(empty), None),         # plus spare-gpu's MCP tool schemas (global config; 5 tools since Nov)
         "project": (Path(project), MCP_OFF),      # plus project context (file tree, git, AGENTS.md...)
         "empty-notools": (Path(empty), TOOLS_OFF),  # system prompt without tool schemas, if honoured
         # without the skills it discovers in ~/.claude/skills and ~/.agents/skills

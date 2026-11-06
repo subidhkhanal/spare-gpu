@@ -57,9 +57,12 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
             assert ("agent", lead) in files, f"{command}: its agent {lead} is in the pack"
             data, _ = parse(files[("agent", lead)])
             assert data["mode"] == "primary"  # depth 0: the only place a task may start more tasks
+            helpers = set(component.agents) - {lead}
+            if not helpers:
+                assert "task" not in data["permission"], f"{lead} has no helpers to start"
+                continue
             task = data["permission"]["task"]
             allowed = {name for name, action in task.items() if action == "allow"}
-            helpers = set(component.agents) - {lead}
             assert task["*"] == "deny" and allowed == helpers, f"{lead} may start {helpers}"
             assert pack.helpers([component]) == sorted(helpers, key=component.agents.index)
 
@@ -141,6 +144,16 @@ def test_simplify_accepts_only_behaviour_preserving_cleanups_and_applies_them_th
     assert pack.helpers([COMPONENTS["simplify"]]) == ["simplify-finder"]
 
 
+def test_context_report_runs_on_the_standard_model_and_only_relays_the_tools_numbers():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["context"]])}
+    lead, body = parse(files[("agent", "context-lead")])
+    assert lead["model"] == FILLED.standard and lead["permission"] == {"*": "deny", "spare-gpu_context_report": "allow"}
+    flat = " ".join(body.split())
+    for step in ("Every number comes from the tool", "Don't apply anything yourself", "gtu context-report --apply N", "31 Oct 2026"):
+        assert step in flat, step
+    assert pack.helpers([COMPONENTS["context"]]) == []  # no helpers: the thinking is in code
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())
@@ -153,4 +166,4 @@ def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else
     doc = pack.config(pack.select("research"), FILLED)
     assert doc["permission"]["task"] == {"research-scout": "deny", "research-writer": "deny", "research-checker": "deny"}
     assert doc["permission"]["spare-gpu_scholar_search"] == doc["permission"]["spare-gpu_verify_refs"] == "deny"
-    assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp"}}
+    assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}

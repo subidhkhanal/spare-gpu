@@ -23,7 +23,9 @@ PACK_DIR = Path(__file__).parent
 MARKER = "# Installed by spare-gpu"  # in a Markdown file's frontmatter: ours, until the user removes it
 HEAVY, STANDARD = "{{HEAVY_MODEL}}", "{{STANDARD_MODEL}}"
 SCHEMA = "https://opencode.ai/config.json"
-EXA_MCP = {"type": "remote", "url": "https://mcp.exa.ai/mcp"}  # web search for /deep-research: queries go to Exa
+# Web search for /deep-research: queries go to Exa. Keyless, so OAuth auto-detection is off, as the
+# marketplace's Cloudflare-docs entry does it.
+EXA_MCP = {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}
 SERVER = "spare-gpu"  # the MCP server the pack's tools live in; BharatCode names its tools <server>_<tool>
 
 

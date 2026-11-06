@@ -17,7 +17,7 @@ from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, desktop, freerun, refs, router, runner, runstate, scholar, security, waits, worktree
+from . import __version__, actions, desktop, freerun, overhead, refs, router, runner, runstate, scholar, security, waits, worktree
 from .api import ApiKeyMissing, find_api_key
 from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
@@ -311,6 +311,15 @@ class SpareTools:
             return f"Couldn't read the candidates: {exc}."
         return security.describe(security.filter_findings(candidates))
 
+    def context_report(self, days: int = 7, measure: bool = False) -> str:
+        report = overhead.inventory(self._root())
+        if measure:
+            report.measured = overhead.measure(self._root())
+            if report.measured is None:
+                report.notes.append("A live measurement wasn't possible: BharatCode's CLI isn't available here.")
+        report.usage = overhead.usage(days)
+        return overhead.describe(report)
+
 
 def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False):
     """The MCP server for one project folder (the agent's working directory by default). With
@@ -426,6 +435,22 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
                     description, exploit_scenario, recommendation and confidence (0 to 1).
             """
             return tools.security_filter(findings)
+
+        @server.tool(annotations=notes(True))
+        def context_report(days: int = 7, measure: bool = False) -> str:
+            """What every BharatCode request in this project carries before the user's words, item by
+            item with its token cost (measured per-item costs, counted from the config and files):
+            the system prompt and built-in tools, each MCP server, the skills found, instruction
+            files like AGENTS.md, and the command pack. Then the top savings, each with the exact
+            config switch and the `gtu context-report --apply N` command that makes it after a
+            backup, and BharatCode's usage figures for the last days when its CLI is installed.
+            For /context-report: relay the numbers; never invent any.
+
+            Args:
+                days: How many days of usage to ask BharatCode's stats for (default 7).
+                measure: Also run one tiny `bharatcode run` to measure the real overhead (costs a model call; default off).
+            """
+            return tools.context_report(days, measure)
 
     @server.tool(annotations=notes(False, world=True))
     def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,

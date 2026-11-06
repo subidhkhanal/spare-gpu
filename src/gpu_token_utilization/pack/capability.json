@@ -1,0 +1,76 @@
+{
+  "_comment": "A proposal in BharatCode's marketplace format (packages/core/src/capabilities/catalog.json). The marketplace supports skill and mcp modules today; the pack's Markdown commands and agents are installed by `gtu integrate --pack` until BharatCode has module types for them. Not loaded by anything yet.",
+  "id": "spare-gpu-pack",
+  "name": "spare-gpu command pack",
+  "description": "Commands that split each job between DeepSeek (plan, judge, verify) and Qwen (many quick parallel steps): /deep-research, /code-review, /security-review, /simplify, /context-report, plus /auto.",
+  "publisher": "spare-gpu (for BharatCode; not affiliated with BharatCode or Anthropic)",
+  "version": "0.1.0",
+  "category": "workflow",
+  "trust": "community",
+  "requiresSetup": true,
+  "requirements": [
+    "Python 3.11 or newer",
+    "git",
+    "spare-gpu installed (install.ps1)"
+  ],
+  "permissions": [
+    "local_process",
+    "workspace_files",
+    "network",
+    "background_process"
+  ],
+  "modules": [
+    {
+      "type": "mcp",
+      "name": "spare-gpu",
+      "config": {
+        "type": "local",
+        "command": [
+          "gtu",
+          "mcp",
+          "--pack"
+        ]
+      }
+    },
+    {
+      "type": "mcp",
+      "name": "exa",
+      "config": {
+        "type": "remote",
+        "url": "https://mcp.exa.ai/mcp",
+        "oauth": false
+      }
+    }
+  ],
+  "unsupported_by_the_marketplace_today": {
+    "commands": [
+      "deep-research",
+      "code-review",
+      "security-review",
+      "simplify",
+      "context-report"
+    ],
+    "agents": [
+      "research-lead",
+      "research-scout",
+      "research-writer",
+      "research-checker",
+      "review-lead",
+      "review-finder",
+      "review-verifier",
+      "security-lead",
+      "security-finder",
+      "security-verifier",
+      "simplify-lead",
+      "simplify-finder",
+      "context-lead"
+    ],
+    "config": [
+      "small_model",
+      "agent.title.model",
+      "agent.explore.model",
+      "permission.task denies for the helpers",
+      "permission denies for the pack-only tools"
+    ]
+  }
+}
