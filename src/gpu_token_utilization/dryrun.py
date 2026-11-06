@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import worktree
-from .agent_cli import CliNotFound, resolve_command
+from .agent_cli import CLI_KINDS, CliNotFound, resolve_command
 from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
 from .jobs import PLANS, JobConfig, numbered_listing
@@ -106,7 +106,7 @@ def _problems(job: Job) -> list[str]:
             worktree.ensure_clean(Path(job.repo))
         except worktree.GitError as exc:
             problems.append(str(exc).splitlines()[0])
-    if job.kind in ("tests", "docs"):
+    if job.kind in CLI_KINDS:
         try:
             resolve_command()
         except CliNotFound as exc:

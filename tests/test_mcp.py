@@ -308,6 +308,22 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_
     assert "- review-verifier: start `" in routed and "- research-checker: start `research-checker` (" in routed
 
 
+def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_queued(git_repo, fake, monkeypatch):
+    from test_routing_jobs import wait_figures  # DeepSeek queued about 2 minutes, Qwen idle
+    from gpu_token_utilization import overhead, router
+
+    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: None)
+    (git_repo / ".gtu").mkdir()
+    (git_repo / ".gtu" / "switch-safe").write_text("review-verifier\n", encoding="utf-8")  # the project's own override
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=wait_figures)
+    text = tools.waits(roles=True)
+    assert "- review-verifier: start `review-verifier-standard` (saves about" in text
+    assert "- research-checker: start `research-checker` (research-checker jobs aren't marked switch-safe" in text
+    assert router.State.load(git_repo / ".gtu").away_from is None  # a reading, not a routing: nothing saved
+    again = tools.waits(roles=True)  # and every role is judged from the same state each time
+    assert "- review-verifier: start `review-verifier-standard`" in again and "still routed away" not in again
+
+
 def test_pack_cost_without_a_snapshot_or_a_cli_says_so(tools, git_repo, monkeypatch):
     from gpu_token_utilization import overhead
 

@@ -154,9 +154,10 @@ def run(folder: Path, how: str = "") -> list[Finding]:
     for conflict in bc_config.pack_conflicts(folder, doc):
         found.append(Finding(WARN, f"conflict: {conflict}"))
 
-    policy = router.load_policy(folder / ".." if False else None)
+    policy = router.load_policy()  # the shipped policy and GTU_SWITCH_SAFE; a project's .gtu/switch-safe counts only in that project
     unmeasured = [r for r in SWITCHABLE if not router.switch_safe(r, policy)]
-    found.append(Finding(PASS, "switchable roles on the heavy model until measured: " + (", ".join(unmeasured) or "none (all switch-safe)")))
+    found.append(Finding(PASS, "switchable roles on the heavy model until measured: " + (", ".join(unmeasured) or "none (all switch-safe)")
+                         + " (a project's .gtu/switch-safe can add to this)"))
     return found
 
 

@@ -210,23 +210,26 @@ class SpareTools:
             views = waits.views(store, http)
         text = waits.describe(views)
         if roles:
-            text += "\n" + self._role_lines(views, path.parent if path.exists() else None)
+            text += "\n" + self._role_lines(views, self._root() / ".gtu")
             self._snapshot_usage()
         return text
 
-    def _role_lines(self, views, folder: Path | None) -> str:
+    def _role_lines(self, views, folder: Path) -> str:
         """For each switchable pack role: which variant to start now. The router decides as it does
-        for jobs: down to the standard model only when the role is measured switch-safe and that
-        saves enough waiting; up is always allowed."""
+        for jobs: down to the standard model only when the role is measured switch-safe (in
+        routing_policy.json, or by hand in the project's .gtu/switch-safe or GTU_SWITCH_SAFE) and
+        that saves enough waiting; up is always allowed. Each role is judged from the same saved
+        state (which models the plan refused), on a copy: an answer is a reading, not a routing,
+        so the jobs' hysteresis is neither consumed by sibling roles nor changed here."""
         heavy = router.preferred_model(router.DELEGATE_PREFERRED)
-        state = router.State.load(folder) if folder else router.State()
+        policy = router.load_policy(folder)
+        saved = router.State.load(folder)
         lines = ["Pack roles, which variant to start now (routing_policy.json and the waits above decide):"]
         for role in pack.SWITCHABLE:
-            choice = router.choose(role, heavy, views, state)
+            state = router.State(saved.away_from, saved.back_votes, list(saved.unavailable))
+            choice = router.choose(role, heavy, views, state, policy)
             agent = pack.variant_of(role) if choice.routed else role
             lines.append(f"- {role}: start `{agent}` ({choice.reason})")
-        if folder:
-            state.save(folder)
         return "\n".join(lines)
 
     # --- the pack's cost figures: a usage snapshot at spare_waits, the delta at pack_cost -----------
