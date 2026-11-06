@@ -43,19 +43,35 @@ def scenario(tmp_path, monkeypatch):
 
 @pytest.fixture
 def run_jobs(store, client, make_gate, fake):
-    def run(budgets=None, **kwargs):
+    def run(budgets=None, config=None, **kwargs):
         logs = []
         scheduler = Scheduler(
             store, make_gate(), client,
             cli=BharatCodeCli(command=FAKE_CLI, timeout=60),
             budgets=budgets or Budgets(),
-            config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
+            config=config or JobConfig(test_command=(sys.executable, "-m", "pytest")),
             sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append, **kwargs,
         )
         scheduler.run()
         return logs
 
     return run
+
+
+# The project's own test command, allowed whatever the interpreter is called (python3 on Linux).
+FIX_CONFIG = JobConfig(test_command=(sys.executable, "-m", "pytest"),
+                       allowed_commands=("python -m pytest", "python3 -m pytest", "pytest"))
+EXISTING_TEST = IMPORT_SRC + "def test_adds_numbers():\n    assert add(2, 3) == 5\n"
+FINDINGS = "src/calc.py:2 the function has no docstring; add one"
+
+
+@pytest.fixture
+def repo_with_tests(git_repo):
+    (git_repo / "tests").mkdir()
+    (git_repo / "tests" / "test_calc.py").write_text(EXISTING_TEST)
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "tests")
+    return git_repo
 
 
 def result_files(store, job_id):
@@ -222,6 +238,51 @@ def test_docs_only_change(old, new, ok):
 def test_markdown_may_only_grow():
     assert jobs.no_lines_removed("a\nb\n", "a\nb\nc\n")
     assert not jobs.no_lines_removed("a\nb\n", "a\nc\n")
+
+
+# --- fix job ------------------------------------------------------------------------------
+
+def test_fix_job_keeps_the_fix_when_the_tests_pass_and_never_lets_it_touch_existing_tests(repo_with_tests, store, scenario, run_jobs):
+    head = git(repo_with_tests, "rev-parse", "HEAD")
+    record = scenario(steps=[{"tokens": 3000, "writes": {
+        "src/calc.py": 'def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n',
+        "tests/test_calc.py": "def test_nothing():\n    pass\n",  # a fix that weakens the tests
+    }}, {"tokens": 200}])
+    job = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
+    run_jobs(config=FIX_CONFIG)
+    assert store.get_job(job.id).status == "done"
+    verify = store.steps(job.id)[1]["output"]
+    assert verify.startswith("Kept the fix in 1 file(s): the test command passed.")
+    assert "- kept src/calc.py" in verify and "- reverted tests/test_calc.py: a fix may not change existing tests" in verify
+    assert result_files(store, job.id) == {"src/calc.py"}
+    assert "Return the sum" in result(store, job.id, "src/calc.py")
+    prompt = json.loads(record.read_text().splitlines()[0])["args"][-1]
+    assert FINDINGS in prompt and "Do not modify or delete existing test files" in prompt
+    assert_main_untouched(repo_with_tests, head)
+
+
+def test_fix_job_drops_the_fix_when_the_tests_fail(repo_with_tests, store, scenario, run_jobs):
+    scenario(steps=[{"tokens": 3000, "writes": {"src/calc.py": "def add(a, b):\n    return a - b\n"}}])
+    job = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
+    run_jobs(config=FIX_CONFIG)
+    assert store.get_job(job.id).status == "done"
+    verify = store.steps(job.id)[1]["output"]
+    assert verify.startswith("Kept the fix in 0 file(s): the test command failed with it.")
+    assert "discarded the fix" in verify and jobs.kept_nothing(verify) if hasattr(jobs, "kept_nothing") else True
+    from gpu_token_utilization.scheduler import kept_nothing
+    assert kept_nothing(verify)  # the router's fallback sees it as nothing kept
+    assert result_files(store, job.id) == set() and store.get_job(job.id).output_dir is None
+
+
+def test_fix_job_without_findings_or_without_a_fix_finishes_honestly(repo_with_tests, store, scenario, run_jobs):
+    scenario(steps=[{"tokens": 500}], text="Nothing to change.")
+    nothing = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
+    run_jobs(config=FIX_CONFIG)
+    assert store.get_job(nothing.id).status == "done" and "No fix was generated" in store.steps(nothing.id)[1]["output"]
+    blank = store.add_job("fix", ".", str(repo_with_tests))
+    run_jobs(config=FIX_CONFIG)
+    assert store.get_job(blank.id).status == "failed"
+    assert "needs the findings" in (store.steps(blank.id)[0]["output"] or "")
 
 
 # --- review job --------------------------------------------------------------------------

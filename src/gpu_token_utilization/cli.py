@@ -455,6 +455,7 @@ class JobKind(str, Enum):
     tests = "tests"
     docs = "docs"
     review = "review"
+    fix = "fix"
 
 
 def _fail(message: str) -> None:

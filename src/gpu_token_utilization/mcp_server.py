@@ -406,7 +406,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             return tools.verify_refs(folder)
 
     @server.tool(annotations=notes(False, world=True))
-    def spare_delegate(type: Literal["tests", "docs", "review"], path: str, note: str | None = None,
+    def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,
                        your_model: str | None = None) -> str:
         """Hand a self-contained task (write tests, write docs, or review code for a file or folder
         in this repo) to a background BharatCode Desktop session on whichever model will start it
@@ -424,10 +424,13 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
-                changing code; "review" writes a code review.
-            path: File or folder relative to the repo root, e.g. "src/pay.py". Pass the user's path
-                exactly as given; spare-gpu says if it doesn't exist.
-            note: Optional extra instructions in the user's words.
+                changing code; "review" writes a code review; "fix" applies the review findings given
+                in `note` (from /code-review --fix) and keeps the result only if the project's test
+                command passes with it.
+            path: File or folder relative to the repo root, e.g. "src/pay.py" ("." for a fix). Pass the
+                user's path exactly as given; spare-gpu says if it doesn't exist.
+            note: Optional extra instructions in the user's words; for "fix", the findings, one per
+                line with file:line and the change wanted.
             your_model: The model you are running on, as your system prompt names it (e.g.
                 "deepseek-v4.1-flash"); it's the one the task would otherwise use.
         """

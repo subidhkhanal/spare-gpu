@@ -510,8 +510,62 @@ def review(ctx: StepContext) -> str:
     return f"Wrote {name} ({result.usage.total_tokens} tokens" + (", cut off" if result.truncated else "") + ")."
 
 
+# --- fix (the findings of /code-review --fix) ----------------------------------------------
+
+FIX_PROMPT = """Apply the review findings below to the code in this repository.
+- Change only what each finding needs; keep every change small and local.
+- Do not modify or delete existing test files; you may add new ones.
+- Do not change behaviour beyond what a finding describes.
+- You may run `{test_command}` to check your work. Do not run any other commands.
+When you are finished, reply with one line per finding: fixed, or why not.
+
+Findings:
+{findings}"""
+
+
+def write_fix(ctx: StepContext) -> str:
+    job = ctx.job
+    if not (job.note or "").strip():
+        raise BharatCodeError("a fix job needs the findings to apply, in its note")
+    prompt = FIX_PROMPT.format(findings=job.note.strip(), test_command=" ".join(ctx.config.test_command))
+    result = run_cli(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
+    saved = save_candidate(ctx.workdir, ctx.state_dir / "fix.patch")
+    return _cli_summary(result, saved)
+
+
+def verify_fix(ctx: StepContext) -> str:
+    """Keep the fix only if the project's test command passes with it. Changes to existing test
+    files are reverted first: a fix may not pass by weakening the tests."""
+    if not apply_candidate(ctx.workdir, ctx.state_dir / "fix.patch"):
+        return "No fix was generated; nothing to keep."
+    if not command_allowed(ctx.config.test_command, ctx.config.allowed_commands):
+        raise BharatCodeError("the test command is not in the allowlist")
+    notes = []
+    for code, path in changed_files(ctx.workdir):
+        if TEST_FILE.search(path) and code.strip() != "??":
+            revert(ctx.workdir, code, path)
+            notes.append(f"reverted {path}: a fix may not change existing tests")
+    changed = [p for _, p in changed_files(ctx.workdir)]
+    if not changed:
+        return "Kept the fix in 0 file(s): nothing was left to keep.\n" + "\n".join(f"- {n}" for n in notes)
+    try:
+        proc = subprocess.run(list(ctx.config.test_command), cwd=ctx.workdir, capture_output=True,
+                              timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL, env=_test_env())
+        ok, why = proc.returncode == 0, f"exit code {proc.returncode}"
+    except subprocess.TimeoutExpired:
+        ok, why = False, f"it timed out after {ctx.config.test_timeout:.0f} s"
+    if not ok:
+        for code, path in changed_files(ctx.workdir):
+            revert(ctx.workdir, code, path)
+        notes.append(f"discarded the fix: the test command failed with it ({why})")
+        return "Kept the fix in 0 file(s): the test command failed with it.\n" + "\n".join(f"- {n}" for n in notes)
+    notes = [f"kept {p}" for p in changed] + notes
+    return f"Kept the fix in {len(changed)} file(s): the test command passed.\n" + "\n".join(f"- {n}" for n in notes)
+
+
 PLANS = {
     "tests": [("write", write_tests), ("verify", verify_tests)],
     "docs": [("write", write_docs), ("verify", verify_docs)],
     "review": [("review", review)],
+    "fix": [("write", write_fix), ("verify", verify_fix)],
 }

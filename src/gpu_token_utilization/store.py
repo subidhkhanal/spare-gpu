@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOB_KINDS = ("tests", "docs", "review")
+JOB_KINDS = ("tests", "docs", "review", "fix")
 JOB_STATUSES = ("queued", "running", "paused", "done", "failed", "cancelled")
 FINAL_STATUSES = ("done", "failed", "cancelled")
 STEP_STATUSES = ("pending", "running", "done", "failed")
@@ -18,10 +18,10 @@ DB_ENV = "GTU_DB"
 DEFAULT_DB = Path(".gtu") / "gtu.db"
 BUSY_TIMEOUT_S = 30.0
 
-SCHEMA = """
+JOBS_TABLE = """
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL CHECK (kind IN ('tests', 'docs', 'review')),
+    kind        TEXT NOT NULL CHECK (kind IN (__KINDS__)),
     target      TEXT NOT NULL,
     repo        TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'queued'
@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     note        TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
-);
+)""".replace("__KINDS__", ", ".join(f"'{k}'" for k in JOB_KINDS))
+
+SCHEMA = JOBS_TABLE + """;
 
 CREATE TABLE IF NOT EXISTS job_steps (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,6 +233,29 @@ class Store:
                 if name not in existing:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self.conn.commit()
+        self._widen_job_kinds()
+
+    def _widen_job_kinds(self) -> None:
+        """An older store limits `kind` with a CHECK constraint that lacks newer kinds (fix). SQLite
+        can't change a constraint in place, so the jobs table is rebuilt once, keeping every row;
+        the steps and requests that point at jobs by id are untouched."""
+        row = self.conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone()
+        if row is None or all(f"'{kind}'" in row["sql"] for kind in JOB_KINDS):
+            return
+        columns = [r["name"] for r in self.conn.execute("PRAGMA table_info(jobs)")]
+        names = ", ".join(columns)
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self.conn:
+                self.conn.execute(JOBS_TABLE.replace("CREATE TABLE IF NOT EXISTS jobs", "CREATE TABLE jobs_new"))
+                for name, kind in ADDED_COLUMNS["jobs"].items():
+                    if name in columns:
+                        self.conn.execute(f"ALTER TABLE jobs_new ADD COLUMN {name} {kind}")
+                self.conn.execute(f"INSERT INTO jobs_new ({names}) SELECT {names} FROM jobs")
+                self.conn.execute("DROP TABLE jobs")
+                self.conn.execute("ALTER TABLE jobs_new RENAME TO jobs")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
 
     @classmethod
     def open_default(cls) -> Store:

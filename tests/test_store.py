@@ -1,6 +1,8 @@
+import sqlite3
+
 import pytest
 
-from gpu_token_utilization.store import RequestLog, Store, StoreError
+from gpu_token_utilization.store import SCHEMA, RequestLog, Store, StoreError
 
 
 @pytest.fixture
@@ -20,6 +22,29 @@ def test_add_get_and_list_jobs(store, job_repo):
     assert len(a.id) == 8 and a.status == "queued"
     assert store.get_job(b.id).note == "focus on errors"
     assert [j.id for j in store.list_jobs()] == [a.id, b.id]
+
+
+def test_an_older_store_learns_the_fix_kind_and_keeps_its_rows(tmp_path, job_repo):
+    # a store made before the fix kind existed: its CHECK constraint names only the first three
+    path = tmp_path / ".gtu" / "gtu.db"
+    path.parent.mkdir()
+    old = sqlite3.connect(path)
+    old.executescript(SCHEMA.replace("'tests', 'docs', 'review', 'fix'", "'tests', 'docs', 'review'"))
+    old.execute("INSERT INTO jobs (id, kind, target, repo, note, created_at, updated_at) VALUES "
+                "('old00001', 'tests', 'src', ?, 'keep me', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')", (job_repo,))
+    old.execute("INSERT INTO job_steps (job_id, seq, name, status) VALUES ('old00001', 1, 'write', 'done')")
+    old.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        old.execute("INSERT INTO jobs (id, kind, target, repo, created_at, updated_at) VALUES ('x', 'fix', '.', 'r', 'a', 'a')")
+    old.close()
+    with Store(path) as store:
+        new = store.add_job("fix", ".", job_repo, note="src/a.py:3 off by one")
+        assert new.kind == "fix" and store.get_job("old00001").note == "keep me"
+        assert [s["name"] for s in store.steps("old00001")] == ["write"]
+        assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert "'fix'" in store.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'jobs'").fetchone()[0]
+    with Store(path) as again:  # a second open changes nothing
+        assert [j.id for j in again.list_jobs()] == ["old00001", new.id]
 
 
 def test_unknown_kind_is_rejected(store, job_repo):

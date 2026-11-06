@@ -60,7 +60,7 @@ def job_env() -> dict[str, str]:
     return env
 
 
-CLI_KINDS = ("tests", "docs")  # job kinds that run the CLI; review talks to the API directly
+CLI_KINDS = ("tests", "docs", "fix")  # job kinds that run the CLI; review talks to the API directly
 INSTALL_HELP = (
     "tests and docs jobs need BharatCode's CLI; review jobs don't. To install it:\n"
     "  1. Install Node.js (the LTS version) from https://nodejs.org, then open a new terminal\n"

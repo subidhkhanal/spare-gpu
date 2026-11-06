@@ -229,7 +229,7 @@ def test_protocol_offers_exactly_five_task_shaped_tools(tools, git_repo):
     listed = {t.name: t for t in anyio.run(go)}
     assert set(listed) == TOOLS and not set(listed) & REMOVED
     delegate = listed["spare_delegate"]
-    assert set(delegate.input_schema["properties"]["type"]["enum"]) == {"tests", "docs", "review"}
+    assert set(delegate.input_schema["properties"]["type"]["enum"]) == {"tests", "docs", "review", "fix"}
     assert delegate.input_schema["required"] == ["type", "path"]
     # each description names its example phrasings and steers away from its nearest neighbour
     for name, phrase, neighbour in [

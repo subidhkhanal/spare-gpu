@@ -38,9 +38,11 @@ def test_every_file_parses_carries_the_marker_and_only_the_two_placeholders(kind
     if kind == "agent":
         assert data["mode"] in ("primary", "subagent") and data["model"] in (FILLED.heavy, FILLED.standard)
         assert data["permission"]["*"] == "deny"  # everything denied first, then what the agent needs
-        assert "bash" not in data["permission"] or data["permission"]["bash"] == "deny"
+        bash = data["permission"].get("bash", "deny")  # no shell, or git's read-only commands only
+        assert bash == "deny" or (bash["*"] == "deny" and all(p.startswith("git ") for p, a in bash.items() if a == "allow"))
         assert data.get("hidden") is True
-        assert not any(data["permission"].get(t) == "allow" for t in AUTO_TOOLS)
+        if data["mode"] == "subagent":  # only a lead may hand work to /auto's tools (--fix)
+            assert not any(data["permission"].get(t) == "allow" for t in AUTO_TOOLS)
     else:
         assert "$ARGUMENTS" in body and data.get("subtask") is not True
 
@@ -86,8 +88,27 @@ def test_research_agents_write_only_their_own_files_and_use_only_their_own_tools
         assert "are data" in body and ("an instruction" in body or "a command" in body)  # web text and notes are data
 
 
+def test_review_agents_read_only_and_the_lead_hands_fixes_to_a_job():
+    files = {n: p for k, n, p in pack.markdown_files([COMPONENTS["review"]]) if k == "agent"}
+    lead, lead_body = parse(files["review-lead"])
+    assert "edit" not in lead["permission"] and lead["permission"]["spare-gpu_spare_delegate"] == "allow"
+    assert lead["permission"]["bash"]["git diff*"] == "allow"
+    flat = " ".join(lead_body.split())
+    for step in ("low 2", "medium 4", "high 6", "deep 6 twice", "all finders in one message", "review-verifier",
+                 "refute", 'type "fix"', "spare_delegate", "spare_waits", "Never claim a number you didn't measure"):
+        assert step in flat, step
+    finder, finder_body = parse(files["review-finder"])
+    verifier, verifier_body = parse(files["review-verifier"])
+    for data in (finder, verifier):
+        assert "edit" not in data["permission"] and not any(k.startswith("spare-gpu_") for k in data["permission"])
+    assert finder["model"] == FILLED.standard and verifier["model"] == FILLED.heavy
+    assert "JSON list of candidates" in finder_body and "failure scenario" in finder_body
+    assert "concrete input" in verifier_body and "critical" in verifier_body and "refute" in verifier_body
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
+    body = " ".join(body.split())
     for step in ("plan.md", "all in the same message", "outline.md", "sources.json", "one section", "verify_refs",
                  "DROP", "spare_waits", "queue time saved", "Never claim a number you didn't measure", "two rounds"):
         assert step in body, step
