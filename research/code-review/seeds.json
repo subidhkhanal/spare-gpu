@@ -1,0 +1,17 @@
+[
+  {
+    "repo": ".",
+    "file": "src/gpu_token_utilization/security.py",
+    "line": 65,
+    "what": "the confidence threshold check inverted: speculative findings kept, confident ones dropped",
+    "patch": "--- a/src/gpu_token_utilization/security.py\n+++ b/src/gpu_token_utilization/security.py\n@@ -62,7 +62,7 @@\n     confidence = finding.get(\"confidence\")\n-    if isinstance(confidence, (int, float)) and 0 <= confidence < MIN_CONFIDENCE:\n+    if isinstance(confidence, (int, float)) and 0 <= confidence >= MIN_CONFIDENCE:\n         return f\"confidence {confidence:g} is below {MIN_CONFIDENCE:g} (too speculative)\"\n"
+  },
+  {
+    "repo": ".",
+    "file": "README.md",
+    "line": 1,
+    "clean": true,
+    "what": "a comment-only change: no finding expected",
+    "patch": "--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-**Type `/auto` in BharatCode Desktop and your task runs on whichever model will start it sooner, DeepSeek or Qwen, so you don't sit in a queue.**\n+**Type `/auto` in BharatCode Desktop and your task runs on whichever model starts it sooner, DeepSeek or Qwen, so you don't sit in a queue.**\n"
+  }
+]

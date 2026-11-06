@@ -27,6 +27,15 @@ bug's line (or the line that fails because of it) and the claim describes the mu
 Recall = matched seeded bugs / 30. Precision = findings judged real / all findings. Also record
 DeepSeek calls per run: `/review` uses one; `/code-review` uses 1 (lead) + 1 or 2 (verifier).
 
+## Scripts
+
+`python scripts/eval_review.py research/code-review/seeds.json` applies each seed's patch to its
+checkout, runs `/code-review` through BharatCode's CLI in each setup, matches the findings to the
+seed, reverts, and writes `results-<date>.json` and `results.md`. Mark each finding's `"real"`
+in the JSON and run `--judge` for precision; `--write-policy` records the review-verifier
+verdict (split vs split-standard-roles). seeds.json holds the format and two examples; the
+built-in `/review` baseline is run in Desktop by hand and entered in the table.
+
 ## Results
 
 | Setup | Recall | Precision | Minutes (median) | DeepSeek calls | Qwen calls |

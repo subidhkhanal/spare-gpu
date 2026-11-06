@@ -1,0 +1,42 @@
+[
+  {
+    "question": "What is known about quantum-inspired particle swarm optimisation for task offloading in vehicular networks?",
+    "key_papers": []
+  },
+  {
+    "question": "How do retrieval-augmented language models reduce hallucination, and what are the limits?",
+    "key_papers": []
+  },
+  {
+    "question": "What do measured studies say about the energy cost of training versus serving large language models?",
+    "key_papers": []
+  },
+  {
+    "question": "What is the evidence on GLP-1 receptor agonists for weight loss in people without diabetes?",
+    "key_papers": []
+  },
+  {
+    "question": "What does the evidence say about screen time and sleep in adolescents?",
+    "key_papers": []
+  },
+  {
+    "question": "What are the measured effects of minimum wage increases on employment in the 2010s?",
+    "key_papers": []
+  },
+  {
+    "question": "How do carbon taxes affect emissions and competitiveness, by the evidence from British Columbia and the EU?",
+    "key_papers": []
+  },
+  {
+    "question": "What is known about the effect of four-day work weeks on productivity and wellbeing?",
+    "key_papers": []
+  },
+  {
+    "question": "What does the research say about automated content moderation and over-removal of lawful speech?",
+    "key_papers": []
+  },
+  {
+    "question": "What is the evidence for and against open-weight model releases on safety?",
+    "key_papers": []
+  }
+]
