@@ -125,6 +125,6 @@ def advise(waits: list[Wait], decision: Decision | None, now: datetime | None = 
                          "with 4 slots, and not at all with 2.")
         else:
             lines.append(f"BharatCode's live stats aren't available ({r.reason}).")
-    lines.append("To run something: spare_queue_work for tests, docs or a review; spare_run_when_free for "
-                 "any other command.")
+    lines.append("To run something: spare_delegate for tests, docs or a review; `gtu run-when-free` in a "
+                 "terminal for any other command.")
     return "\n".join(lines)

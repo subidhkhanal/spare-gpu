@@ -143,7 +143,7 @@ class Job:
 
 @dataclass
 class Command:
-    """A command to run once BharatCode has spare capacity (`spare_run_when_free`)."""
+    """A command to run once BharatCode has spare capacity (`gtu run-when-free`)."""
     id: str
     command: str
     repo: str

@@ -1,4 +1,4 @@
-"""Run any command once BharatCode has spare capacity (`spare_run_when_free`, `gtu run-when-free`).
+"""Run any command once BharatCode has spare capacity (`gtu run-when-free`).
 
 Queueing records the command and starts a small detached waiter, so the caller (often an agent)
 never blocks. The waiter asks the capacity gate, as `gtu start` does, until it opens, then runs

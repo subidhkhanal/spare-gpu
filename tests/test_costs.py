@@ -1,4 +1,4 @@
-"""Token totals for spare_last_night (per-session detail is in BharatCode Desktop itself)."""
+"""Token totals for `gtu report` (per-session detail is in BharatCode Desktop itself)."""
 
 from datetime import datetime, timedelta, timezone
 

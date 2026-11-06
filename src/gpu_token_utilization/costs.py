@@ -1,4 +1,4 @@
-"""Token totals for spare-gpu's work (`spare_last_night`), from the request log.
+"""Token totals for spare-gpu's work (`gtu report`), from the request log.
 
 Every request we send is logged, and so is every step a job's agent reports. Per-session detail
 (input, output, cached and reasoning tokens, and a breakdown by message type) is in BharatCode

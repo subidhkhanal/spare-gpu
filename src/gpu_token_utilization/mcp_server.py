@@ -1,6 +1,6 @@
 """MCP server: spare-gpu as tools an agent can call (BharatCode's CLI, or any MCP client).
 
-Started with `gtu mcp`, over stdio. Seven tools, each shaped around a task the user wants done
+Started with `gtu mcp`, over stdio. Five tools, each shaped around a task the user wants done
 rather than around our internal functions. Selection accuracy drops as tool count grows and when
 tools overlap, so related questions are merged (one status tool answers "what's queued", "is it
 done" and "why isn't it running"). Each tool is a thin wrapper over the code the matching `gtu`
@@ -11,18 +11,16 @@ plain text for the agent to relay, and none blocks: long work is handed to a bac
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, costs, desktop, freerun, router, runner, runstate, waits, worktree
-from . import report as reporting
+from . import __version__, actions, desktop, freerun, router, runner, runstate, waits, worktree
 from .api import ApiKeyMissing, find_api_key
-from .budget import Budgets
 from .gate import Gate, GateConfig
-from .store import DB_ENV, FINAL_STATUSES, Command, Store, StoreError
+from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
 
 INSTRUCTIONS = (
     "spare-gpu does coding chores (writing tests, adding docs, code review) for a project folder as "
@@ -31,7 +29,6 @@ INSTRUCTIONS = (
     "switch-safe task to whichever model starts it sooner, checking the result before keeping it. "
     "Relay the tools' answers to the user as they are."
 )
-LAST_NIGHT_HOURS = 24
 # Desktop already shows each session's tokens in detail; spare-gpu points there rather than estimate.
 SESSION_DETAIL = ("Each job runs as a BharatCode Desktop session named \"spare-gpu: ...\"; open it in Desktop "
                   "for its full token breakdown.")
@@ -69,18 +66,16 @@ def ask_folder() -> Path:
 
 
 class SpareTools:
-    """The eight tools as plain functions returning text, for one project folder."""
+    """The five tools as plain functions returning text, for one project folder."""
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
-                 start_command: Callable[[Command], int] | None = None,
                  http: Callable[[], httpx.Client] | None = None):
         self.base = Path(base)
         # Everything that reaches outside is injectable, so tests use fakes: the gate (BharatCode's
-        # live stats), the background job runner, the run-when-free waiter, and the wait figures.
+        # live stats), the background job runner, and the wait figures.
         self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
         self._launch = launch or runner.launch
-        self._start_command = start_command
         self._http = http or (lambda: httpx.Client(timeout=10.0))
 
     # --- helpers -------------------------------------------------------------------------
@@ -93,7 +88,7 @@ class SpareTools:
         if not create and not path.exists():
             raise NoStore(
                 f"spare-gpu hasn't been used in this project yet (no .gtu folder in {self._root()}). "
-                "Queue something with spare_queue_work first."
+                "Hand something over with spare_delegate first, or queue it with `gtu add` in a terminal."
             )
         return Store(path)
 
@@ -139,22 +134,7 @@ class SpareTools:
         return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
                 "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
-    # --- the eight tools -------------------------------------------------------------------
-
-    def queue_work(self, kind: str, path: str, note: str | None = None, start: bool = True) -> str:
-        try:
-            outcome = actions.queue_job(lambda repo: Store(db_path(repo)), self._root(), kind, path, note)
-        except actions.ActionError as exc:
-            return f"Didn't queue it: {exc}"
-        job = outcome.job
-        lines = [f"Queued a {job.kind} job for {job.target} (job {job.id}). When it finishes, its edited "
-                 f"files are copied to {worktree.OUTPUT_DIR}/<date>_<time>/ in this project; your files aren't touched."]
-        if outcome.note:
-            lines.append(outcome.note)
-        with Store(db_path(Path(job.repo))) as store:
-            if start:
-                lines.append(self._ensure_runner(store, Path(job.repo)))
-        return "\n".join(lines)
+    # --- the five tools -------------------------------------------------------------------
 
     def work_status(self) -> str:
         try:
@@ -199,39 +179,6 @@ class SpareTools:
             lines.append(("Capacity: " if decision.open else "Why it isn't running yet: ") + decision.describe())
         if jobs:
             lines.append(SESSION_DETAIL)
-        return "\n".join(lines)
-
-    def last_night(self, hours: float | None = None) -> str:
-        now = datetime.now(timezone.utc)
-        since = now - timedelta(hours=hours or LAST_NIGHT_HOURS)
-        budgets = Budgets.from_env()
-        try:
-            with self._open() as store:
-                reports = [reporting.build_job(store, j) for j in reporting.select_jobs(store, since, None)]
-                cost, _ = costs.collect(store, str(hours or LAST_NIGHT_HOURS), now)
-                night = store.tokens_since(budgets.night_began(now).isoformat())
-        except NoStore as exc:
-            return str(exc)
-        period = f"since {reporting._local(since)}"
-        if not reports:
-            return f"Nothing ran {period}."
-        lines = [f"spare-gpu {period}: {len(reports)} job(s), {cost.total:,} tokens "
-                 f"({night:,} of tonight's {budgets.per_night:,}-token budget used)."]
-        for r in reports:
-            j = r.job
-            made = ", ".join(f"{p} ({ {'A': 'added', 'M': 'changed', 'D': 'deleted'}.get(c, c)})" for c, p in r.files)
-            tests = (f" Tests: {r.tests_kept} kept, {r.tests_dropped} discarded as failing."
-                     if r.tests_kept is not None else "")
-            lines.append(
-                f"- {j.kind} {j.target} (job {j.id}): {j.status}; started {reporting._local(r.started)}, "
-                f"took {reporting._span(r.duration)}, {r.tokens:,} tokens. Produced: {made or 'nothing committed'}."
-                + tests + (f" Edited files: {j.output_dir}/" if j.output_dir else "")
-            )
-        held = sorted(w for r in reports for w in r.queue_waits_ms)
-        if held:
-            lines.append(f"BharatCode held these requests in its queue for {held[len(held) // 2] / 1000:.1f} s "
-                         f"(median), {held[-1] / 1000:.1f} s at most.")
-        lines.append(SESSION_DETAIL)
         return "\n".join(lines)
 
     def cancel_work(self, work_id: str) -> str:
@@ -324,19 +271,8 @@ class SpareTools:
                  "your files aren't touched.", choice.summary()]
         if outcome.note:
             lines.append(outcome.note)
-        lines += [runner_line, "spare_work_status shows progress; spare_last_night shows what it produced."]
+        lines += [runner_line, "spare_work_status shows progress and, once it finishes, where its files are."]
         return "\n".join(lines)
-
-    def run_when_free(self, command: str) -> str:
-        try:
-            cmd = freerun.queue(lambda repo: Store(db_path(repo)), self._root(), command, self._start_command)
-        except freerun.FreeRunError as exc:
-            return f"Didn't queue it: {exc}."
-        except OSError as exc:
-            return f"Couldn't start waiting for capacity: {exc}"
-        return (f"Will run `{cmd.command}` in {cmd.repo} as soon as BharatCode has spare capacity (command {cmd.id}). "
-                f"It runs in the background with Command Prompt; output goes to {cmd.log_path}. "
-                "spare_work_status shows when it has run; spare_cancel_work stops it.")
 
 
 def build_server(base: Path, tools: SpareTools | None = None):
@@ -350,31 +286,6 @@ def build_server(base: Path, tools: SpareTools | None = None):
     def notes(read_only: bool, destructive: bool = False, world: bool = False) -> ToolAnnotations:
         return ToolAnnotations(read_only_hint=read_only, destructive_hint=destructive, open_world_hint=world)
 
-    @server.tool(annotations=notes(False))
-    def spare_queue_work(type: Literal["tests", "docs", "review"], path: str, note: str | None = None) -> str:
-        """Queue a coding chore for spare-gpu to do in the background: write tests, write
-        documentation, or review code, for a file or folder in this project. The work happens
-        in the background, unattended; when it finishes, its edited files are copied to the
-        project's spare-gpu/<date>_<time>/ folder. It doesn't happen in this chat.
-
-        Use it when the user wants tests, docs or a review done in the background, later, tonight
-        or overnight. Examples: "queue tests for the payments module", "write tests for
-        src/payments tonight", "get docs written for utils overnight", "queue a code review of
-        app/api.py", "review app/api.py later". Call it straight away: it is the whole job, and it
-        checks the path itself.
-        To have it done now on whichever model is free instead, use spare_delegate. For any other
-        command (a build, a migration, a big refactor script) use spare_run_when_free.
-
-        Args:
-            type: "tests" writes new passing tests; "docs" adds docstrings and README text without
-                changing code; "review" writes a code review (bugs, risky code, suggestions).
-            path: File or folder relative to the repo root, e.g. "src/payments". If the user gave a
-                path, pass it exactly as given without searching; spare-gpu says if it doesn't exist.
-                Only search when the user named a module loosely ("the payments module").
-            note: Optional extra instructions in the user's words, e.g. "cover refunds".
-        """
-        return tools.queue_work(type, path, note)
-
     @server.tool(annotations=notes(True, world=True))
     def spare_work_status() -> str:
         """Everything about spare-gpu's work in this repo in one answer: what's queued, what's
@@ -382,30 +293,15 @@ def build_server(base: Path, tools: SpareTools | None = None):
         isn't running yet (BharatCode's current load).
 
         Use it for any "where are things" question: "what's queued?", "is my tests job done?",
-        "what is spare-gpu doing?", "why hasn't my job started?", "did my command run?". Also use it
-        to find a job id before cancelling. For a summary of finished work use spare_last_night;
-        for how long each model would wait right now use spare_waits."""
+        "what is spare-gpu doing?", "why hasn't my job started?", "did my command run?", "what did
+        spare-gpu do last night?". Also use it to find a job id before cancelling. For how long
+        each model would wait right now use spare_waits; the full morning summary with token
+        totals is `gtu report` in a terminal."""
         return tools.work_status()
-
-    @server.tool(annotations=notes(True))
-    def spare_last_night(hours: float | None = None) -> str:
-        """What spare-gpu got done recently: which jobs ran, when, how long, what each produced
-        (the edited files in its spare-gpu/<date>_<time>/ folder, tests kept or discarded) and what it cost in tokens.
-
-        Use it for a summary of results: "what did spare-gpu do last night?", "what got done?",
-        "show me the overnight results". For one job's state ("is my tests job done?") or work still
-        queued or running, use spare_work_status. Also answers "what did last night cost?": it gives
-        the token totals and the budget used.
-
-        Args:
-            hours: How far back to look. Leave it out for the last 24 hours ("last night", "today");
-                168 for "this week".
-        """
-        return tools.last_night(hours)
 
     @server.tool(annotations=notes(False, destructive=True))
     def spare_cancel_work(job_id: str) -> str:
-        """Cancel a queued or running spare-gpu job, or a command waiting in spare_run_when_free.
+        """Cancel a queued or running spare-gpu job, or a command queued with `gtu run-when-free`.
         Nothing of a cancelled job is copied to the spare-gpu/ folder.
 
         Use it for "cancel the docs job", "drop job 1a2b3c4d", "don't run that command after all",
@@ -460,8 +356,9 @@ def build_server(base: Path, tools: SpareTools | None = None):
 
         Use it when the user wants the task done now without waiting: "write tests for src/pay.py
         on whichever model is free", "get this reviewed now, don't wait in the queue", "delegate the
-        docs for utils". For work that can simply wait in the background (later, tonight), use
-        spare_queue_work.
+        docs for utils", "queue tests for the payments module". For a plain question (not a
+        coding chore) use spare_ask. Work that should wait for a quiet moment is queued from a
+        terminal with `gtu add` and run by `gtu start`.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
@@ -473,23 +370,6 @@ def build_server(base: Path, tools: SpareTools | None = None):
                 "deepseek-v4.1-flash"); it's the one the task would otherwise use.
         """
         return tools.delegate(type, path, note, your_model)
-
-    @server.tool(annotations=notes(False, world=True))
-    def spare_run_when_free(command: str) -> str:
-        """Run one existing command in this repo as soon as BharatCode has spare capacity, in the
-        background. Returns at once with an id; the command waits, runs, and its output is logged.
-
-        Use it to defer heavy commands, not to write tests/docs/reviews (that's spare_queue_work):
-        "run the test suite when BharatCode is free", "kick off `bharatcode run 'add type hints'`
-        tonight", "run npm run build once there's capacity". Only test, build and lint tools and
-        `bharatcode run` are accepted (pytest, npm test, npm run <script>, go test, cargo test,
-        make, ...); anything else, or anything with &&, pipes or redirects, is refused with the list.
-
-        Args:
-            command: One plain command line, e.g. "pytest -x" or "bharatcode run 'add docstrings'".
-                Run directly in the repo root, not through a shell.
-        """
-        return tools.run_when_free(command)
 
     return server
 
