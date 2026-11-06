@@ -20,7 +20,7 @@ from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "context_report", "pack_cost"}  # only for `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -260,7 +260,6 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert "sources.json" in listed["verify_refs"].description and "DROP" in listed["verify_refs"].description
     assert listed["scholar_search"].input_schema["required"] == ["query"]
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
-    assert "never invent any" in listed["context_report"].description and not listed["context_report"].input_schema.get("required")
 
 
 STATS = """┌────────────────────────────────────────────────────────┐
@@ -286,14 +285,14 @@ STATS = """┌──────────────────────
 
 
 def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_delta(tools, git_repo, fake, monkeypatch):
-    from gpu_token_utilization import overhead
+    from gpu_token_utilization import stats
 
     fake.usage_busy(1)
     plain = tools.waits()
     assert "Pack roles" not in plain  # a plain server says nothing about the pack
-    later = overhead.parse_stats(STATS.replace("120.5K", "150.5K").replace("30 │", "34 │").replace("300.0K", "420.0K"))
-    readings = iter([overhead.parse_stats(STATS), later, later])  # the snapshot, pack_cost, and the second waits call
-    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: next(readings))
+    later = stats.parse_stats(STATS.replace("120.5K", "150.5K").replace("30 │", "34 │").replace("300.0K", "420.0K"))
+    readings = iter([stats.parse_stats(STATS), later, later])  # the snapshot, pack_cost, and the second waits call
+    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: next(readings))
     text = tools.waits(roles=True)
     assert "Pack roles, which variant to start now" in text
     for role in ("research-checker", "review-verifier", "security-verifier"):
@@ -310,9 +309,9 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_
 
 def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_queued(git_repo, fake, monkeypatch):
     from test_routing_jobs import wait_figures  # DeepSeek queued about 2 minutes, Qwen idle
-    from gpu_token_utilization import overhead, router
+    from gpu_token_utilization import router, stats
 
-    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: None)
+    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: None)
     (git_repo / ".gtu").mkdir()
     (git_repo / ".gtu" / "switch-safe").write_text("review-verifier\n", encoding="utf-8")  # the project's own override
     tools = SpareTools(git_repo, launch=lambda repo: 1, http=wait_figures)
@@ -325,55 +324,13 @@ def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_
 
 
 def test_pack_cost_without_a_snapshot_or_a_cli_says_so(tools, git_repo, monkeypatch):
-    from gpu_token_utilization import overhead
+    from gpu_token_utilization import stats
 
     assert tools.pack_cost().startswith("No usage snapshot")
     (git_repo / ".gtu").mkdir(exist_ok=True)
     (git_repo / ".gtu" / "pack-usage.json").write_text('{"at": "2026-11-06T10:00:00+00:00", "models": {}}', encoding="utf-8")
-    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: None)
+    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: None)
     assert "no token figures" in tools.pack_cost()
-
-
-def test_context_report_through_the_tool(git_repo, fake, monkeypatch):
-    monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(git_repo.parent / "cfg"))
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
-    text = tools.context_report()
-    assert text.startswith(f"Per-step overhead in {git_repo.resolve()}") and "isn't installed here" in text
-    scenario = git_repo.parent / "scenario.json"
-    scenario.write_text(json.dumps({"steps": [{"tokens": 9_000}], "text": "OK"}))
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
-    assert "Measured just now with one tiny run: 8,950 tokens" in tools.context_report(measure=True)
-
-
-def test_security_filter_through_the_tool(git_repo, fake):
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
-    text = tools.security_filter(json.dumps([
-        {"file": "app.py", "line": 1, "description": "SQL injection via the id parameter.", "confidence": 0.9},
-        {"file": "app.py", "line": 2, "description": "Missing rate limiting on login.", "confidence": 0.9},
-    ]))
-    assert text.startswith("Kept 1 of 2 candidate(s)") and "- DROPPED app.py:2: rate limiting" in text
-    assert tools.security_filter("nope").startswith("Couldn't read the candidates:")
-
-
-def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
-    from test_scholar import registries
-
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()),
-                       scholar_http=registries)
-    text = tools.scholar_search("attention is all you need")
-    assert text.startswith("1. Attention Is All You Need (2017)") and "arxiv: 1706.03762" in text
-    assert tools.scholar_search("attention", limit=2, sources="arxiv").count("found in: arxiv") == 2
-    assert "unknown source 'nope'" in tools.scholar_search("attention", sources="nope")
-    folder = git_repo / "research" / "transformers"
-    folder.mkdir(parents=True)
-    (folder / "sources.json").write_text(json.dumps({"sources": [
-        {"key": "lecun2015", "title": "Deep learning", "authors": ["Yann LeCun"], "doi": "10.1038/nature14539"},
-        {"key": "fake", "title": "Made up", "doi": "10.1000/fake"}]}), encoding="utf-8")
-    text = tools.verify_refs("research/transformers")
-    assert "1 verified, 1 to drop" in text and "- DROP fake: no registry has DOI 10.1000/fake" in text
-    assert json.loads((folder / "sources.json").read_text(encoding="utf-8"))["sources"][1]["verified"] is False
-    assert tools.verify_refs("research/nothing").startswith("No sources.json in ")
-    assert "outside this project" in tools.verify_refs("../elsewhere")
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):

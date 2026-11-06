@@ -13,7 +13,7 @@ each job between the two models: DeepSeek plans, judges and verifies; Qwen does 
 parallel, self-contained steps. `/deep-research` (cited reports with every reference checked
 against OpenAlex, Crossref and arXiv), `/code-review` (parallel finders, a verifier, optional
 `--fix` kept only if tests pass), `/security-review` (the method of Anthropic's MIT-licensed
-security reviewer, read-only), `/simplify`, `/context-report` and `/verify-app`.
+security reviewer, read-only), `/simplify` and `/verify-app`.
 
 **Why it may interest BharatCode.** It uses only the extension points Desktop already ships
 (Markdown commands and agents, MCP, config keys) and it is built to spend BharatCode's capacity

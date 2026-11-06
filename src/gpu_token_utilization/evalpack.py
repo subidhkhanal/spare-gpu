@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import overhead, pack, scholar
+from . import pack, scholar, stats
 from .agent_cli import resolve_command
 from .api import env_without_key
 
@@ -104,7 +104,7 @@ def run_command(project: Path, lead: str, prompt: str, setup: str, timeout: floa
 
 
 def stats_delta(before: dict | None, after: dict | None) -> dict[str, float]:
-    """Tokens per model between two `bharatcode stats --models` readings (overhead.parse_stats)."""
+    """Tokens per model between two `bharatcode stats --models` readings (stats.parse_stats)."""
     if not before or not after:
         return {}
     return {model: figures["tokens"] - (before.get(model) or {}).get("tokens", 0.0) for model, figures in after.items()
@@ -242,4 +242,4 @@ def markdown_table(rows: list[dict], columns: list[str]) -> str:
 
 
 def usage_snapshot(command: list[str] | None = None) -> dict | None:
-    return overhead.model_usage(days=1, command=command)
+    return stats.model_usage(days=1, command=command)

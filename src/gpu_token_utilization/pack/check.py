@@ -52,9 +52,9 @@ def installed_models(folder: Path) -> Models | None:
             model = data.get("model")
             if not model:
                 continue
-            if name.endswith("-lead") and name != "context-lead" and heavy is None:
+            if name.endswith("-lead") and heavy is None:
                 heavy = model
-            if (name.endswith(("-scout", "-finder", "-writer", "-driver")) or name == "context-lead") and standard is None:
+            if name.endswith(("-scout", "-finder", "-writer", "-driver")) and standard is None:
                 standard = model
     return Models(heavy, standard) if heavy and standard else None
 

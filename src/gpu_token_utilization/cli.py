@@ -20,7 +20,7 @@ from .agent_cli import CLI_KINDS, CMD_ENV, BharatCodeCli, CliNotFound, cli_statu
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, desktop, dryrun, overhead, pack, router, runstate, waits, worktree
+from . import actions, bc_config, desktop, dryrun, pack, router, runstate, waits, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -812,44 +812,6 @@ def pack_check(
     typer.echo(f"Result: {verdict}" + ("" if verdict == "PASS" else "; the checks that need Desktop are in research/*/manual-check.md"))
     if verdict == "FAIL":
         raise typer.Exit(1)
-
-
-@app.command("context-report")
-def context_report(
-    days: int = typer.Option(7, "--days", help="Days of BharatCode usage to show (needs its CLI)."),
-    measure: bool = typer.Option(False, "--measure", help="Also run one tiny `bharatcode run` to measure the real overhead."),
-    apply: int = typer.Option(None, "--apply", help="Apply saving number N from the list, after a timestamped backup."),
-    yes: bool = typer.Option(False, "--yes", help="Don't ask before applying."),
-) -> None:
-    """What every BharatCode request in this project carries before your words, with its cost, the
-    top savings and their exact config switches. Numbers come from the config and files, with the
-    per-item costs measured in research/token-overhead.md."""
-    report = overhead.inventory(Path.cwd())
-    if measure:
-        report.measured = overhead.measure(Path.cwd())
-        if report.measured is None:
-            report.notes.append("A live measurement wasn't possible: BharatCode's CLI isn't available, or the run didn't report tokens.")
-    report.usage = overhead.usage(days)
-    typer.echo(overhead.describe(report))
-    if apply is None:
-        return
-    waste = report.waste()
-    if not 1 <= apply <= len(waste):
-        _fail(f"there's no saving number {apply}; the list has {len(waste)}.")
-    item = waste[apply - 1]
-    if not item.apply:
-        _fail(f"saving {apply} is a change to make by hand: {item.switch}")
-    typer.echo(f"\nAbout to change {item.apply['file']}: {item.switch}")
-    typer.echo("The file is rewritten as plain JSON (comments don't survive; the backup keeps them). "
-               "Restart BharatCode Desktop afterwards.")
-    if not yes and not typer.confirm("Go ahead?", default=False):
-        typer.echo("Nothing changed.")
-        return
-    try:
-        backup = overhead.apply(item)
-    except (OSError, ValueError) as exc:
-        _fail(f"couldn't apply it: {exc}")
-    typer.echo(f"Done. The file as it was is saved as {backup}.")
 
 
 @app.command()

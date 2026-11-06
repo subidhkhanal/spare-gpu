@@ -56,7 +56,6 @@ COMPONENTS: dict[str, Component] = {
     "security": Component("security", "/security-review", ("security-review",),
                           ("security-lead", "security-finder", "security-verifier"), ("security_filter", *SHARED_TOOLS)),
     "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder"), SHARED_TOOLS),
-    "context": Component("context", "/context-report", ("context-report",), ("context-lead",), ("context_report",)),
     # Needs the Playwright MCP from BharatCode's marketplace (server name "playwright"); the pack adds no server for it.
     "verify": Component("verify", "/verify-app", ("verify-app",), ("verify-lead", "verify-driver"), SHARED_TOOLS),
 }
@@ -244,6 +243,23 @@ def config(components, models: Models, source: Path = PACK_DIR) -> dict:
     if mcp:
         doc["mcp"] = mcp
     return doc
+
+
+# Measured 31 Oct 2026 (research/token-overhead.md): what one MCP tool's schema and one line of
+# the task tool's subagent list cost on every step.
+TOKENS_PER_MCP_TOOL = 330
+TOKENS_PER_SUBAGENT_LINE = 40
+
+
+def pack_added_tokens(doc: dict, helper_list: list[str] | None = None) -> int:
+    """What the pack adds to a normal session's request with this pack config: every pack tool
+    and helper agent the config fails to deny is described on every step."""
+    permission = doc.get("permission") or {}
+    tools = [t for c in COMPONENTS.values() for t in c.tools if permission.get(f"{SERVER}_{t}") != "deny"]
+    task = permission.get("task") or {}
+    names = helper_list if helper_list is not None else helpers(COMPONENTS.values())
+    visible = [h for h in names if task.get(h) != "deny"]
+    return TOKENS_PER_MCP_TOOL * len(set(tools)) + TOKENS_PER_SUBAGENT_LINE * len(visible)
 
 
 def config_text(doc: dict, marker_line: str) -> str:
