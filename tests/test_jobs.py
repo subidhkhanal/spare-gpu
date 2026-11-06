@@ -235,6 +235,42 @@ def test_docs_only_change(old, new, ok):
     assert jobs.docs_only_change(old, new)[0] is ok
 
 
+@pytest.mark.parametrize("old, new, ok", [
+    ("def f():\n    # keep me\n    return 1\n", 'def f():\n    """Doc."""\n    return 1\n', False),  # comment dropped
+    ("x = (1,\n     2)\n", "x = (1, 2)\n", False),  # reformatted: same tree, other lines
+    ("def f():\n    # keep me\n    return 1\n", 'def f():\n    """Doc."""\n    # keep me\n    return 1\n', True),
+    ("def f():\n    pass\n", 'def f():\n    """Doc."""\n', True),  # a docstring may replace a bare pass
+    ("# header\n\ndef f():\n    return 1\n", '"""Module doc."""\n# header\n\ndef f():\n    return 1\n', True),
+])
+def test_docs_only_change_keeps_comments_and_formatting_too(old, new, ok):
+    verdict, why = jobs.docs_only_change(old, new)
+    assert verdict is ok
+    if not ok:
+        assert why == "it changes or removes lines outside the docstrings (comments or formatting)"
+
+
+def test_a_big_file_is_reviewed_in_part_rather_than_not_at_all(git_repo):
+    big = git_repo / "big.py"
+    big.write_text("".join(f"x{n} = {n}\n" for n in range(1, 301)), encoding="utf-8")
+    listing, omitted = jobs.numbered_listing(git_repo, "big.py", 2_500)
+    assert listing and listing.startswith("big.py:1| x1 = 1\n") and listing.endswith("\n") and len(listing) <= 2_500
+    cut_after = int(omitted[0].rsplit("line ", 1)[1].rstrip(")"))
+    assert omitted == [f"big.py (cut after line {cut_after})"] and 100 < cut_after < 300
+    assert listing.count("\n") == cut_after
+    (git_repo / "a_small.py").write_text("y = 1\n", encoding="utf-8")  # sorts before big.py
+    listing, omitted = jobs.numbered_listing(git_repo, ".", 2_500)  # the small one whole, the big one cut
+    assert listing.startswith("a_small.py:1| y = 1\n") and "big.py:1|" in listing and omitted[0].startswith("big.py (cut after line")
+    listing, omitted = jobs.numbered_listing(git_repo, ".", 100)  # too little room for a cut once something is in: left out whole
+    assert listing.startswith("a_small.py:1|") and "big.py" in omitted
+
+
+def test_nested_test_functions_are_removed_without_eating_the_next_one(tmp_path):
+    file = tmp_path / "test_x.py"
+    file.write_text("def test_x():\n    def test_x():\n        pass\n    test_x()\n\n\ndef test_y():\n    assert True\n", encoding="utf-8")
+    assert jobs.remove_test_functions(file, {"test_x"}) == 1
+    assert file.read_text(encoding="utf-8") == "\n\ndef test_y():\n    assert True\n"
+
+
 def test_markdown_may_only_grow():
     assert jobs.no_lines_removed("a\nb\n", "a\nb\nc\n")
     assert not jobs.no_lines_removed("a\nb\n", "a\nc\n")
@@ -392,9 +428,14 @@ def test_test_command_must_be_allowlisted(monkeypatch):
     (("python", "-m", "pytest"), True),
     ((sys.executable, "-m", "pytest"), True),
     (("pytest", "-x"), True),
+    (("py", "-m", "pytest"), True),  # the Windows launcher
+    (("python3", "-m", "pytest"), True),
+    (("C:\\venv\\Scripts\\python3.12.exe", "-m", "pytest"), True),
+    (("pythonw", "-m", "pytest"), True),
     (("npm", "test"), True),
     (("npm", "install"), False),
     (("python", "evil.py"), False),
+    (("pypy", "-m", "pytest"), False),
 ])
 def test_command_allowlist(command, ok):
     assert jobs.command_allowed(command, jobs.DEFAULT_ALLOWED) is ok

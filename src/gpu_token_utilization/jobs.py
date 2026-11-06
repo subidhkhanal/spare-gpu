@@ -76,9 +76,20 @@ class JobConfig:
             raise ValueError(f"test command {' '.join(self.test_command)!r} is not in the allowlist {self.allowed_commands}")
 
 
+PYTHON_LAUNCHER = re.compile(r"^(python|pythonw|py)(\d+(\.\d+)?)?$")
+
+
+def _program(word: str) -> str:
+    """The program's name for the allowlist: any folder and .exe dropped, and the Python
+    launchers (py, python3, python3.12, pythonw) all counted as "python"."""
+    name = re.split(r"[\\/]", word)[-1]  # either separator: the config may name a Windows path on any platform
+    stem = Path(name).stem.lower()
+    return "python" if PYTHON_LAUNCHER.match(stem) else stem
+
+
 def command_allowed(command: tuple[str, ...], allowed: tuple[str, ...]) -> bool:
-    words = [Path(command[0]).stem.lower(), *command[1:]] if command else []
-    return any(words[: len(a.split())] == a.split() for a in allowed)
+    words = [_program(command[0]), *command[1:]] if command else []
+    return any(words[: len(a.split())] == [_program(a.split()[0]), *a.split()[1:]] for a in allowed if a.split())
 
 
 # --- git helpers on the job's worktree -------------------------------------------------
@@ -279,12 +290,17 @@ def remove_test_functions(file: Path, names: set[str]) -> int:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
             start = min([d.lineno for d in node.decorator_list] + [node.lineno])
             spans.append((start, node.end_lineno))
+    kept: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if kept and start <= kept[-1][1]:
+            continue  # nested inside a function that goes anyway: deleting it twice would eat the lines after
+        kept.append((start, end))
     lines = source.splitlines(keepends=True)
-    for start, end in sorted(spans, reverse=True):
+    for start, end in reversed(kept):
         del lines[start - 1 : end]
     file.write_bytes("".join(lines).encode("utf-8"))
     match_file_style(file, original)  # same byte-order mark and line endings as the model wrote
-    return len(spans)
+    return len(kept)
 
 
 def _keep_passing_python(ctx: StepContext, path: str) -> tuple[int, int, str]:
@@ -386,8 +402,31 @@ def _docstrings(tree: ast.AST) -> dict[str, str]:
     return found
 
 
+def _docstring_lines(tree: ast.AST) -> set[int]:
+    """Line numbers that belong to a docstring."""
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(getattr(first, "value", None), ast.Constant) \
+                    and isinstance(first.value.value, str):
+                inside.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return inside
+
+
+def _outside_docstrings(text: str, tree: ast.AST) -> str:
+    """The file without its docstrings (and without `pass` lines, which a docstring may replace):
+    the code and comments a docs job must leave exactly as they were."""
+    inside = _docstring_lines(tree)
+    return "\n".join(line.rstrip() for n, line in enumerate(text.splitlines(), 1)
+                     if n not in inside and line.strip() != "pass")
+
+
 def docs_only_change(old: str, new: str) -> tuple[bool, str]:
-    """Whether `new` differs from `old` only by added or extended docstrings."""
+    """Whether `new` differs from `old` only by added or extended docstrings: the same code (by
+    syntax tree), every old docstring kept, and every line outside the docstrings, comments
+    included, still there as it was (a model that reflows the file or drops the comments
+    leaves the tree unchanged, so the tree alone can't see it)."""
     try:
         old_tree, new_tree = ast.parse(old), ast.parse(new)
     except SyntaxError:
@@ -398,6 +437,8 @@ def docs_only_change(old: str, new: str) -> tuple[bool, str]:
     for name, text in _docstrings(old_tree).items():
         if text not in new_docs.get(name, ""):
             return False, f"it removes or rewrites the existing docstring of {name}"
+    if not no_lines_removed(_outside_docstrings(old, old_tree), _outside_docstrings(new, new_tree)):
+        return False, "it changes or removes lines outside the docstrings (comments or formatting)"
     return True, ""
 
 
@@ -466,8 +507,14 @@ def _source_files(root: Path, target: Path) -> list[Path]:
     )
 
 
+MIN_CUT_CHARS = 2_000  # a file is cut to the room left only when that room is worth reviewing
+
+
 def numbered_listing(root: Path, target: str, max_chars: int) -> tuple[str, list[str]]:
-    """The target's text files with `path:line|` prefixes, capped; also returns files left out."""
+    """The target's text files with `path:line|` prefixes, capped; also returns what was left out.
+    A file that doesn't fit is cut at the last whole line that does (noted as "cut after line
+    N") when that is worth reviewing, or when it is the first file, so one big file is reviewed
+    in part rather than not at all; the rest are left out whole."""
     parts, omitted, used = [], [], 0
     for file in _source_files(root, root / target):
         data = file.read_bytes()
@@ -476,6 +523,15 @@ def numbered_listing(root: Path, target: str, max_chars: int) -> tuple[str, list
         rel = file.relative_to(root).as_posix()
         block = "".join(f"{rel}:{n}| {line}\n" for n, line in enumerate(source_text(data).splitlines(), 1))
         if used + len(block) > max_chars:
+            room = max_chars - used
+            if room >= MIN_CUT_CHARS or not parts:
+                cut = block[:room]
+                cut = cut[: cut.rfind("\n") + 1]  # whole lines only
+                if cut:
+                    parts.append(cut)
+                    used += len(cut)
+                    omitted.append(f"{rel} (cut after line {cut.count(chr(10))})")
+                    continue
             omitted.append(rel)
             continue
         parts.append(block)
