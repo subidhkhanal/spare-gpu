@@ -18,7 +18,7 @@ irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 
 
 Then fully close BharatCode Desktop and open it again. That's all: no API key needed.
 
-The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop, adds `/auto` and adds the `gtu` command. Run the same line again to update.
+The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop, adds `/auto` and adds the `gtu` command. It installs the newest tagged release and prints the version it installed; set `$env:SPARE_GPU_VERSION = '0.1.0'` first to pin one. Run the same line again to update. (Until the first release is published it installs the development version from `master`, and says so.)
 
 To remove it: `gtu integrate --uninstall`, then delete `%LOCALAPPDATA%\spare-gpu`.
 

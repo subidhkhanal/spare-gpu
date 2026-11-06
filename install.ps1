@@ -8,15 +8,33 @@
 # except, possibly, the git install (Windows may ask).
 #
 # Options, as environment variables set before running it:
-#   SPARE_GPU_HOME    where to install (default %LOCALAPPDATA%\spare-gpu)
-#   SPARE_GPU_SOURCE  what to install (default: the latest version on GitHub, as a zip)
+#   SPARE_GPU_HOME     where to install (default %LOCALAPPDATA%\spare-gpu)
+#   SPARE_GPU_VERSION  which release to install, e.g. 0.1.0 (default: the newest release on GitHub)
+#   SPARE_GPU_SOURCE   what to install instead, anything pip accepts (overrides SPARE_GPU_VERSION)
 #   SPARE_GPU_SKIP_INTEGRATE=1  install only; don't touch BharatCode's config
 #   SPARE_GPU_SKIP_PATH=1       don't add gtu to your PATH
+
+function Resolve-SpareGpuSource($repo) {
+    # A known version, not whatever master holds at this minute: the newest tagged release.
+    if ($env:SPARE_GPU_SOURCE) { return $env:SPARE_GPU_SOURCE }
+    if ($env:SPARE_GPU_VERSION) { return "https://github.com/$repo/archive/refs/tags/v$($env:SPARE_GPU_VERSION).zip" }
+    $tag = $null
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'spare-gpu-installer' }
+        $tag = $release.tag_name
+    } catch { $tag = $null }
+    if ($tag) {
+        Write-Host "spare-gpu: installing release $tag"
+        return "https://github.com/$repo/archive/refs/tags/$tag.zip"
+    }
+    Write-Host 'spare-gpu: no release is published yet, so this installs the development version from master.' -ForegroundColor Yellow
+    return "https://github.com/$repo/archive/refs/heads/master.zip"
+}
 
 function Install-SpareGpu {
     $ErrorActionPreference = 'Stop'
     $home_ = if ($env:SPARE_GPU_HOME) { $env:SPARE_GPU_HOME } else { Join-Path $env:LOCALAPPDATA 'spare-gpu' }
-    $source = if ($env:SPARE_GPU_SOURCE) { $env:SPARE_GPU_SOURCE } else { 'https://github.com/subidhkhanal/spare-gpu/archive/refs/heads/master.zip' }
+    $source = Resolve-SpareGpuSource 'subidhkhanal/spare-gpu'
 
     function Say($text) { Write-Host "spare-gpu: $text" }
     function Fail($text) { Write-Host "spare-gpu: $text" -ForegroundColor Red; throw 'spare-gpu install stopped' }
@@ -89,6 +107,9 @@ function Install-SpareGpu {
     & $venvPython -m pip install --quiet --disable-pip-version-check --force-reinstall --no-deps $source
     if ($LASTEXITCODE -ne 0) { Fail 'pip could not install spare-gpu (see above).' }
     $gtu = Join-Path $venv 'Scripts\gtu.exe'
+    $installed = (& $gtu --version 2>$null | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0 -or -not $installed) { Fail 'spare-gpu was installed but `gtu --version` did not run (see above).' }
+    Say "installed spare-gpu $installed"
 
     # 4. `gtu` on your PATH, for new windows (`gtu integrate --uninstall`, `gtu list`, ...)
     $scripts = Split-Path $gtu
@@ -108,10 +129,13 @@ function Install-SpareGpu {
     if ($LASTEXITCODE -ne 0) { Fail 'gtu integrate reported a problem (see above).' }
 
     Write-Host ''
-    Write-Host 'spare-gpu is installed.' -ForegroundColor Green
+    Write-Host "spare-gpu $installed is installed." -ForegroundColor Green
     Write-Host 'Now fully close BharatCode Desktop and open it again, then type /auto in a chat, for example:'
     Write-Host '  /auto write docs for src/utils.py'
     Write-Host 'To remove it later: gtu integrate --uninstall, then delete' $home_
 }
 
-try { Install-SpareGpu } catch { if ($_.Exception.Message -ne 'spare-gpu install stopped') { Write-Host "spare-gpu: $($_.Exception.Message)" -ForegroundColor Red } }
+# SPARE_GPU_NO_RUN=1 loads the functions without installing (the tests parse the script that way).
+if ($env:SPARE_GPU_NO_RUN -ne '1') {
+    try { Install-SpareGpu } catch { if ($_.Exception.Message -ne 'spare-gpu install stopped') { Write-Host "spare-gpu: $($_.Exception.Message)" -ForegroundColor Red } }
+}
