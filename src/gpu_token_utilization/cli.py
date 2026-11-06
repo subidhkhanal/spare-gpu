@@ -790,6 +790,27 @@ def mcp(
     serve(folder or Path.cwd(), pack=with_pack)
 
 
+@app.command("pack-check")
+def pack_check(
+    channel: str = typer.Option("stable", "--channel", help="Which BharatCode's config to check: stable, beta, dev or local."),
+) -> None:
+    """Check the pack's install without starting BharatCode: the MCP entry, the settings file, every
+    command and agent file, the model ids, helpers and tools hidden, and conflicts with your own
+    settings. Exit code 1 on a FAIL. The checks that need Desktop stay in research/*/manual-check.md."""
+    from .pack import check
+
+    if channel not in bc_config.CHANNELS:
+        _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)}.")
+    folder, how = _channel_folder(channel)
+    findings = check.run(folder, how) + check.check_channels()
+    for finding in findings:
+        typer.echo(str(finding))
+    verdict = check.worst(findings)
+    typer.echo(f"Result: {verdict}" + ("" if verdict == "PASS" else "; the checks that need Desktop are in research/*/manual-check.md"))
+    if verdict == "FAIL":
+        raise typer.Exit(1)
+
+
 @app.command("context-report")
 def context_report(
     days: int = typer.Option(7, "--days", help="Days of BharatCode usage to show (needs its CLI)."),
