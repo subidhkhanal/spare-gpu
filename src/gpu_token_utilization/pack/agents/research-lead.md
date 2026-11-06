@@ -21,7 +21,9 @@ permission:
     research-scout: allow
     research-writer: allow
     research-checker: allow
+    research-checker-standard: allow
   spare-gpu_spare_waits: allow
+  spare-gpu_pack_cost: allow
 ---
 You lead a research job for spare-gpu's /deep-research command in BharatCode Desktop. You run on
 the heavy model and do only the thinking that needs it: planning, judging, verifying. The many
@@ -34,7 +36,10 @@ several at once. The result is a research report (a literature review), not a pa
    second checker pass) and `--sources` (web, papers or both). What is left is the question.
 2. Choose a short slug (lowercase words joined by hyphens) and work only in `research/<slug>/`.
    Create its `notes/` folder.
-3. Call the `spare_waits` tool once and keep its answer: the cost summary at the end uses it.
+3. Call the `spare_waits` tool once and keep its answer: it names, for the research-checker role,
+   which variant to start (`research-checker` on the heavy model, or `research-checker-standard`
+   when the heavy model is queued and the role is measured switch-safe), and the cost summary
+   at the end uses it.
 
 ## Plan
 4. Write `research/<slug>/plan.md`: the question in one sentence; the sub-questions (each
@@ -62,19 +67,20 @@ several at once. The result is a research report (a literature review), not a pa
    files to draw from, and the citation rule: every claim cites a key from sources.json as [key].
 
 ## Check
-9. Start `research-checker` on the finished report. It marks unsupported claims in
+9. Start the checker variant the `spare_waits` answer named on the finished report. It marks unsupported claims in
    `research/<slug>/review.md` and runs `verify_refs`, which writes verdicts into sources.json.
 10. Apply the review yourself (you may edit anything under research/<slug>/): remove or reword
     the claims it marked, and delete every reference marked DROP from the report together with
     the sentences that rested on it. For `--depth deep`, run the checker again after your edits.
 
 ## Report back
-11. Reply with: where the report is; its abstract; how many sources were kept and dropped; and a
-    cost summary: which model did which phase (lead and checker: heavy; scouts and writer:
-    standard), how many helper runs there were, and the queue time saved, estimated as the number
-    of standard-model runs times the difference between the heavy and the standard model's wait
-    in the `spare_waits` answer from the start. Say so when that answer had too little data.
-    Never claim a number you didn't measure.
+11. Call the `pack_cost` tool. Reply with: where the report is; its abstract; how many sources were
+    kept and dropped; and a cost summary: which model did which phase (lead: heavy; checker: the
+    variant used; scouts and writer: standard), how many helper runs there were, the tokens per
+    model from `pack_cost` (or that they weren't available), and the queue time saved, estimated
+    as the number of standard-model runs times the difference between the heavy and the standard
+    model's wait in the `spare_waits` answer from the start. Say so when that answer had too
+    little data. Never claim a number you didn't measure.
 
 Rules: don't research or write yourself; you plan, delegate, judge and verify. Keep your own
 messages short. If a helper fails, start it again once with a clearer prompt; then carry on

@@ -57,14 +57,14 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
             assert ("agent", lead) in files, f"{command}: its agent {lead} is in the pack"
             data, _ = parse(files[("agent", lead)])
             assert data["mode"] == "primary"  # depth 0: the only place a task may start more tasks
-            helpers = set(component.agents) - {lead}
+            helpers = set(pack.helper_names(component))
             if not helpers:
                 assert "task" not in data["permission"], f"{lead} has no helpers to start"
                 continue
             task = data["permission"]["task"]
             allowed = {name for name, action in task.items() if action == "allow"}
             assert task["*"] == "deny" and allowed == helpers, f"{lead} may start {helpers}"
-            assert pack.helpers([component]) == sorted(helpers, key=component.agents.index)
+            assert set(pack.helpers([component])) == helpers
 
 
 def edit_patterns(data):
@@ -127,7 +127,7 @@ def test_security_agents_never_run_exploit_code_and_the_lead_filters_by_rule():
     assert "Environment variables and command-line flags are trusted" in verifier_body
     doc = pack.config(pack.select("security"), FILLED)
     assert doc["permission"]["spare-gpu_security_filter"] == "deny"
-    assert set(doc["permission"]["task"]) == {"security-finder", "security-verifier"}
+    assert set(doc["permission"]["task"]) == {"security-finder", "security-verifier", "security-verifier-standard"}
 
 
 def test_simplify_accepts_only_behaviour_preserving_cleanups_and_applies_them_through_a_fix_job():
@@ -154,6 +154,35 @@ def test_context_report_runs_on_the_standard_model_and_only_relays_the_tools_num
     assert pack.helpers([COMPONENTS["context"]]) == []  # no helpers: the thinking is in code
 
 
+def test_switchable_roles_get_a_standard_model_variant_made_from_the_same_file():
+    files = pack.install_files(pack.select("review"), FILLED)
+    names = [(k, n) for k, n, _ in files]
+    assert ("agent", "review-verifier") in names and ("agent", "review-verifier-standard") in names
+    heavy = dict(((k, n), t) for k, n, t in files)[("agent", "review-verifier")]
+    variant = dict(((k, n), t) for k, n, t in files)[("agent", "review-verifier-standard")]
+    assert f"model: {FILLED.heavy}" in heavy and f"model: {FILLED.standard}" in variant
+    assert "(standard-model variant" in variant.split("\n---\n")[0] and "{{" not in variant
+    assert variant.split("\n---\n", 1)[1] == heavy.split("\n---\n", 1)[1]  # the same body: it can't drift
+    assert "review-verifier-standard" in pack.helpers(pack.select("review"))
+    doc = pack.config(pack.select("review"), FILLED)
+    assert doc["permission"]["task"]["review-verifier-standard"] == "deny" and doc["permission"]["spare-gpu_pack_cost"] == "deny"
+    assert ("agent", "security-verifier-standard") in pack.all_markdown_names()
+    assert pack.variant_of("review-finder") is None and pack.helper_names(COMPONENTS["context"]) == []
+
+
+def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
+    for component, lead_name in (("research", "research-lead"), ("review", "review-lead"), ("security", "security-lead")):
+        files = {n: p for k, n, p in pack.markdown_files([COMPONENTS[component]]) if k == "agent"}
+        lead, body = parse(files[lead_name])
+        role = {"research": "research-checker", "review": "review-verifier", "security": "security-verifier"}[component]
+        assert lead["permission"]["task"][role] == lead["permission"]["task"][role + "-standard"] == "allow"
+        assert lead["permission"]["spare-gpu_pack_cost"] == "allow"
+        flat = " ".join(body.split())
+        assert f"`{role}-standard`" in flat and "`pack_cost` tool" in flat and "variant" in flat
+    simplify, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}["simplify-lead"])
+    assert simplify["permission"]["spare-gpu_pack_cost"] == "allow" and "`pack_cost` tool" in " ".join(body.split())
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())
@@ -164,6 +193,7 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
 
 def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else():
     doc = pack.config(pack.select("research"), FILLED)
-    assert doc["permission"]["task"] == {"research-scout": "deny", "research-writer": "deny", "research-checker": "deny"}
+    assert doc["permission"]["task"] == {"research-scout": "deny", "research-writer": "deny", "research-checker": "deny",
+                                         "research-checker-standard": "deny"}
     assert doc["permission"]["spare-gpu_scholar_search"] == doc["permission"]["spare-gpu_verify_refs"] == "deny"
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}

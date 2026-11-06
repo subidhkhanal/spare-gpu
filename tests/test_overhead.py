@@ -99,6 +99,18 @@ def test_usage_comes_from_the_cli_or_is_none():
     assert overhead.usage(7, command=echo) == "Total tokens: 12,345\nqwen: 9,000"
 
 
+def test_bharatcode_stats_model_usage_is_parsed_with_its_rounding():
+    from test_mcp import STATS
+
+    figures = overhead.parse_stats(STATS)
+    assert set(figures) == {"bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b"}
+    deepseek = figures["bharatcode/deepseek-v4.1-flash"]
+    assert deepseek["messages"] == 12 and deepseek["input"] == 120_500 and deepseek["cache_read"] == 40_000
+    assert deepseek["tokens"] == 120_500 + 8_200 + 40_000
+    assert overhead.parse_stats("no model usage section at all") == {}
+    assert overhead._stats_number("1.2M") == 1_200_000 and overhead._stats_number("$0.0012") == 0.0012
+
+
 def test_apply_backs_the_file_up_first_and_changes_only_the_switch(setup):
     folder, home, project = setup
     report = overhead.inventory(project, home=home)

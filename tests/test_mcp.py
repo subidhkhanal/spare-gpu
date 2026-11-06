@@ -20,7 +20,7 @@ from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "context_report"}  # only for a server started with `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "context_report", "pack_cost"}  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -261,6 +261,61 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert listed["scholar_search"].input_schema["required"] == ["query"]
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
     assert "never invent any" in listed["context_report"].description and not listed["context_report"].input_schema.get("required")
+
+
+STATS = """┌────────────────────────────────────────────────────────┐
+│                      MODEL USAGE                       │
+├────────────────────────────────────────────────────────┤
+│ bharatcode/deepseek-v4.1-flash                         │
+│   Messages                                         12 │
+│   Input Tokens                                  120.5K │
+│   Output Tokens                                   8.2K │
+│   Cache Read                                     40.0K │
+│   Cache Write                                       0 │
+│   Cost                                        $0.0000 │
+├────────────────────────────────────────────────────────┤
+│ bharatcode/qwen-3.8-27b                                │
+│   Messages                                         30 │
+│   Input Tokens                                  300.0K │
+│   Output Tokens                                  20.0K │
+│   Cache Read                                        0 │
+│   Cache Write                                       0 │
+│   Cost                                        $0.0000 │
+└────────────────────────────────────────────────────────┘
+"""
+
+
+def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_delta(tools, git_repo, fake, monkeypatch):
+    from gpu_token_utilization import overhead
+
+    fake.usage_busy(1)
+    plain = tools.waits()
+    assert "Pack roles" not in plain  # a plain server says nothing about the pack
+    later = overhead.parse_stats(STATS.replace("120.5K", "150.5K").replace("30 │", "34 │").replace("300.0K", "420.0K"))
+    readings = iter([overhead.parse_stats(STATS), later, later])  # the snapshot, pack_cost, and the second waits call
+    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: next(readings))
+    text = tools.waits(roles=True)
+    assert "Pack roles, which variant to start now" in text
+    for role in ("research-checker", "review-verifier", "security-verifier"):
+        assert f"- {role}: start `{role}` (" in text  # unmeasured roles stay on the heavy model
+    assert (git_repo / ".gtu" / "pack-usage.json").is_file()
+    cost = tools.pack_cost()
+    assert cost.startswith("Tokens used on this machine since the spare_waits call 0 min ago")
+    assert "- DeepSeek V4.1 Flash: +30,000 tokens in 0 message(s)" in cost
+    assert "- Qwen 3.8 27B: +120,000 tokens in 4 message(s)" in cost
+    monkeypatch.setenv("GTU_SWITCH_SAFE", "review-verifier")  # measured (or marked) switch-safe: the router may move it
+    routed = tools.waits(roles=True)
+    assert "- review-verifier: start `" in routed and "- research-checker: start `research-checker` (" in routed
+
+
+def test_pack_cost_without_a_snapshot_or_a_cli_says_so(tools, git_repo, monkeypatch):
+    from gpu_token_utilization import overhead
+
+    assert tools.pack_cost().startswith("No usage snapshot")
+    (git_repo / ".gtu").mkdir(exist_ok=True)
+    (git_repo / ".gtu" / "pack-usage.json").write_text('{"at": "2026-11-06T10:00:00+00:00", "models": {}}', encoding="utf-8")
+    monkeypatch.setattr(overhead, "model_usage", lambda days=1, command=None: None)
+    assert "no token figures" in tools.pack_cost()
 
 
 def test_context_report_through_the_tool(git_repo, fake, monkeypatch):

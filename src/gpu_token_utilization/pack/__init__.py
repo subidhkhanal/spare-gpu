@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +28,12 @@ SCHEMA = "https://opencode.ai/config.json"
 # marketplace's Cloudflare-docs entry does it.
 EXA_MCP = {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}
 SERVER = "spare-gpu"  # the MCP server the pack's tools live in; BharatCode names its tools <server>_<tool>
+# Heavy-model roles that also ship as a standard-model variant (<name>-standard). The lead starts
+# the variant the spare_waits tool names: the router moves a role down only when the role is
+# measured switch-safe in routing_policy.json and the heavy model's wait is longer.
+SWITCHABLE = ("research-checker", "review-verifier", "security-verifier")
+VARIANT_SUFFIX = "-standard"
+SHARED_TOOLS = ("pack_cost",)  # pack-only tools every lead uses
 
 
 @dataclass(frozen=True)
@@ -43,12 +50,12 @@ COMPONENTS: dict[str, Component] = {
     "split": Component("split", "titles and the explore subagent on the standard model"),
     "research": Component("research", "/deep-research", ("deep-research",),
                           ("research-lead", "research-scout", "research-writer", "research-checker"),
-                          ("scholar_search", "verify_refs"), {"exa": EXA_MCP}),
+                          ("scholar_search", "verify_refs", *SHARED_TOOLS), {"exa": EXA_MCP}),
     "review": Component("review", "/code-review", ("code-review",),
-                        ("review-lead", "review-finder", "review-verifier")),
+                        ("review-lead", "review-finder", "review-verifier"), SHARED_TOOLS),
     "security": Component("security", "/security-review", ("security-review",),
-                          ("security-lead", "security-finder", "security-verifier"), ("security_filter",)),
-    "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder")),
+                          ("security-lead", "security-finder", "security-verifier"), ("security_filter", *SHARED_TOOLS)),
+    "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder"), SHARED_TOOLS),
     "context": Component("context", "/context-report", ("context-report",), ("context-lead",), ("context_report",)),
 }
 
@@ -145,21 +152,67 @@ def markdown_files(components, source: Path = PACK_DIR) -> list[tuple[str, str, 
     return found
 
 
+def variant_of(name: str) -> str | None:
+    """The standard-model variant's name for a switchable role, else None."""
+    return name + VARIANT_SUFFIX if name in SWITCHABLE else None
+
+
+def helper_names(component: Component) -> list[str]:
+    """Every agent of the component that isn't its lead, variants included."""
+    lead = {name for name in component.agents if name.endswith("-lead")}
+    names = []
+    for name in component.agents:
+        if name in lead:
+            continue
+        names.append(name)
+        if variant_of(name):
+            names.append(variant_of(name))
+    return names
+
+
 def all_markdown_names() -> list[tuple[str, str]]:
-    """(kind, name) of every file the pack can install, whichever components exist yet."""
-    return [(kind, name) for c in COMPONENTS.values() for kind, names in (("command", c.commands), ("agent", c.agents))
-            for name in names]
+    """(kind, name) of every file the pack can install, variants included, whichever components exist yet."""
+    out = []
+    for c in COMPONENTS.values():
+        out += [("command", name) for name in c.commands]
+        for name in c.agents:
+            out.append(("agent", name))
+            if variant_of(name):
+                out.append(("agent", variant_of(name)))
+    return out
 
 
 def helpers(components, source: Path = PACK_DIR) -> list[str]:
-    """The pack's subagents: every agent file whose mode isn't primary. BharatCode describes
-    every subagent to every agent on every step, so these are denied globally and allowed only
-    inside the pack's lead agents."""
+    """The pack's subagents: every agent file whose mode isn't primary, and the standard-model
+    variants. BharatCode describes every subagent to every agent on every step, so these are
+    denied globally and allowed only inside the pack's lead agents."""
     names = []
     for kind, name, path in markdown_files(components, source):
         if kind == "agent" and frontmatter(path.read_text(encoding="utf-8")).get("mode") != "primary":
             names.append(name)
+            if variant_of(name):
+                names.append(variant_of(name))
     return names
+
+
+def variant_text(raw: str) -> str:
+    """A switchable agent's file as its standard-model variant: the model placeholder swapped, and
+    the description saying so. Made at install time from the one source file, so the two can't drift."""
+    text = raw.replace(HEAVY, STANDARD)
+    return re.sub(r"^(description: .*)$", r"\1 (standard-model variant: started when the heavy model is queued and "
+                  "the role is measured switch-safe)", text, count=1, flags=re.M)
+
+
+def install_files(components, models: Models, source: Path = PACK_DIR) -> list[tuple[str, str, str]]:
+    """(kind, name, text) of everything to write into the config folder: each command and agent
+    with the model ids filled in, plus the standard-model variant of each switchable agent."""
+    out = []
+    for kind, name, path in markdown_files(components, source):
+        raw = path.read_text(encoding="utf-8")
+        out.append((kind, name, models.fill(raw)))
+        if kind == "agent" and variant_of(name):
+            out.append((kind, variant_of(name), models.fill(variant_text(raw))))
+    return out
 
 
 # --- the pack's config file ---------------------------------------------------------------------

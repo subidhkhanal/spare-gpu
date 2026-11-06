@@ -120,7 +120,8 @@ def test_bharatcodes_plan_refusal_is_recognised():
 def test_the_shipped_policy_is_well_formed(monkeypatch):
     monkeypatch.delenv(router.POLICY_ENV)
     policy = json.loads(router.POLICY_FILE.read_text(encoding="utf-8"))
-    assert set(policy["types"]) == {"tests", "docs", "review"}
+    assert set(policy["types"]) == {"tests", "docs", "review", "research-checker", "review-verifier", "security-verifier"}
+    assert all(policy["types"][role] == "unmeasured" for role in ("research-checker", "review-verifier", "security-verifier"))
     assert set(policy["types"].values()) <= {"switch-safe", "keep-preferred", "unmeasured"}
     for kind, verdict in policy["types"].items():
         # a measured verdict always comes with the evidence behind it

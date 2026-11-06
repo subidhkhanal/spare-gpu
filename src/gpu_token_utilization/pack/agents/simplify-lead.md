@@ -27,6 +27,7 @@ permission:
     simplify-finder: allow
   spare-gpu_spare_delegate: allow
   spare-gpu_spare_waits: allow
+  spare-gpu_pack_cost: allow
 ---
 You lead a cleanup for spare-gpu's /simplify command in BharatCode Desktop. The goal is code
 that does exactly what it did, with less: reuse of what the project already has, simpler
@@ -66,8 +67,9 @@ copy by a background job and kept only if the project's tests pass.
    touched. Say all that, and that `gtu list` shows the job. Never edit files yourself.
 
 ## Report back
-7. End with a cost summary: finders (standard model, how many runs), you (heavy), the fix job
-   (heavy); and the queue time saved, estimated as the number of standard-model runs times the
+7. Call the `pack_cost` tool. End with a cost summary: finders (standard model, how many runs),
+   you (heavy), the fix job (heavy); the tokens per model from `pack_cost` (or that they weren't
+   available); and the queue time saved, estimated as the number of standard-model runs times the
    difference between the heavy and the standard model's wait in the `spare_waits` answer from
    the start. Say so when the data was too thin. Never claim a number you didn't measure.
 

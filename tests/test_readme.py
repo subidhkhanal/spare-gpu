@@ -19,8 +19,12 @@ def test_questions_are_routed_by_design_and_the_readme_says_so():
 
 
 def test_the_readme_names_exactly_the_measured_switch_safe_job_types():
-    safe = {kind for kind, verdict in POLICY["types"].items() if verdict == "switch-safe"}
+    jobs = {kind: verdict for kind, verdict in POLICY["types"].items() if kind in ("tests", "docs", "review")}
+    safe = {kind for kind, verdict in jobs.items() if verdict == "switch-safe"}
     assert safe == {"docs"}, "the README's wording describes docs as the one measured type; update both together"
     assert "docs jobs, the one job type where Qwen was measured to be just as good" in README
-    for kept in set(POLICY["types"]) - safe:
+    roles = set(POLICY["types"]) - set(jobs)  # the pack's switchable roles: unmeasured until the benchmarks run
+    assert roles == {"research-checker", "review-verifier", "security-verifier"}
+    assert all(POLICY["types"][r] == "unmeasured" for r in roles) and "standard-model variant" in README
+    for kept in set(jobs) - safe:
         assert kept.rstrip("s") in "tests and reviews stay on DeepSeek", kept

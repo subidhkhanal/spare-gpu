@@ -191,8 +191,7 @@ def _install_pack(pad: str, channel: str, only: str | None, lite: bool) -> bool:
         return False
     said = {"added": "Wrote", "updated": "Updated", "unchanged": "Already up to date:"}[outcome]
     typer.echo(f"{pad}{said} the pack's settings in {path}: {pack.describe(doc)}.")
-    files = [(kind, name, models.fill(source.read_text(encoding="utf-8")))
-             for kind, name, source in pack.markdown_files(components)]
+    files = pack.install_files(components, models)
     try:
         outcomes = bc_config.install_markdown(folder, files)
     except OSError as exc:

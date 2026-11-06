@@ -1,11 +1,14 @@
 {
   "version": 1,
   "date": "2026-11-05",
-  "note": "Measured by scripts/eval_models.py on 9 task(s); raw results in results-2026-11-05.json. Switch-safe: 95% paired-bootstrap lower bound of mean(Qwen - DeepSeek) >= -5% of DeepSeek's mean. Re-run when BharatCode changes its models.",
+  "note": "Measured by scripts/eval_models.py on 9 task(s); raw results in results-2026-11-05.json. Switch-safe: 95% paired-bootstrap lower bound of mean(Qwen - DeepSeek) >= -5% of DeepSeek's mean. Re-run when BharatCode changes its models. The pack's switchable roles (research-checker, review-verifier, security-verifier) are listed as unmeasured until scripts/eval_research.py and scripts/eval_review.py have run; a role moves to its -standard variant only when measured switch-safe (or marked so by hand in .gtu/switch-safe or GTU_SWITCH_SAFE).",
   "types": {
     "tests": "keep-preferred",
     "docs": "switch-safe",
-    "review": "keep-preferred"
+    "review": "keep-preferred",
+    "research-checker": "unmeasured",
+    "review-verifier": "unmeasured",
+    "security-verifier": "unmeasured"
   },
   "evidence": {
     "tests": {

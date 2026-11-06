@@ -10,14 +10,15 @@ plain text for the agent to relay, and none blocks: long work is handed to a bac
 
 from __future__ import annotations
 
+import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, desktop, freerun, overhead, refs, router, runner, runstate, scholar, security, waits, worktree
+from . import __version__, actions, desktop, freerun, overhead, pack, refs, router, runner, runstate, scholar, security, waits, worktree
 from .api import ApiKeyMissing, find_api_key
 from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
@@ -203,10 +204,73 @@ class SpareTools:
                 f"{worktree.OUTPUT_DIR}/.")
         return text + (f"\nNote: {outcome.note}" if outcome.note else "")
 
-    def waits(self) -> str:
+    def waits(self, roles: bool = False) -> str:
         path = db_path(self._root())
         with Store(path if path.exists() else ":memory:") as store, self._http() as http:  # needs no jobs
-            return waits.describe(waits.views(store, http))
+            views = waits.views(store, http)
+        text = waits.describe(views)
+        if roles:
+            text += "\n" + self._role_lines(views, path.parent if path.exists() else None)
+            self._snapshot_usage()
+        return text
+
+    def _role_lines(self, views, folder: Path | None) -> str:
+        """For each switchable pack role: which variant to start now. The router decides as it does
+        for jobs: down to the standard model only when the role is measured switch-safe and that
+        saves enough waiting; up is always allowed."""
+        heavy = router.preferred_model(router.DELEGATE_PREFERRED)
+        state = router.State.load(folder) if folder else router.State()
+        lines = ["Pack roles, which variant to start now (routing_policy.json and the waits above decide):"]
+        for role in pack.SWITCHABLE:
+            choice = router.choose(role, heavy, views, state)
+            agent = pack.variant_of(role) if choice.routed else role
+            lines.append(f"- {role}: start `{agent}` ({choice.reason})")
+        if folder:
+            state.save(folder)
+        return "\n".join(lines)
+
+    # --- the pack's cost figures: a usage snapshot at spare_waits, the delta at pack_cost -----------
+
+    def _usage_file(self) -> Path:
+        return self._root() / ".gtu" / "pack-usage.json"
+
+    def _snapshot_usage(self) -> None:
+        figures = overhead.model_usage(days=1)
+        if figures is None:
+            return
+        try:
+            self._usage_file().parent.mkdir(parents=True, exist_ok=True)
+            self._usage_file().write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                                      "models": figures}), encoding="utf-8")
+        except OSError:
+            pass
+
+    def pack_cost(self) -> str:
+        try:
+            snapshot = json.loads(self._usage_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ("No usage snapshot: call spare_waits at the start of the command, then pack_cost at the end. "
+                    "Say the token figures weren't available.")
+        now_figures = overhead.model_usage(days=1)
+        if now_figures is None:
+            return ("BharatCode's CLI isn't available here, so there are no token figures; Desktop's session "
+                    "detail has them. Say so instead of estimating.")
+        started = datetime.fromisoformat(snapshot["at"])
+        minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+        lines = [f"Tokens used on this machine since the spare_waits call {minutes:.0f} min ago, by model "
+                 "(from `bharatcode stats --models`, rounded by BharatCode to about a hundred tokens; every "
+                 "session on this machine in that time counts):"]
+        before = snapshot.get("models") or {}
+        for model, figures in now_figures.items():
+            earlier = before.get(model) or {}
+            delta = figures["tokens"] - earlier.get("tokens", 0.0)
+            messages = figures["messages"] - earlier.get("messages", 0.0)
+            if delta <= 0 and messages <= 0:
+                continue
+            lines.append(f"- {waits.name(model)}: +{delta:,.0f} tokens in {messages:.0f} message(s)")
+        if len(lines) == 1:
+            lines.append("- nothing new was recorded yet (BharatCode writes its stats when a session ends).")
+        return "\n".join(lines)
 
     def ask(self, question: str, your_model: str | None = None) -> str:
         """Answer a general question on whichever model starts it sooner, and say which and why.
@@ -372,7 +436,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         busy right now?", "how long is DeepSeek's queue?", "which model is faster right now?". It
         only reports; to hand a task to the faster model use spare_delegate. For why an
         already-queued job hasn't started, use spare_work_status."""
-        return tools.waits()
+        return tools.waits(roles=pack)
 
     @server.tool(annotations=notes(True, world=True))
     def spare_ask(question: str, your_model: str | None = None) -> str:
@@ -451,6 +515,15 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
                 measure: Also run one tiny `bharatcode run` to measure the real overhead (costs a model call; default off).
             """
             return tools.context_report(days, measure)
+
+        @server.tool(annotations=notes(True))
+        def pack_cost() -> str:
+            """The tokens each model used on this machine since the spare_waits call that started the
+            pack command, from `bharatcode stats --models`: for the cost summary at the end of
+            /deep-research, /code-review, /security-review and /simplify. Rounded by BharatCode to
+            about a hundred tokens, and counting every session on this machine in that time. When it
+            has no figures, say so; never estimate them."""
+            return tools.pack_cost()
 
     @server.tool(annotations=notes(False, world=True))
     def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,
