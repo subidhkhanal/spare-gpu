@@ -15,6 +15,26 @@ def checks(gate, fake, n):
     return out
 
 
+def test_a_bypass_reading_never_stands_in_for_a_gated_decision(fake, make_gate):
+    # an ungated `gtu start` is running under full load and records "bypass" readings (always open)
+    fake.usage_busy(2)
+    gate = make_gate()
+    assert gate.check_bypassed().open is True
+    assert gate.check().open is False  # a gated consumer (run-when-free, spare_work_status) takes its own reading
+    assert fake.usage_calls == 2
+    fake.clock.advance(30)
+    assert gate.check().open is False and fake.usage_calls == 2  # and reuses its own, not the bypass one
+
+
+def test_a_bypass_reading_between_gated_ones_keeps_the_streaks(fake, make_gate):
+    fake.usage_quiet(5)
+    gate = make_gate()
+    assert checks(gate, fake, 3) == [False, False, True]
+    gate.check_bypassed()  # the ungated runner reads in between
+    fake.clock.advance(60)
+    assert gate.check().open is True  # still open: three quiet readings in a row, the bypass one doesn't reset them
+
+
 def test_opens_only_after_three_quiet_readings(fake, make_gate):
     fake.usage_quiet(3)
     assert checks(make_gate(), fake, 3) == [False, False, True]

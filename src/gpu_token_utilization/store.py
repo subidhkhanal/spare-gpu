@@ -499,8 +499,11 @@ class Store:
         reading.id = cur.lastrowid
         return reading
 
-    def last_gate_reading(self) -> GateReading | None:
-        row = self.conn.execute("SELECT * FROM gate_readings ORDER BY id DESC LIMIT 1").fetchone()
+    def last_gate_reading(self, exclude_bypass: bool = False) -> GateReading | None:
+        """The newest reading; with `exclude_bypass`, the newest one that carries a real decision
+        (an ungated `gtu start` records "bypass" readings, which are always marked open)."""
+        where = "WHERE source != 'bypass'" if exclude_bypass else ""
+        row = self.conn.execute(f"SELECT * FROM gate_readings {where} ORDER BY id DESC LIMIT 1").fetchone()
         return GateReading(**dict(row)) if row else None
 
     def request_summary(self, job_id: str | None = None) -> dict:

@@ -27,6 +27,41 @@ def make_scheduler(store, gate, client, fake, plans, isolate=False):
     return Scheduler(store, gate, client, plans=plans, sleep=fake.clock.sleep, isolate=isolate)
 
 
+def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinning(fake, store, client, make_gate, job_repo):
+    from gpu_token_utilization.budget import BudgetExceeded
+
+    def too_big(ctx):
+        raise BudgetExceeded("not enough token budget left for the review")  # as review() says before sending
+
+    job = store.add_job("review", "big.py", job_repo)
+    other = store.add_job("docs", "a.py", job_repo)
+    calls, logs = [], []
+    plans = {**counting_plan(["one"], calls), "review": [("review", too_big)]}  # the review step is the one that can't fit
+    fake.usage_quiet(3)
+    scheduler = Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
+    assert scheduler.run() == 1  # the docs job ran; the review was paused once and left alone
+    assert store.get_job(job.id).status == "paused" and store.get_job(other.id).status == "done"
+    assert sum("paused, not enough token budget" in line for line in logs) == 1
+    assert any("Nothing left that fits the token budgets" in line for line in logs)
+
+
+def test_anything_else_that_breaks_a_step_fails_that_job_and_the_runner_carries_on(fake, store, client, make_gate, job_repo):
+    import xml.etree.ElementTree as ET
+
+    def broken(ctx):
+        raise ET.ParseError("junit.xml: no element found")  # a truncated report after a killed pytest
+
+    job = store.add_job("tests", "a.py", job_repo)
+    other = store.add_job("docs", "b.py", job_repo)
+    calls, logs = [], []
+    plans = {"tests": [("write", broken)], "docs": counting_plan(["one"], calls)["docs"]}
+    scheduler = Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
+    assert scheduler.run() == 1
+    assert store.get_job(job.id).status == "failed" and store.get_job(other.id).status == "done"
+    assert store.steps(job.id)[0]["output"] == "ParseError: junit.xml: no element found"
+    assert any("failed unexpectedly (ParseError" in line and "carry on" in line for line in logs)
+
+
 def test_pauses_while_busy_and_resumes_when_quiet(fake, store, client, make_gate, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     fake.usage_busy(4)  # then the default reply: quiet

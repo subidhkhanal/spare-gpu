@@ -205,6 +205,8 @@ class Scheduler:
                 return completed
             runnable = []
             for job in self.pending_jobs():
+                if job.id in paused_for_budget:  # a step already said it can't fit: don't pick it up again
+                    continue
                 if self.cli_missing and job.kind in CLI_KINDS:
                     if job.id not in waiting_for_cli:
                         waiting_for_cli.add(job.id)
@@ -242,6 +244,12 @@ class Scheduler:
             if outcome == "stopped":
                 self._stop_now()
                 return completed
+            if outcome == "budget":
+                # The step couldn't start or finish within what's left (e.g. a review whose prompt
+                # alone is bigger than the remaining budget). The raw totals may still be under
+                # the budgets, so without this the job would be picked up again at once, forever.
+                paused_for_budget.add(job.id)
+                continue
             if outcome == "done":
                 completed += 1
                 if max_steps is not None and completed >= max_steps:
@@ -261,7 +269,7 @@ class Scheduler:
                                           warn=lambda note: self._log(f"Job {job.id}: {note}"))
                 if not job.base_commit:  # first run: remember the copy's starting point, for reports
                     self.store.set_base_commit(job.id, worktree._git(workdir, "rev-parse", "HEAD").stdout.strip())
-            except worktree.GitError as exc:
+            except (worktree.GitError, OSError) as exc:
                 self.store.set_status(job.id, "failed")
                 self._log(f"Job {job.id}: cannot start: {exc}")
                 return "failed"
@@ -337,6 +345,18 @@ class Scheduler:
             self.store.set_step(step["id"], "failed", str(exc))
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
+            return "failed"
+        except Exception as exc:  # noqa: BLE001  anything else (a git call, a truncated junit.xml, a locked file)
+            # fails this job and is written down; the runner carries on with the queue instead of
+            # dying with a traceback and leaving every job marked running for the night.
+            if self.should_stop():
+                self._undo_step(job, workdir)
+                self.store.set_status(job.id, "paused")
+                return "stopped"
+            what = f"{type(exc).__name__}: {exc}"
+            self.store.set_step(step["id"], "failed", what)
+            self._finish(job, "failed")
+            self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed unexpectedly ({what}); the other jobs carry on.")
             return "failed"
 
         if self.isolate:

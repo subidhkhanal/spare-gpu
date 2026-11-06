@@ -184,9 +184,11 @@ class Gate:
         self._http.close()
 
     def check(self, allow_probe: bool = True) -> Decision:
-        """Current decision. Takes a new reading at most once per poll interval."""
+        """Current decision. Takes a new reading at most once per poll interval. Readings an
+        ungated `gtu start` records ("bypass") are always marked open and carry no streaks, so
+        they never stand in for a decision here."""
         now = self._now()
-        last = self.store.last_gate_reading()
+        last = self.store.last_gate_reading(exclude_bypass=True)
         if last is not None:
             age = (now - _parse_ts(last.taken_at)).total_seconds()
             if 0 <= age < self.cfg.poll_interval:
@@ -228,7 +230,7 @@ class Gate:
         return Decision(True, reading, self.cfg.poll_interval, self.cfg, bypassed=True)
 
     def _record(self, now: datetime, signal: Signal, force_close: bool = False) -> Decision:
-        last = self.store.last_gate_reading()
+        last = self.store.last_gate_reading(exclude_bypass=True)  # streaks continue from the last real decision
         quiet = (last.quiet_streak if last else 0) + 1 if signal.verdict == "quiet" else 0
         busy = (last.busy_streak if last else 0) + 1 if signal.verdict != "quiet" else 0
         was_open = last is not None and last.decision == "open"
