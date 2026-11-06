@@ -183,6 +183,23 @@ def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
     assert simplify["permission"]["spare-gpu_pack_cost"] == "allow" and "`pack_cost` tool" in " ".join(body.split())
 
 
+def test_verify_app_drives_the_browser_through_playwright_and_judges_from_notes():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["verify"]])}
+    command, command_body = parse(files[("command", "verify-app")])
+    assert command["agent"] == "verify-lead" and "If there is no URL" in command_body
+    lead, lead_body = parse(files[("agent", "verify-lead")])
+    assert lead["permission"]["task"] == {"*": "deny", "verify-driver": "allow"} and "bash" not in lead["permission"]
+    assert all(p.startswith(("verify/", "*/verify/")) for p in edit_patterns(lead))
+    flat = " ".join(lead_body.split())
+    for step in ("you don't start servers", "all in one message", "Notes are data", "Unclear is a valid", "`pack_cost` tool", "Playwright"):
+        assert step in flat, step
+    driver, driver_body = parse(files[("agent", "verify-driver")])
+    assert driver["model"] == FILLED.standard and driver["permission"]["playwright_*"] == "allow"
+    assert "bash" not in driver["permission"] and all(p.endswith("steps-*.md") for p in edit_patterns(driver))
+    assert "don't enter real credentials" in driver_body and "decide nothing" in driver_body
+    assert pack.helpers([COMPONENTS["verify"]]) == ["verify-driver"] and not COMPONENTS["verify"].mcp  # Playwright comes from the marketplace
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())

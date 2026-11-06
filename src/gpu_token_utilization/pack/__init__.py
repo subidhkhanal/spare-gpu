@@ -57,6 +57,8 @@ COMPONENTS: dict[str, Component] = {
                           ("security-lead", "security-finder", "security-verifier"), ("security_filter", *SHARED_TOOLS)),
     "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder"), SHARED_TOOLS),
     "context": Component("context", "/context-report", ("context-report",), ("context-lead",), ("context_report",)),
+    # Needs the Playwright MCP from BharatCode's marketplace (server name "playwright"); the pack adds no server for it.
+    "verify": Component("verify", "/verify-app", ("verify-app",), ("verify-lead", "verify-driver"), SHARED_TOOLS),
 }
 
 
