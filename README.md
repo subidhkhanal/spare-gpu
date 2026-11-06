@@ -72,6 +72,10 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 `gtu integrate --pack` adds a pack of commands for BharatCode Desktop that split each job between the two models: DeepSeek plans, judges and verifies; Qwen does the many quick, parallel, self-contained steps. It uses only BharatCode's own extension points (Markdown commands and agents, spare-gpu's MCP tools, and a config file of the pack's own next to yours, which is never edited). Components, chosen with `--only`: `split` (titles and the explore subagent run on Qwen), `research` (`/deep-research`), `review` (`/code-review`), `security` (`/security-review`), `simplify` (`/simplify`) and `context` (`/context-report`). The commands land one by one; `split` is in. `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added. Model ids are read from bharatcode.ai's model list at install time.
 
+### `/deep-research` (experimental until the benchmark in research/deep-research/ is run)
+
+`/deep-research <question> [--depth quick|standard|deep] [--sources web|papers|both]` writes a cited research report into `research/<slug>/` in your project. A lead on DeepSeek plans the sub-questions and starts one scout per sub-question on Qwen, all at once; scouts search the open paper registries (OpenAlex, Crossref, arXiv, through spare-gpu's `scholar_search` tool) and the web (Exa's hosted MCP, keyless; your queries go to Exa) and write notes with exact quotes and ids. A writer on Qwen drafts the report one section per call; a checker on DeepSeek marks unsupported claims and runs `verify_refs`, which drops every reference the registries don't have or whose title and authors don't match. The lead's reply names the model used per phase, the helper runs, and the queue time saved as estimated from live waits. Scouts have no shell and can write only their own notes file; everything they read is treated as data. Google Scholar isn't used.
+
 ## What you get
 
 Background work lands in your project when it's done. Ask "is my job done?" to check on it.

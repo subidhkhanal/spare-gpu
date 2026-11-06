@@ -39,6 +39,7 @@ Issues = "https://github.com/subidhkhanal/spare-gpu/issues"
 dev = [
   "pytest>=8",
   "respx>=0.21",
+  "pyyaml>=6",
 ]
 build = [
   "build>=1.2",
