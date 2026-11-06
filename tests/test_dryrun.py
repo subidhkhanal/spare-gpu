@@ -133,3 +133,13 @@ def test_problems_that_would_stop_a_job_are_flagged(repo, monkeypatch):
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     out = runner.invoke(app, ["start", "--dry-run"]).output
     assert "PROBLEM: BharatCode's CLI isn't installed" in out
+
+
+def test_a_fix_job_without_the_cli_is_a_problem_in_the_dry_run(store, git_repo, monkeypatch):
+    from gpu_token_utilization import agent_cli, dryrun
+
+    monkeypatch.delenv("GTU_BHARATCODE_CMD", raising=False)
+    monkeypatch.setattr(agent_cli.shutil, "which", lambda name: None)
+    job = store.add_job("fix", ".", str(git_repo), note="src/calc.py:2 add a docstring")
+    assert any("bharatcode" in p for p in dryrun._problems(job))  # like tests and docs: it runs the CLI
+    assert dryrun._problems(store.add_job("review", "src", str(git_repo))) == []
