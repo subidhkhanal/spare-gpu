@@ -20,7 +20,7 @@ from .agent_cli import CLI_KINDS, CMD_ENV, BharatCodeCli, CliNotFound, cli_statu
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, desktop, dryrun, router, runstate, waits, worktree
+from . import actions, bc_config, desktop, dryrun, pack, router, runstate, waits, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -128,12 +128,18 @@ def setup(
 
 @app.command()
 def integrate(
-    uninstall: bool = typer.Option(False, "--uninstall", help="Remove spare-gpu from BharatCode's config."),
+    uninstall: bool = typer.Option(False, "--uninstall", help="Remove spare-gpu from BharatCode's config "
+                                                              "(with --pack: only the pack)."),
     channel: str = typer.Option(
         "all", "--channel",
         help="Which BharatCode to register with: stable (the released Desktop app and the CLI), beta, dev "
              "(a Desktop build from source), local, or all (every one installed here; the default).",
     ),
+    with_pack: bool = typer.Option(False, "--pack", help="Also install the command pack: /deep-research, "
+                                                         "/code-review, ... and the model split."),
+    only: str = typer.Option(None, "--only", help="Pack components, comma-separated: "
+                                                  + ", ".join(pack.COMPONENTS) + " (default: all)."),
+    lite: bool = typer.Option(False, "--lite", help="Qwen-only plan: every pack role runs on the standard model."),
 ) -> None:
     """Register spare-gpu's MCP server with BharatCode Desktop (and its CLI). Backs each config up
     first, says exactly what it changed and how to undo it, and is safe to run again."""
@@ -142,15 +148,83 @@ def integrate(
     channels = bc_config.installed_channels() if channel == "all" else [channel]
     if uninstall:
         for name in channels:
-            _uninstall(name)
+            if with_pack:
+                _uninstall_pack(name)
+            else:
+                _uninstall(name)
         return
+    if with_pack:
+        try:
+            pack.select(only)
+        except pack.PackError as exc:
+            _fail(str(exc))
     ok = True
     for name in channels:
         typer.echo(f"BharatCode {name}:")
         ok = _register_channel("  ", name) and ok
+        if with_pack:
+            ok = _install_pack("  ", name, only, lite) and ok
     typer.echo("Restart BharatCode Desktop (and close open BharatCode windows) to load spare-gpu.")
     if not ok:
         raise typer.Exit(1)
+
+
+def _channel_folder(channel: str) -> tuple[Path, str]:
+    if channel == "stable":
+        return bc_config.locate_config_dir()
+    return bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel"
+
+
+def _install_pack(pad: str, channel: str, only: str | None, lite: bool) -> bool:
+    """Install the pack into one channel: its config file, then its commands and agents with the
+    model ids filled in. Says what changed, what conflicts with the user's own settings, and how to undo."""
+    folder, _ = _channel_folder(channel)
+    components = pack.select(only)
+    models, note = pack.resolve_models(lite=lite)
+    typer.echo(f"{pad}Pack models: heavy {waits.name(models.heavy)} ({models.heavy}), "
+               f"standard {waits.name(models.standard)} ({models.standard}){note}")
+    doc = pack.config(components, models)
+    try:
+        path, outcome = bc_config.install_pack_config(folder, pack.config_text(doc, bc_config.PACK_LINE))
+    except (bc_config.ConfigError, OSError) as exc:
+        typer.echo(f"{pad}Couldn't write the pack's settings: {exc}")
+        return False
+    said = {"added": "Wrote", "updated": "Updated", "unchanged": "Already up to date:"}[outcome]
+    typer.echo(f"{pad}{said} the pack's settings in {path}: {pack.describe(doc)}.")
+    files = [(kind, name, models.fill(source.read_text(encoding="utf-8")))
+             for kind, name, source in pack.markdown_files(components)]
+    try:
+        outcomes = bc_config.install_markdown(folder, files)
+    except OSError as exc:
+        typer.echo(f"{pad}Couldn't add the pack's commands and agents ({exc}).")
+        return False
+    for key, what in outcomes.items():
+        kind, name = key.split("/", 1)
+        shown = f"/{name}" if kind == "command" else f"the {name} agent"
+        if what == "kept-yours":
+            typer.echo(f"{pad}You already have {shown} ({folder / kind / (name + '.md')}); left it as it is.")
+        elif what == "unchanged":
+            typer.echo(f"{pad}{shown} is already there.")
+        else:
+            typer.echo(f"{pad}{'Added' if what == 'added' else 'Updated'} {shown} ({folder / kind / (name + '.md')}).")
+    if not files:
+        typer.echo(f"{pad}No commands or agents to add for: {', '.join(c.name for c in components)}.")
+    for conflict in bc_config.pack_conflicts(folder, doc):
+        typer.echo(f"{pad}Conflict: {conflict}.")
+    typer.echo(f"{pad}To undo the pack: gtu integrate --pack --uninstall")
+    return True
+
+
+def _uninstall_pack(channel: str) -> None:
+    folder, how = _channel_folder(channel)
+    for key in bc_config.remove_markdown(folder, pack.all_markdown_names()):
+        kind, name = key.split("/", 1)
+        typer.echo(f"Removed {'/' + name if kind == 'command' else 'the ' + name + ' agent'} from {folder / kind}.")
+    path, outcome = bc_config.remove_pack_config(folder)
+    if outcome == "removed":
+        typer.echo(f"Removed the pack's settings file {path} ({how}). Your own config was never changed.")
+    else:
+        typer.echo(f"The pack wasn't installed in {folder}; nothing changed.")
 
 
 def _register_channel(pad: str, channel: str) -> bool:
@@ -226,10 +300,9 @@ def _install_commands(pad: str, folder: Path) -> None:
 
 
 def _uninstall(channel: str = "stable") -> None:
-    if channel == "stable":
-        folder, how = bc_config.locate_config_dir()
-    else:
-        folder, how = bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel"
+    folder, how = _channel_folder(channel)
+    if any(bc_config.is_pack_file(folder / name) for name in bc_config.PACK_NAMES):
+        _uninstall_pack(channel)
     path = bc_config.config_file(folder)
     for name in bc_config.remove_commands(folder):
         typer.echo(f"Removed the /{name} command from {folder / 'command'}.")

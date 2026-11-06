@@ -68,6 +68,10 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 `gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
 
+## The pack (in progress)
+
+`gtu integrate --pack` adds a pack of commands for BharatCode Desktop that split each job between the two models: DeepSeek plans, judges and verifies; Qwen does the many quick, parallel, self-contained steps. It uses only BharatCode's own extension points (Markdown commands and agents, spare-gpu's MCP tools, and a config file of the pack's own next to yours, which is never edited). Components, chosen with `--only`: `split` (titles and the explore subagent run on Qwen), `research` (`/deep-research`), `review` (`/code-review`), `security` (`/security-review`), `simplify` (`/simplify`) and `context` (`/context-report`). The commands land one by one; `split` is in. `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added. Model ids are read from bharatcode.ai's model list at install time.
+
 ## What you get
 
 Background work lands in your project when it's done. Ask "is my job done?" to check on it.

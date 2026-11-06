@@ -105,10 +105,111 @@ def snippet(command: list[str]) -> str:
 
 
 def config_file(folder: Path) -> Path:
+    """The user's own config file in `folder` (never the pack's, see pack_file)."""
     for name in CONFIG_NAMES:
-        if (folder / name).exists():
+        if (folder / name).exists() and not is_pack_file(folder / name):
             return folder / name
     return folder / CONFIG_NAMES[0]
+
+
+# --- the pack's own config file ---------------------------------------------------------------
+# BharatCode reads config.json, opencode.json and opencode.jsonc from its config folder and merges
+# them deeply, in that order (config/config.ts, loadGlobal), and creates opencode.jsonc itself when
+# none exists. So the pack keeps its settings in a file of its own, marked on its first line, and
+# the user's file is never edited: the user's opencode.jsonc wins where both set the same key.
+# BharatCode writes its own settings (its UI's model choice) to the first of those files that
+# exists, jsonc first, so the user's file is created before the pack's if it's missing.
+PACK_LINE = "// Installed by spare-gpu (`gtu integrate --pack`); `gtu integrate --pack --uninstall` removes this file."
+PACK_NAMES = ("config.json", "opencode.json")  # in BharatCode's load order, below opencode.jsonc
+LOAD_ORDER = ("config.json", "opencode.json", "opencode.jsonc")
+
+
+def is_pack_file(path: Path) -> bool:
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            return PACK_LINE in fh.read(len(PACK_LINE) + 200)
+    except OSError:
+        return False
+
+
+def pack_file(folder: Path) -> Path:
+    """Where the pack's settings go: the first of config.json and opencode.json that isn't the
+    user's own file (and is either free or already the pack's)."""
+    user = config_file(folder)
+    for name in PACK_NAMES:
+        path = folder / name
+        if path != user and (not path.exists() or is_pack_file(path)):
+            return path
+    raise ConfigError(f"both {PACK_NAMES[0]} and {PACK_NAMES[1]} in {folder} are your own files, so there's no file "
+                      f"left for the pack's settings. Merge one into {CONFIG_NAMES[0]} (BharatCode reads all three) "
+                      "and run this again")
+
+
+def install_pack_config(folder: Path, text: str) -> tuple[Path, str]:
+    """Write the pack's config file. Returns its path and "added", "updated" or "unchanged"."""
+    try:
+        parse_jsonc(text)  # never write a file that doesn't parse
+    except ValueError as exc:
+        raise ConfigError(f"the pack's config doesn't parse ({exc}); nothing was written") from None
+    user = config_file(folder)
+    if not user.exists():  # BharatCode must find its own file first, so it never writes into the pack's
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text(json.dumps({"$schema": "https://opencode.ai/config.json"}, indent=2) + "\n", encoding="utf-8")
+    path = pack_file(folder)
+    before = path.read_text(encoding="utf-8-sig") if path.exists() else None
+    if before == text:
+        return path, "unchanged"
+    path.write_text(text, encoding="utf-8")
+    return path, "updated" if before is not None else "added"
+
+
+def remove_pack_config(folder: Path) -> tuple[Path, str]:
+    """Delete the pack's config file. Returns its path and "removed", "kept-yours" (the marker is
+    gone, so the user has made it theirs) or "absent"."""
+    for name in PACK_NAMES:
+        path = folder / name
+        if path.exists() and is_pack_file(path):
+            path.unlink()
+            return path, "removed"
+    return folder / PACK_NAMES[0], "absent"
+
+
+def pack_conflicts(folder: Path, doc: dict) -> list[str]:
+    """Settings in the user's own config files that overlap the pack's with another value, and
+    which of the two BharatCode uses (the file it loads later wins)."""
+    try:
+        ours = pack_file(folder)
+    except ConfigError:
+        return []
+    found = []
+    for name in LOAD_ORDER:
+        path = folder / name
+        if path == ours or not path.exists() or is_pack_file(path):
+            continue
+        try:
+            theirs = parse_jsonc(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        wins = "yours wins" if LOAD_ORDER.index(name) > LOAD_ORDER.index(ours.name) else "the pack's wins"
+        for keys, value in _leaves(doc):
+            current = theirs
+            for key in keys:
+                current = current.get(key) if isinstance(current, dict) else None
+            if current is not None and current != value:
+                found.append(f"{name} sets {'.'.join(keys)} = {json.dumps(current)}, the pack {json.dumps(value)}; {wins}")
+    return found
+
+
+def _leaves(doc: dict, prefix: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], object]]:
+    out = []
+    for key, value in doc.items():
+        if key == "$schema":
+            continue
+        if isinstance(value, dict) and prefix != ("mcp",):  # an MCP entry is compared whole
+            out += _leaves(value, (*prefix, key))
+        else:
+            out.append(((*prefix, key), value))
+    return out
 
 
 def server_command() -> list[str]:
@@ -251,34 +352,46 @@ def _ours(path: Path) -> bool:
         return False
 
 
-def install_commands(folder: Path) -> dict[str, str]:
-    """Copy spare-gpu's slash commands into <folder>/command/. A file of the same name the user
-    wrote (or edited, removing the marker) is left alone. {name: added|updated|unchanged|kept-yours}."""
-    target = folder / "command"
+def install_markdown(folder: Path, files: list[tuple[str, str, str]]) -> dict[str, str]:
+    """Write Markdown commands and agents into <folder>/<kind>/<name>.md. `files` are (kind, name,
+    text); each text carries the marker. A file of the same name the user wrote (or edited,
+    removing the marker) is left alone. {"<kind>/<name>": added|updated|unchanged|kept-yours}."""
     outcome = {}
-    for source in sorted(COMMANDS_DIR.glob("*.md")):
-        dest, text = target / source.name, source.read_text(encoding="utf-8")
+    for kind, name, text in files:
+        dest = folder / kind / f"{name}.md"
         if dest.exists() and not _ours(dest):
-            outcome[source.stem] = "kept-yours"
+            outcome[f"{kind}/{name}"] = "kept-yours"
         elif dest.exists() and dest.read_text(encoding="utf-8-sig") == text:
-            outcome[source.stem] = "unchanged"
+            outcome[f"{kind}/{name}"] = "unchanged"
         else:
             existed = dest.exists()
-            target.mkdir(parents=True, exist_ok=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(text, encoding="utf-8")
-            outcome[source.stem] = "updated" if existed else "added"
+            outcome[f"{kind}/{name}"] = "updated" if existed else "added"
     return outcome
+
+
+def remove_markdown(folder: Path, names: list[tuple[str, str]]) -> list[str]:
+    """Remove the named (kind, name) files, but only those still carrying spare-gpu's marker."""
+    removed = []
+    for kind, name in names:
+        dest = folder / kind / f"{name}.md"
+        if dest.exists() and _ours(dest):
+            dest.unlink()
+            removed.append(f"{kind}/{name}")
+    return removed
+
+
+def install_commands(folder: Path) -> dict[str, str]:
+    """Copy spare-gpu's own slash commands (/auto) into <folder>/command/. {name: added|updated|unchanged|kept-yours}."""
+    files = [("command", source.stem, source.read_text(encoding="utf-8")) for source in sorted(COMMANDS_DIR.glob("*.md"))]
+    return {key.split("/", 1)[1]: what for key, what in install_markdown(folder, files).items()}
 
 
 def remove_commands(folder: Path) -> list[str]:
     """Remove the slash commands spare-gpu installed (only files still carrying its marker)."""
-    removed = []
-    for source in sorted(COMMANDS_DIR.glob("*.md")):
-        dest = folder / "command" / source.name
-        if dest.exists() and _ours(dest):
-            dest.unlink()
-            removed.append(source.stem)
-    return removed
+    names = [("command", source.stem) for source in sorted(COMMANDS_DIR.glob("*.md"))]
+    return [key.split("/", 1)[1] for key in remove_markdown(folder, names)]
 
 
 def connected(path: Path, timeout: float = 90.0) -> bool | None:

@@ -157,6 +157,26 @@ def list_models(
     return CheckResult(models=parsed.data, elapsed_ms=elapsed_ms, request_id=request_id)
 
 
+def public_models(client: httpx.Client | None = None, base_url: str = BASE_URL, timeout: float = 30.0) -> list[Model]:
+    """GET /models with no key: the list is public, and `gtu integrate` runs without a key inside Desktop."""
+    owns_client = client is None
+    http = client or httpx.Client(timeout=timeout)
+    try:
+        try:
+            response = http.get(f"{base_url}/models")
+        except httpx.HTTPError as exc:
+            raise ApiError(f"could not reach BharatCode ({type(exc).__name__})") from None
+    finally:
+        if owns_client:
+            http.close()
+    if response.status_code != 200:
+        raise ApiError(f"unexpected response (HTTP {response.status_code})")
+    try:
+        return ModelList.model_validate(response.json()).data
+    except ValueError:
+        raise ApiError("unexpected response body from /models") from None
+
+
 PREFERRED_MODEL = "qwen-3.8-27b"
 
 
