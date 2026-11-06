@@ -1,0 +1,81 @@
+{
+ "status": "ok",
+ "message-type": "work-list",
+ "message": {
+  "total-results": 2,
+  "items": [
+   {
+    "DOI": "10.1038/nature14539",
+    "title": [
+     "Deep learning"
+    ],
+    "author": [
+     {
+      "given": "Yann",
+      "family": "LeCun"
+     },
+     {
+      "given": "Yoshua",
+      "family": "Bengio"
+     },
+     {
+      "given": "Geoffrey",
+      "family": "Hinton"
+     }
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       2015,
+       5,
+       27
+      ]
+     ]
+    },
+    "container-title": [
+     "Nature"
+    ],
+    "URL": "https://doi.org/10.1038/nature14539",
+    "abstract": "<jats:p>Deep learning allows computational models that are composed of multiple processing layers to learn representations of data.</jats:p>",
+    "is-referenced-by-count": 65000
+   },
+   {
+    "DOI": "10.1109/5.726791",
+    "title": [
+     "Gradient-based learning applied to document recognition"
+    ],
+    "author": [
+     {
+      "given": "Y.",
+      "family": "Lecun"
+     },
+     {
+      "given": "L.",
+      "family": "Bottou"
+     },
+     {
+      "given": "Y.",
+      "family": "Bengio"
+     },
+     {
+      "given": "P.",
+      "family": "Haffner"
+     }
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       1998,
+       11
+      ]
+     ]
+    },
+    "container-title": [
+     "Proceedings of the IEEE"
+    ],
+    "URL": "https://doi.org/10.1109/5.726791",
+    "is-referenced-by-count": 40000
+   }
+  ]
+ }
+}

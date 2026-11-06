@@ -1,0 +1,131 @@
+{
+ "meta": {
+  "count": 2,
+  "per_page": 5
+ },
+ "results": [
+  {
+   "id": "https://openalex.org/W2963403868",
+   "doi": "https://doi.org/10.48550/arxiv.1706.03762",
+   "title": "Attention Is All You Need",
+   "display_name": "Attention Is All You Need",
+   "publication_year": 2017,
+   "authorships": [
+    {
+     "author": {
+      "display_name": "Ashish Vaswani"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Noam Shazeer"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Niki Parmar"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Jakob Uszkoreit"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Llion Jones"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Aidan N. Gomez"
+     }
+    },
+    {
+     "author": {
+      "display_name": "\u0141ukasz Kaiser"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Illia Polosukhin"
+     }
+    }
+   ],
+   "primary_location": {
+    "source": {
+     "display_name": "arXiv (Cornell University)"
+    },
+    "landing_page_url": "https://arxiv.org/abs/1706.03762"
+   },
+   "cited_by_count": 120000,
+   "abstract_inverted_index": {
+    "The": [
+     0
+    ],
+    "dominant": [
+     1
+    ],
+    "sequence": [
+     2
+    ],
+    "transduction": [
+     3
+    ],
+    "models": [
+     4
+    ],
+    "are": [
+     5
+    ],
+    "based": [
+     6
+    ],
+    "on": [
+     7
+    ],
+    "complex": [
+     8
+    ],
+    "recurrent": [
+     9
+    ],
+    "networks.": [
+     10
+    ]
+   }
+  },
+  {
+   "id": "https://openalex.org/W2250539671",
+   "doi": "https://doi.org/10.1038/nature14539",
+   "title": "Deep learning",
+   "display_name": "Deep learning",
+   "publication_year": 2015,
+   "authorships": [
+    {
+     "author": {
+      "display_name": "Yann LeCun"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Yoshua Bengio"
+     }
+    },
+    {
+     "author": {
+      "display_name": "Geoffrey Hinton"
+     }
+    }
+   ],
+   "primary_location": {
+    "source": {
+     "display_name": "Nature"
+    },
+    "landing_page_url": "https://doi.org/10.1038/nature14539"
+   },
+   "cited_by_count": 70000,
+   "abstract_inverted_index": null
+  }
+ ]
+}

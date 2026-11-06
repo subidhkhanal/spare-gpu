@@ -1,0 +1,39 @@
+{
+ "status": "ok",
+ "message-type": "work",
+ "message": {
+  "DOI": "10.1038/nature14539",
+  "title": [
+   "Deep learning"
+  ],
+  "author": [
+   {
+    "given": "Yann",
+    "family": "LeCun"
+   },
+   {
+    "given": "Yoshua",
+    "family": "Bengio"
+   },
+   {
+    "given": "Geoffrey",
+    "family": "Hinton"
+   }
+  ],
+  "issued": {
+   "date-parts": [
+    [
+     2015,
+     5,
+     27
+    ]
+   ]
+  },
+  "container-title": [
+   "Nature"
+  ],
+  "URL": "https://doi.org/10.1038/nature14539",
+  "abstract": "<jats:p>Deep learning allows computational models that are composed of multiple processing layers to learn representations of data.</jats:p>",
+  "is-referenced-by-count": 65000
+ }
+}
