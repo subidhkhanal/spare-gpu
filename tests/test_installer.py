@@ -24,7 +24,8 @@ def test_the_default_source_is_the_newest_tagged_release_not_master():
 def test_a_version_or_a_source_can_be_pinned():
     assert "refs/tags/v$($env:SPARE_GPU_VERSION).zip" in TEXT
     assert "if ($env:SPARE_GPU_SOURCE) { return $env:SPARE_GPU_SOURCE }" in TEXT
-    for option in ("SPARE_GPU_VERSION", "SPARE_GPU_SOURCE"):
+    assert "$repo = if ($env:SPARE_GPU_REPO) { $env:SPARE_GPU_REPO } else { 'subidhkhanal/spare-gpu' }" in TEXT
+    for option in ("SPARE_GPU_VERSION", "SPARE_GPU_SOURCE", "SPARE_GPU_REPO"):
         assert re.search(rf"^#\s+{option}\s", TEXT, re.M), f"{option} is documented at the top"
 
 

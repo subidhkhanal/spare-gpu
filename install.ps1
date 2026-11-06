@@ -11,6 +11,7 @@
 #   SPARE_GPU_HOME     where to install (default %LOCALAPPDATA%\spare-gpu)
 #   SPARE_GPU_VERSION  which release to install, e.g. 0.1.0 (default: the newest release on GitHub)
 #   SPARE_GPU_SOURCE   what to install instead, anything pip accepts (overrides SPARE_GPU_VERSION)
+#   SPARE_GPU_REPO     the GitHub repository to install from, owner/name (default subidhkhanal/spare-gpu; a fork sets its own)
 #   SPARE_GPU_SKIP_INTEGRATE=1  install only; don't touch BharatCode's config
 #   SPARE_GPU_SKIP_PATH=1       don't add gtu to your PATH
 
@@ -34,7 +35,8 @@ function Resolve-SpareGpuSource($repo) {
 function Install-SpareGpu {
     $ErrorActionPreference = 'Stop'
     $home_ = if ($env:SPARE_GPU_HOME) { $env:SPARE_GPU_HOME } else { Join-Path $env:LOCALAPPDATA 'spare-gpu' }
-    $source = Resolve-SpareGpuSource 'subidhkhanal/spare-gpu'
+    $repo = if ($env:SPARE_GPU_REPO) { $env:SPARE_GPU_REPO } else { 'subidhkhanal/spare-gpu' }
+    $source = Resolve-SpareGpuSource $repo
 
     function Say($text) { Write-Host "spare-gpu: $text" }
     function Fail($text) { Write-Host "spare-gpu: $text" -ForegroundColor Red; throw 'spare-gpu install stopped' }
