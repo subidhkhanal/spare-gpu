@@ -48,7 +48,9 @@ def main(args: list[str]) -> int:
     if scenario.get("record"):
         config = workdir / "opencode.json"
         entry = {"args": args, "config": json.loads(config.read_text()) if config.exists() else None,
-                 "skills_off": os.environ.get("OPENCODE_DISABLE_EXTERNAL_SKILLS") == "1"}
+                 "skills_off": os.environ.get("OPENCODE_DISABLE_EXTERNAL_SKILLS") == "1",
+                 "config_env": {k: os.environ.get(k) for k in
+                                ("OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION")}}
         with open(scenario["record"], "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")
 

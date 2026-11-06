@@ -32,6 +32,13 @@ def no_real_desktop(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_bharatcode_config(monkeypatch, tmp_path):
+    """No test may read the user's real BharatCode config (jobs read it to switch its MCP servers
+    off). Tests that need one write it under GTU_BHARATCODE_CONFIG_DIR or this APPDATA."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+
+@pytest.fixture(autouse=True)
 def fake_bharatcode_cli(monkeypatch):
     """No test ever starts the real BharatCode CLI; tests about a missing CLI delete this."""
     monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))

@@ -24,7 +24,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 import httpx
 
@@ -190,12 +190,13 @@ def export_url(conn: Connection) -> None:
 # --- running a job step as a Desktop session ----------------------------------------------------
 
 def session_rules(edit: bool, commands: tuple[str, ...]) -> list[dict]:
-    """The job's permission rules as a Desktop session ruleset (last match wins, like the config's).
-    Sent with the session itself, so they apply whatever config Desktop has loaded for the folder;
-    also hides spare-gpu's own tools, so a job can't queue more jobs. The skill list in the prompt
-    follows the agent's (config) permissions only, so the opencode.json file is still written too."""
+    """The job's permission rules as a Desktop session ruleset (last match wins, like the config's):
+    the global deny first, then what the job may do. Sent with the session itself, so they apply
+    whatever config Desktop has loaded for the folder; also hides spare-gpu's own tools by name,
+    so a job can't queue more jobs. The skill list in the prompt follows the agent's (config)
+    permissions only, so the opencode.json file is still written too."""
     rules = []
-    for permission, value in permission_config(edit, commands)["permission"].items():
+    for permission, value in permission_config(edit, commands, {})["permission"].items():
         if isinstance(value, str):
             rules.append({"permission": permission, "pattern": "*", "action": value})
         else:
@@ -222,15 +223,16 @@ class DesktopAgent:
     def with_model(self, model: str) -> DesktopAgent:
         """The same agent on another model (the router picks one per job)."""
         return DesktopAgent(self.conn, model=model, timeout=self.timeout, poll=self.poll, transport=self._transport,
-                            sleep=self._sleep, clock=self._clock)
+                            sleep=self._sleep, clock=self._clock, mcp_servers=self.mcp_servers)
 
     def __init__(self, conn: Connection, model: str = DEFAULT_MODEL, timeout: float = 900.0, poll: float = 2.0,
                  transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic, mcp_servers: Mapping[str, dict] | None = None):
         self.conn = conn
         self.model = model
         self.timeout = timeout
         self.poll = poll
+        self.mcp_servers = mcp_servers  # None: the user's config is read when a job runs
         self._transport = transport
         self._sleep = sleep
         self._clock = clock
@@ -241,7 +243,7 @@ class DesktopAgent:
             on_retry: Callable[[int], None] = lambda attempt: None) -> CliResult:
         workdir = Path(workdir)
         config = workdir / CONFIG_FILE
-        config.write_text(json.dumps(permission_config(edit, commands), indent=2), encoding="utf-8")
+        config.write_text(json.dumps(permission_config(edit, commands, self.mcp_servers), indent=2), encoding="utf-8")
         result = CliResult(exit_code=None, text="")
         where = {"directory": str(workdir)}
         try:

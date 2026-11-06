@@ -31,7 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 from .api import env_without_key
 
@@ -47,6 +47,17 @@ CONTINUE_PROMPT = "Continue the task from where you left off."
 # Measured 31 Oct: 16 Claude Code skills cost 3,504 tokens per step, about 30% of the fixed overhead
 # (research/token-overhead.md). spare-gpu's own MCP server is switched off in permission_config.
 JOB_ENV = {"OPENCODE_DISABLE_EXTERNAL_SKILLS": "1"}
+# Config the user set for their own sessions through the environment never reaches a job's: it
+# could re-enable servers or widen permissions. Everything else (PATH, HOME, ...) passes through.
+JOB_ENV_DROPPED = ("OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION")
+
+
+def job_env() -> dict[str, str]:
+    """The environment a job's CLI runs with: ours minus the API key and BharatCode config overrides."""
+    env = env_without_key(**JOB_ENV)
+    for name in JOB_ENV_DROPPED:
+        env.pop(name, None)
+    return env
 
 
 CLI_KINDS = ("tests", "docs")  # job kinds that run the CLI; review talks to the API directly
@@ -118,28 +129,54 @@ def cli_status(timeout: float = 30.0) -> CliStatus:
     return CliStatus(command, version=lines[-1].strip(), signed_in=signed_in)
 
 
-def permission_config(edit: bool, commands: tuple[str, ...]) -> dict:
-    """opencode.json allowing edits (optionally) and only the listed commands."""
+def job_mcp_servers(given: Mapping[str, dict] | None) -> dict[str, dict]:
+    """The user's MCP servers a job must switch off: as given, else read from their BharatCode config."""
+    if given is not None:
+        return dict(given)
+    from .bc_config import user_mcp_servers  # imported here: bc_config imports this module
+
+    return user_mcp_servers()
+
+
+def _switched_off(entry: dict) -> dict:
+    """A user's MCP entry as the job's config repeats it: only what BharatCode needs to accept the
+    entry (its type and how to reach it), never its environment or headers, and switched off."""
+    kept = {key: entry[key] for key in ("type", "command", "url") if key in entry}
+    return {**kept, "enabled": False}
+
+
+def permission_config(edit: bool, commands: tuple[str, ...], mcp_servers: Mapping[str, dict] | None = None) -> dict:
+    """opencode.json for a job: everything denied first, then only what the job needs (reading and
+    searching its copy, editing when it writes, and the listed commands), with the user's MCP
+    servers switched off. Written into the job's private copy, so it applies to that session
+    whatever the user's own config allows. `mcp_servers` None means: read the user's config."""
     bash: dict | str = "deny"
     if commands:
         bash = {"*": "deny"}  # deny first: the last matching rule wins
         for command in commands:
             bash[f"{command}*"] = "allow"
-    return {
-        "$schema": "https://opencode.ai/config.json",
-        # "skill": "deny" also drops the list of the user's skills (~/.claude/skills and others)
-        # from every request (session/system.ts): ~3.5k tokens a step on the machine measured.
-        # Inside Desktop it's the only way to do that; the CLI could use an env var instead.
-        # Nobody watches a job's session, so nothing may "ask": a prompt there waits forever (seen
-        # 5 Nov: a docs job sat for 10+ minutes on a prompt to read the main repo's .git/config).
-        # Each of these is "ask" in Desktop's defaults; a denial lets the agent carry on instead.
-        "permission": {"edit": "allow" if edit else "deny", "bash": bash, "webfetch": "deny", "skill": "deny",
-                       "external_directory": "deny", "doom_loop": "deny", "question": "deny",
-                       "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow"}},
-        # spare-gpu's own MCP server is off inside jobs: its tool schemas cost ~2.3k tokens on
-        # every step (measured), and a job's agent has no business queueing more jobs.
-        "mcp": {"spare-gpu": {"type": "local", "command": ["gtu", "mcp"], "enabled": False}},
+    permission = {
+        # Everything is denied first. BharatCode keeps the file's key order and the last matching
+        # rule wins, so only what's re-allowed below is on; a tool whose last rule is a plain deny
+        # is also left out of the model's tool list, MCP tools included (permission/index.ts).
+        "*": "deny",
+        "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow"},
+        "glob": "allow", "grep": "allow", "list": "allow",
+        "edit": "allow" if edit else "deny",
+        "bash": bash,
+        # Spelled out although "*" already covers them: "skill": "deny" also drops the list of the
+        # user's skills (~/.claude/skills and others) from every request (session/system.ts), ~3.5k
+        # tokens a step on the machine measured. Nobody watches a job's session, so nothing may
+        # "ask": a prompt there waits forever (seen 5 Nov: a docs job sat for 10+ minutes on a
+        # prompt to read the main repo's .git/config). Each of these is "ask" in Desktop's defaults.
+        "webfetch": "deny", "skill": "deny", "external_directory": "deny", "doom_loop": "deny", "question": "deny",
     }
+    # The user's MCP servers are off inside jobs (not started, and their tools hidden by "*"): a
+    # job has no business reaching them. spare-gpu's own server too: its tool schemas cost tokens
+    # on every step, and a job's agent mustn't queue more jobs.
+    mcp = {name: _switched_off(entry) for name, entry in job_mcp_servers(mcp_servers).items()}
+    mcp["spare-gpu"] = {"type": "local", "command": ["gtu", "mcp"], "enabled": False}
+    return {"$schema": "https://opencode.ai/config.json", "permission": permission, "mcp": mcp}
 
 
 @dataclass
@@ -192,13 +229,15 @@ def _pump(stream, sink: queue.Queue) -> None:
 class BharatCodeCli:
     label = "BharatCode CLI"
 
-    def __init__(self, command: list[str] | None = None, model: str = DEFAULT_MODEL, timeout: float = 900.0):
+    def __init__(self, command: list[str] | None = None, model: str = DEFAULT_MODEL, timeout: float = 900.0,
+                 mcp_servers: Mapping[str, dict] | None = None):
         self.command = command
         self.model = model
         self.timeout = timeout
+        self.mcp_servers = mcp_servers  # None: the user's config is read when a job runs
 
     def with_model(self, model: str) -> BharatCodeCli:
-        return BharatCodeCli(self.command, model=model, timeout=self.timeout)
+        return BharatCodeCli(self.command, model=model, timeout=self.timeout, mcp_servers=self.mcp_servers)
 
     def run(
         self,
@@ -215,7 +254,7 @@ class BharatCodeCli:
         workdir = Path(workdir)
         command = self.command or resolve_command()
         config = workdir / CONFIG_FILE
-        config.write_text(json.dumps(permission_config(edit, commands), indent=2), encoding="utf-8")
+        config.write_text(json.dumps(permission_config(edit, commands, self.mcp_servers), indent=2), encoding="utf-8")
         result = CliResult(exit_code=None, text="")
         texts: list[str] = []
         deadline = time.monotonic() + self.timeout
@@ -250,7 +289,7 @@ class BharatCodeCli:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             args, cwd=workdir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", env={**env_without_key(), **JOB_ENV}, **kwargs,
+            text=True, encoding="utf-8", errors="replace", env=job_env(), **kwargs,
         )
         lines: queue.Queue = queue.Queue()
         stderr: list[str] = []

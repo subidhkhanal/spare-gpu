@@ -60,12 +60,14 @@ def config_dir() -> Path:
 CHANNELS = {"stable": "BharatCode", "beta": "BharatCode Beta", "dev": "BharatCode Dev", "local": "BharatCode Local"}
 
 
-def channel_config_dir(channel: str) -> Path:
-    if channel == "stable":
-        return config_dir()  # what the CLI reports, or the override
+def channel_config_dir(channel: str, ask_cli: bool = True) -> Path:
+    """A channel's config folder. The stable one is what BharatCode's CLI reports (unless
+    `ask_cli` is off: starting the CLI is slow and not for a job's start), else the default."""
     override = os.environ.get(CONFIG_DIR_ENV, "").strip()
     if override:  # tests: the other channels' folders sit under the override
-        return Path(override) / CHANNELS[channel]
+        return Path(override) if channel == "stable" else Path(override) / CHANNELS[channel]
+    if channel == "stable" and ask_cli:
+        return config_dir()
     base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     return Path(base) / CHANNELS[channel] / "Config"
 
@@ -73,6 +75,28 @@ def channel_config_dir(channel: str) -> Path:
 def installed_channels() -> list[str]:
     """Channels with a config folder on this machine; stable always (the CLI and released app)."""
     return ["stable"] + [c for c in CHANNELS if c != "stable" and channel_config_dir(c).is_dir()]
+
+
+def user_mcp_servers() -> dict[str, dict]:
+    """The MCP servers in the user's global BharatCode config, by name, from every channel's
+    config folder on this machine (the released app and the CLI share one; beta and dev builds
+    have their own; the stable one wins a clash). For jobs, which switch them off: the folders
+    are found without starting the CLI, and a file that can't be read or parsed is skipped, so
+    the user's config can never stop a job."""
+    found: dict[str, dict] = {}
+    for channel in CHANNELS:
+        folder = channel_config_dir(channel, ask_cli=False)
+        if not folder.is_dir():
+            continue
+        try:
+            mcp = parse_jsonc(config_file(folder).read_text(encoding="utf-8-sig")).get("mcp")
+        except (OSError, ValueError):
+            continue
+        if isinstance(mcp, dict):
+            for name, entry in mcp.items():
+                if isinstance(entry, dict):
+                    found.setdefault(name, entry)
+    return found
 
 
 def snippet(command: list[str]) -> str:
