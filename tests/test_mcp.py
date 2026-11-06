@@ -14,7 +14,7 @@ import httpx
 import mcp
 import pytest
 
-from gpu_token_utilization import actions, freerun, waits
+from gpu_token_utilization import actions, freerun, waits, worktree
 from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
@@ -139,6 +139,14 @@ def test_delegate_in_a_folder_that_is_not_a_git_repo(tmp_path, fake):
     http = lambda: httpx.Client(transport=fake.transport())
     text = SpareTools(tmp_path, launch=lambda repo: 1, http=http).delegate("review", ".")
     assert text.startswith("Handed off: review for ."), text
+
+
+def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, fake, monkeypatch):
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
+    (tmp_path / "a.py").write_text("x = 1\n")
+    http = lambda: httpx.Client(transport=fake.transport())
+    text = SpareTools(tmp_path, launch=lambda repo: 1, http=http).delegate("review", ".")
+    assert text.startswith("Handed off: review for .") and "isn't a git repo" in text
 
 
 # --- spare_work_status ------------------------------------------------------------------------

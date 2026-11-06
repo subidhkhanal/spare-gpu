@@ -21,13 +21,20 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 # Files that running code or tests leaves behind; never part of a job's output.
 GENERATED = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
 # Folders never copied into a job's copy: spare-gpu's own, version control, and the usual
-# dependency and cache folders (large, and not something a job should read or change).
-SKIP_DIRS = {".git", ".gtu", "spare-gpu", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
-             ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox"}
+# dependency, cache and build-output folders (large, and not something a job should read or
+# change). In a git repo this applies to untracked files only: what the user committed is part
+# of their project, a build/ or out/ folder included.
+SKIP_DIRS = {".git", ".gtu", "spare-gpu", ".hg", ".svn",
+             "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
+             "dist", "build", "target", ".next", ".gradle", "out", "coverage"}
+# A project that isn't a git repo has no .gitignore to keep data and build output out of each
+# job's copy, so one whose copy would be this big gets a note (the copy still goes ahead).
+WARN_COPY_BYTES = 200 * 1024 * 1024
 # The private history's commits are attributed to the tool.
 AUTHOR = ("-c", "user.name=spare-gpu", "-c", "user.email=spare-gpu@localhost")
 # Every git call: ".gtu/worktrees/<id>/" lengthens each path, which can pass Windows' 260-character
@@ -95,18 +102,48 @@ def _is_repo_top(repo: Path) -> bool:
 
 def project_files(repo: Path) -> list[str]:
     """The project's files as the user sees them, relative, with "/" separators. In a git repo,
-    what git shows (tracked files plus new ones, minus what .gitignore hides); elsewhere every
-    file, minus SKIP_DIRS."""
+    what git shows (tracked files, plus new ones minus what .gitignore hides and minus
+    SKIP_DIRS); elsewhere every file, minus SKIP_DIRS at any depth."""
     repo = Path(repo)
     if _is_repo_top(repo):
-        names = _git(repo, "ls-files", "-co", "--exclude-standard", "-z").stdout.split("\0")
-        return sorted({n for n in names if n and n.split("/")[0] not in SKIP_DIRS and (repo / n).is_file()})
+        tracked = _git(repo, "ls-files", "-c", "-z").stdout.split("\0")
+        untracked = _git(repo, "ls-files", "-o", "--exclude-standard", "-z").stdout.split("\0")
+        names = {n for n in tracked if n} | {n for n in untracked if n and n.split("/")[0] not in SKIP_DIRS}
+        return sorted(n for n in names if (repo / n).is_file())
     found = []
     for root, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         rel = Path(root).relative_to(repo)
         found += [(rel / f).as_posix() for f in files]
     return sorted(found)
+
+
+def copy_size(repo: Path, files: list[str]) -> int:
+    """How many bytes the copy of `files` would take."""
+    total = 0
+    for name in files:
+        try:
+            total += (Path(repo) / name).stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def size_warning(repo: Path, files: list[str] | None = None) -> str | None:
+    """For a project that isn't a git repo: a note for the user when each job's copy would be
+    big. None for a git repo (its .gitignore keeps build output and data out) or a small folder."""
+    repo = Path(repo)
+    if _is_repo_top(repo):
+        return None
+    files = project_files(repo) if files is None else files
+    size = copy_size(repo, files)
+    if size <= WARN_COPY_BYTES:
+        return None
+    shown = f"{size // 1_048_576:,} MB" if size >= 1_048_576 else f"{size // 1024} KB"
+    return (f"{repo} isn't a git repo, so each job copies all {len(files):,} files in it ({shown}; node_modules, "
+            "dist, build and other dependency and build folders are skipped). A copy that big is slow and uses "
+            "that much disk per job. Move large files out, or make the project a git repo with a .gitignore, so "
+            "ignored files are left out.")
 
 
 def _long_paths_enabled() -> bool:
@@ -140,8 +177,9 @@ def _check_path_lengths(files: list[str], path: Path) -> None:
     )
 
 
-def create(repo: Path, job_id: str) -> Path:
-    """The job's private copy, made from the project's current files if it doesn't exist yet."""
+def create(repo: Path, job_id: str, warn: Callable[[str], None] | None = None) -> Path:
+    """The job's private copy, made from the project's current files if it doesn't exist yet.
+    `warn` gets a note when the copy is big (see size_warning); the copy goes ahead regardless."""
     repo = Path(repo)
     path = worktree_path(repo, job_id)
     if path.exists() and (path / ".git").exists():
@@ -149,6 +187,10 @@ def create(repo: Path, job_id: str) -> Path:
     ensure_clean(repo)
     _ignore_own_folder(repo / ".gtu")
     files = project_files(repo)
+    if warn is not None:
+        note = size_warning(repo, files)
+        if note:
+            warn(note)
     _check_path_lengths(files, path)
     if path.exists():  # a copy cut short (a crash while copying): start it again
         _rmtree(path)

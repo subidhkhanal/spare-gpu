@@ -44,7 +44,7 @@ DEFAULT_ALLOWED = ("python -m pytest", "pytest", "npm test", "go test")
 def _test_env() -> dict:
     """Model-written tests never see the API key, and leave no bytecode caches behind."""
     return env_without_key(PYTHONDONTWRITEBYTECODE="1")
-SKIP_DIRS = {".git", ".gtu", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
+SKIP_DIRS = worktree.SKIP_DIRS  # the review listing skips what the job's copy skips
 MAX_FILE_BYTES = 200_000
 
 

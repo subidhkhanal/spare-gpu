@@ -2,6 +2,7 @@
 not, saved or not), its own history for checking and resuming, and nothing left in the project
 afterwards but the spare-gpu/<date>_<time>/ folder."""
 
+import re
 from datetime import datetime
 
 import pytest
@@ -32,6 +33,17 @@ def plain_folder(tmp_path):
     return folder
 
 
+BUILD_OUTPUT = ("dist/bundle.js", "build/lib/a.py", "target/debug/bin", ".next/cache/c", ".gradle/caches/g",
+                "out/o.txt", "coverage/lcov.info")
+
+
+def with_build_output(folder):
+    for name in BUILD_OUTPUT:
+        path = folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("generated\n")
+
+
 # --- making the copy --------------------------------------------------------------------------
 
 def test_the_copy_has_the_projects_files_and_its_own_history(git_repo):
@@ -50,6 +62,59 @@ def test_a_folder_that_isnt_a_git_repo_works(plain_folder):
     assert not (path / "node_modules").exists()  # dependency folders aren't copied
     assert not (plain_folder / ".git").exists()  # the project doesn't become a repo
     assert worktree.repo_root(plain_folder) == plain_folder
+
+
+def test_build_output_folders_are_not_copied_from_a_plain_folder(plain_folder):
+    with_build_output(plain_folder)
+    path = worktree.create(plain_folder, "abc123")
+    assert (path / "src" / "calc.py").exists()
+    assert not any((path / name).exists() for name in BUILD_OUTPUT)
+
+
+def test_untracked_build_output_is_not_copied_from_a_git_repo_but_committed_files_always_are(git_repo):
+    with_build_output(git_repo)  # untracked, and no .gitignore to hide it
+    (git_repo / "build" / "setup.sh").write_text("# a build script the project commits\n")
+    git(git_repo, "add", "build/setup.sh")
+    git(git_repo, "commit", "-q", "-m", "build script")
+    before = project_state(git_repo)
+    path = worktree.create(git_repo, "abc123")
+    assert (path / "build" / "setup.sh").exists()  # what the user committed is their project
+    assert not (path / "build" / "lib").exists() and not any((path / n).exists() for n in BUILD_OUTPUT)
+    assert project_state(git_repo) == before
+
+
+def test_a_big_plain_folder_gets_a_note_and_is_still_copied(plain_folder, monkeypatch):
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 10)
+    notes = []
+    path = worktree.create(plain_folder, "abc123", warn=notes.append)
+    assert len(notes) == 1 and "isn't a git repo" in notes[0] and re.search(r"\d+ [KM]B", notes[0])
+    assert (path / "src" / "calc.py").exists()  # a note never stops the copy
+    assert worktree.size_warning(plain_folder) == notes[0]
+
+
+def test_a_small_plain_folder_and_any_git_repo_get_no_note(plain_folder, git_repo, monkeypatch):
+    notes = []
+    worktree.create(plain_folder, "abc123", warn=notes.append)
+    assert notes == [] and worktree.size_warning(plain_folder) is None
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
+    worktree.create(git_repo, "abc123", warn=notes.append)
+    assert notes == [] and worktree.size_warning(git_repo) is None  # its .gitignore does that job
+
+
+def test_skipped_folders_dont_count_toward_the_note(plain_folder, monkeypatch):
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1000)
+    (plain_folder / "node_modules" / "big" / "blob").write_bytes(b"x" * 100_000)
+    (plain_folder / "dist").mkdir()
+    (plain_folder / "dist" / "bundle.js").write_bytes(b"x" * 50_000)
+    assert worktree.size_warning(plain_folder) is None  # only what would be copied is measured
+
+
+def test_resuming_a_copy_does_not_repeat_the_note(plain_folder, monkeypatch):
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 10)
+    notes = []
+    worktree.create(plain_folder, "abc123", warn=notes.append)
+    worktree.create(plain_folder, "abc123", warn=notes.append)
+    assert len(notes) == 1
 
 
 def test_unsaved_changes_are_copied_as_they_are(git_repo):

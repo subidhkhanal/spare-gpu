@@ -24,6 +24,19 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_add_notes_when_a_plain_folder_is_big(tmp_path, monkeypatch):
+    from gpu_token_utilization import worktree
+
+    monkeypatch.delenv("GTU_DB", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x = 1\n")
+    monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
+    result = runner.invoke(app, ["add", "review", "src"])
+    assert result.exit_code == 0 and "Queued job" in result.output
+    assert "Note:" in result.output and "isn't a git repo" in result.output
+
+
 def test_add_works_with_unsaved_changes(repo):
     # each job copies the files as they are, so nothing needs committing first
     (repo / "src" / "a.py").write_text("changed\n")

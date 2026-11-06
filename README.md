@@ -105,6 +105,7 @@ You don't have to type `/auto`. spare-gpu also understands plain requests in any
 - `/auto`'s own handoff, a single short request, always runs on Qwen. If Qwen is packed, that one request waits briefly before your task moves to DeepSeek.
 - Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project. That folder ignores itself in git, so it never shows up as a change.
 - Needs git installed on your PC (the installer adds it), since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
+- Dependency, cache and build-output folders (`node_modules`, `venv`, `dist`, `build`, `target`, `.next`, `.gradle`, `out`, `coverage` and the like) aren't copied into a job's copy, unless your repo tracks them. If your project isn't a git repo and its copy would be over 200 MB, queueing a job says so, and the job's log repeats it.
 - Which task types may move to Qwen comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/).
 - More detail and the measurements behind it: [research/](research/).
 

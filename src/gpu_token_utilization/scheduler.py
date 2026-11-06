@@ -257,7 +257,8 @@ class Scheduler:
 
         if self.isolate:
             try:
-                workdir = worktree.create(Path(job.repo), job.id)
+                workdir = worktree.create(Path(job.repo), job.id,
+                                          warn=lambda note: self._log(f"Job {job.id}: {note}"))
                 if not job.base_commit:  # first run: remember the copy's starting point, for reports
                     self.store.set_base_commit(job.id, worktree._git(workdir, "rev-parse", "HEAD").stdout.strip())
             except worktree.GitError as exc:

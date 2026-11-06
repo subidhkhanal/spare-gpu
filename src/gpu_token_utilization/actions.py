@@ -44,13 +44,16 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
             job = store.add_job(kind, relative.as_posix() or ".", str(repo), note)
     except StoreError as exc:
         raise ActionError(str(exc)) from None
-    warning = None
+    notes = []
     if job.kind in CLI_KINDS:
         try:
             resolve_command()
         except CliNotFound as exc:
-            warning = f"This job won't run yet. {exc}\nIt stays queued and runs on the first `gtu start` after that."
-    return Outcome(job, warning)
+            notes.append(f"This job won't run yet. {exc}\nIt stays queued and runs on the first `gtu start` after that.")
+    size = worktree.size_warning(repo)  # a plain folder whose copy would be big: say so now, not at 3 am
+    if size:
+        notes.append(size)
+    return Outcome(job, "\n".join(notes) or None)
 
 
 def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
