@@ -2,7 +2,7 @@
 
 ## What it does
 
-- **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen only happens for task types where Qwen was measured to be just as good: docs and questions today, while tests and reviews stay on DeepSeek.
+- **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek.
 - **One command: `/auto`.** Type `/auto` and what you want: a question, tests, docs or a code review. The reply says which model it used and how much waiting that saved.
 - **Does the chores in the background.** Tests, docs and reviews run as their own Desktop session, so your chat stays free.
 - **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. The files a job edited are copied to `spare-gpu/<date>_<time>/` in your project. Your own files are never touched: open the folder and copy over what you want.
@@ -62,6 +62,8 @@ For example, on 5 Nov DeepSeek had a 3-minute queue while Qwen had a free slot:
 
 It only switches when that saves at least 20 seconds and the other model has a free slot, so switched work never lands in a queue. If your plan doesn't include DeepSeek, everything runs on Qwen.
 
+Questions aren't measured: a quick answer from whichever model is free is the point of `/auto`, so they go to the faster model by design, and the reply names the model that answered. Job types move only after measurement: docs were measured as good on Qwen; tests and reviews weren't shown to be, so they stay on DeepSeek.
+
 ### Turn it off
 
 `gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
@@ -89,13 +91,13 @@ You don't have to type `/auto`. spare-gpu also understands plain requests in any
 | "queue tests for src/payments" | Runs it in the background; the result lands in `spare-gpu/` |
 | "how long is DeepSeek's queue?" | Shows each model's current wait |
 | "is my tests job done?" | Shows queued, running and finished jobs |
-| "what did spare-gpu do last night?" | What ran, what it produced, and the tokens used |
+| "what did spare-gpu do last night?" | Finished jobs, where their files landed and the tokens used (`gtu report` in a terminal has the full summary) |
 | "cancel the docs job" | Cancels it |
 
 ## Why it's useful
 
 - **Less waiting.** DeepSeek's queue can reach minutes at busy times, while Qwen often has a free slot, and the other way round. `/auto` sends your work to whichever is free, without you watching queues.
-- **No quality loss.** Work only moves to Qwen for task types where Qwen was measured to be just as good, and every result is checked before it's kept.
+- **No quality loss on background work.** Jobs only move to Qwen for job types where Qwen was measured to be just as good, and every result is checked before it's kept. Questions are the one unmeasured case: they go to the faster model by design, and the reply says which model answered.
 - **Less babysitting.** Chores run on their own, get checked, and wait for you in the `spare-gpu/` folder.
 - **No surprises.** It never edits your files, never pushes, and only runs your test, build and lint commands.
 
@@ -106,7 +108,7 @@ You don't have to type `/auto`. spare-gpu also understands plain requests in any
 - Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project. That folder ignores itself in git, so it never shows up as a change.
 - Needs git installed on your PC (the installer adds it), since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
 - Dependency, cache and build-output folders (`node_modules`, `venv`, `dist`, `build`, `target`, `.next`, `.gradle`, `out`, `coverage` and the like) aren't copied into a job's copy, unless your repo tracks them. If your project isn't a git repo and its copy would be over 200 MB, queueing a job says so, and the job's log repeats it.
-- Which task types may move to Qwen comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/).
+- Which job types may move to Qwen comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/). Questions aren't part of it.
 - More detail and the measurements behind it: [research/](research/).
 
 MIT licence, see [LICENSE](LICENSE). An independent project for the BharatCode Build League, not affiliated with BharatCode.
