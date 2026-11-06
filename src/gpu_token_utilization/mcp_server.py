@@ -17,7 +17,7 @@ from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, desktop, freerun, refs, router, runner, runstate, scholar, waits, worktree
+from . import __version__, actions, desktop, freerun, refs, router, runner, runstate, scholar, security, waits, worktree
 from .api import ApiKeyMissing, find_api_key
 from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
@@ -304,6 +304,13 @@ class SpareTools:
             return f"Couldn't read {refs.SOURCES_FILE}: {exc}."
         return refs.describe(verdicts, file)
 
+    def security_filter(self, findings: str) -> str:
+        try:
+            candidates = security.parse(findings)
+        except ValueError as exc:
+            return f"Couldn't read the candidates: {exc}."
+        return security.describe(security.filter_findings(candidates))
+
 
 def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False):
     """The MCP server for one project folder (the agent's working directory by default). With
@@ -404,6 +411,21 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
                     the project, or the file itself.
             """
             return tools.verify_refs(folder)
+
+        @server.tool(annotations=notes(True))
+        def security_filter(findings: str) -> str:
+            """Drop the candidate findings of /security-review that match known false-positive
+            patterns, by rule and before any model judges them: denial of service, rate limiting,
+            resource leaks, open redirects, regex injection, memory safety outside C/C++, SSRF in
+            HTML, documentation and test-only files, attacks that need an environment variable,
+            and candidates below 0.7 confidence. Returns what was dropped and why, and the kept
+            candidates as JSON for the verifier.
+
+            Args:
+                findings: The candidates as JSON: a list of objects with file, line, severity, category,
+                    description, exploit_scenario, recommendation and confidence (0 to 1).
+            """
+            return tools.security_filter(findings)
 
     @server.tool(annotations=notes(False, world=True))
     def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,

@@ -45,9 +45,8 @@ COMPONENTS: dict[str, Component] = {
     "review": Component("review", "/code-review", ("code-review",),
                         ("review-lead", "review-finder", "review-verifier")),
     "security": Component("security", "/security-review", ("security-review",),
-                          ("security-lead", "security-finder", "security-verifier")),
-    "simplify": Component("simplify", "/simplify", ("simplify",),
-                          ("simplify-lead", "simplify-finder", "simplify-applier")),
+                          ("security-lead", "security-finder", "security-verifier"), ("security_filter",)),
+    "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder")),
     "context": Component("context", "/context-report", ("context-report",), ("context-lead",), ("context_report",)),
 }
 

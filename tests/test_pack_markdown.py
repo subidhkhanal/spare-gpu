@@ -106,6 +106,41 @@ def test_review_agents_read_only_and_the_lead_hands_fixes_to_a_job():
     assert "concrete input" in verifier_body and "critical" in verifier_body and "refute" in verifier_body
 
 
+def test_security_agents_never_run_exploit_code_and_the_lead_filters_by_rule():
+    files = {n: p for k, n, p in pack.markdown_files([COMPONENTS["security"]]) if k == "agent"}
+    lead, lead_body = parse(files["security-lead"])
+    assert "edit" not in lead["permission"] and lead["permission"]["spare-gpu_security_filter"] == "allow"
+    assert "spare-gpu_spare_delegate" not in lead["permission"]  # a security review never applies changes
+    flat = " ".join(lead_body.split())
+    for step in ("five `security-finder` tasks in one message", "`security_filter` tool", "security-verifier", "refute",
+                 "scored 8 or more", "exploit code", "read-only", "claude-code-security-review (MIT)", "Never claim a number"):
+        assert step in flat, step
+    finder, finder_body = parse(files["security-finder"])
+    verifier, verifier_body = parse(files["security-verifier"])
+    for data, body in ((finder, finder_body), (verifier, verifier_body)):
+        assert "edit" not in data["permission"] and not any(k.startswith("spare-gpu_") for k in data["permission"])
+        assert "exploit code" in body
+    assert finder["model"] == FILLED.standard and verifier["model"] == FILLED.heavy
+    assert "Environment variables and command-line flags are trusted" in verifier_body
+    doc = pack.config(pack.select("security"), FILLED)
+    assert doc["permission"]["spare-gpu_security_filter"] == "deny"
+    assert set(doc["permission"]["task"]) == {"security-finder", "security-verifier"}
+
+
+def test_simplify_accepts_only_behaviour_preserving_cleanups_and_applies_them_through_a_fix_job():
+    files = {n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}
+    lead, lead_body = parse(files["simplify-lead"])
+    assert "edit" not in lead["permission"] and lead["permission"]["spare-gpu_spare_delegate"] == "allow"
+    flat = " ".join(lead_body.split())
+    for step in ("behaviour", 'type "fix"', "kept the changes only if it passes" if False else "keeps the changes only if", "your_model",
+                 "spare-gpu/<date>_<time>/", "Never edit files yourself", "Never claim a number"):
+        assert step in flat, step
+    finder, finder_body = parse(files["simplify-finder"])
+    assert finder["model"] == FILLED.standard and "edit" not in finder["permission"]
+    assert "behaviour_change" in finder_body and "JSON list" in finder_body
+    assert pack.helpers([COMPONENTS["simplify"]]) == ["simplify-finder"]
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())

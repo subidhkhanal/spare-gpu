@@ -20,7 +20,7 @@ from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs"}  # only for a server started with `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter"}  # only for a server started with `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -259,6 +259,17 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert listed["scholar_search"].annotations.read_only_hint is True
     assert "sources.json" in listed["verify_refs"].description and "DROP" in listed["verify_refs"].description
     assert listed["scholar_search"].input_schema["required"] == ["query"]
+    assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
+
+
+def test_security_filter_through_the_tool(git_repo, fake):
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
+    text = tools.security_filter(json.dumps([
+        {"file": "app.py", "line": 1, "description": "SQL injection via the id parameter.", "confidence": 0.9},
+        {"file": "app.py", "line": 2, "description": "Missing rate limiting on login.", "confidence": 0.9},
+    ]))
+    assert text.startswith("Kept 1 of 2 candidate(s)") and "- DROPPED app.py:2: rate limiting" in text
+    assert tools.security_filter("nope").startswith("Couldn't read the candidates:")
 
 
 def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):

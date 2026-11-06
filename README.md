@@ -80,6 +80,14 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 `/code-review [low|medium|high|deep] [commit or branch] [--fix]` reviews your uncommitted changes (or a commit or branch). A lead on DeepSeek slices the diff by concern (correctness, edge cases, error handling, concurrency, API misuse, tests) and starts one finder per slice on Qwen, all at once; the finders report candidates with a failure scenario each; a verifier on DeepSeek re-reads the code for every candidate and keeps only those with concrete evidence, ranked by severity. Effort sets the number of finders (2, 4, 6, or 6 twice with a refuting verifier pass). With `--fix`, the kept findings go to a background `fix` job that applies them in a private copy, runs your test command, and keeps the changes only if it passes (a fix may not change existing tests); the result lands in `spare-gpu/<date>_<time>/`. Finders and the verifier have no shell beyond git's read-only commands and can't edit files. BharatCode's own `/review` is one pass by one model; this runs locally before you push, on your own quota. Nazar reviews pull requests on GitHub; this is for the changes still on your machine.
 
+### `/security-review` (experimental until the benchmark in research/security-review/ is run)
+
+`/security-review [commit or branch] [deep]` is a read-only security review of your uncommitted changes (or a commit or branch): five finders on Qwen, one per vulnerability class (injection and input validation; authentication and authorisation; crypto and secrets; code execution and XSS; data exposure), report candidates; a rule-based filter (`security_filter`, a re-implementation of the false-positive rules in Anthropic's MIT-licensed claude-code-security-review, see `pack/ATTRIBUTION.md`) drops the known low-signal patterns; a verifier on DeepSeek follows each remaining attack path, applies the method's precedents, and scores 1 to 10; only 8 and above are reported. Nothing in it runs exploit code or writes a file.
+
+### `/simplify` (experimental until the benchmark in research/simplify/ is run)
+
+`/simplify [file or folder]` (nothing means the files in your uncommitted diff) has finders on Qwen propose reuse, simplification and efficiency cleanups with no behaviour change; a lead on DeepSeek accepts the safe ones and hands them to a `fix` job, which applies them in a private copy on DeepSeek, runs your test command, and keeps them only if it passes. The result is one set of changed files in `spare-gpu/<date>_<time>/` to accept or ignore.
+
 ## What you get
 
 Background work lands in your project when it's done. Ask "is my job done?" to check on it.
