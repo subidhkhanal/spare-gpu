@@ -34,6 +34,8 @@ SERVER = "spare-gpu"  # the MCP server the pack's tools live in; BharatCode name
 SWITCHABLE = ("research-checker", "review-verifier", "security-verifier")
 VARIANT_SUFFIX = "-standard"
 SHARED_TOOLS = ("pack_cost",)  # pack-only tools every lead uses
+# Files an earlier version installed and this one no longer has: removed on install and uninstall.
+RETIRED = (("command", "context-report"), ("agent", "context-lead"))
 
 
 @dataclass(frozen=True)
@@ -180,7 +182,7 @@ def all_markdown_names() -> list[tuple[str, str]]:
             out.append(("agent", name))
             if variant_of(name):
                 out.append(("agent", variant_of(name)))
-    return out
+    return out + list(RETIRED)
 
 
 def helpers(components, source: Path = PACK_DIR) -> list[str]:
@@ -259,7 +261,7 @@ def pack_added_tokens(doc: dict, helper_list: list[str] | None = None) -> int:
     task = permission.get("task") or {}
     names = helper_list if helper_list is not None else helpers(COMPONENTS.values())
     visible = [h for h in names if task.get(h) != "deny"]
-    return TOKENS_PER_MCP_TOOL * len(set(tools)) + TOKENS_PER_SUBAGENT_LINE * len(visible)
+    return TOKENS_PER_MCP_TOOL * len(set(tools)) + TOKENS_PER_SUBAGENT_LINE * len(visible)  # a shared tool is described once
 
 
 def config_text(doc: dict, marker_line: str) -> str:

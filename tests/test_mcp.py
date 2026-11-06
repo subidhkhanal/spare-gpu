@@ -19,6 +19,8 @@ from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
+from conftest import STATS
+
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
 PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
@@ -262,28 +264,6 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
 
 
-STATS = """┌────────────────────────────────────────────────────────┐
-│                      MODEL USAGE                       │
-├────────────────────────────────────────────────────────┤
-│ bharatcode/deepseek-v4.1-flash                         │
-│   Messages                                         12 │
-│   Input Tokens                                  120.5K │
-│   Output Tokens                                   8.2K │
-│   Cache Read                                     40.0K │
-│   Cache Write                                       0 │
-│   Cost                                        $0.0000 │
-├────────────────────────────────────────────────────────┤
-│ bharatcode/qwen-3.8-27b                                │
-│   Messages                                         30 │
-│   Input Tokens                                  300.0K │
-│   Output Tokens                                  20.0K │
-│   Cache Read                                        0 │
-│   Cache Write                                       0 │
-│   Cost                                        $0.0000 │
-└────────────────────────────────────────────────────────┘
-"""
-
-
 def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_delta(tools, git_repo, fake, monkeypatch):
     from gpu_token_utilization import stats
 
@@ -331,6 +311,37 @@ def test_pack_cost_without_a_snapshot_or_a_cli_says_so(tools, git_repo, monkeypa
     (git_repo / ".gtu" / "pack-usage.json").write_text('{"at": "2026-11-06T10:00:00+00:00", "models": {}}', encoding="utf-8")
     monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: None)
     assert "no token figures" in tools.pack_cost()
+
+
+def test_security_filter_through_the_tool(git_repo, fake):
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
+    text = tools.security_filter(json.dumps([
+        {"file": "app.py", "line": 1, "description": "SQL injection via the id parameter.", "confidence": 0.9},
+        {"file": "app.py", "line": 2, "description": "Missing rate limiting on login.", "confidence": 0.9},
+    ]))
+    assert text.startswith("Kept 1 of 2 candidate(s)") and "- DROPPED app.py:2: rate limiting" in text
+    assert tools.security_filter("nope").startswith("Couldn't read the candidates:")
+
+
+def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
+    from test_scholar import registries
+
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()),
+                       scholar_http=registries)
+    text = tools.scholar_search("attention is all you need")
+    assert text.startswith("1. Attention Is All You Need (2017)") and "arxiv: 1706.03762" in text
+    assert tools.scholar_search("attention", limit=2, sources="arxiv").count("found in: arxiv") == 2
+    assert "unknown source 'nope'" in tools.scholar_search("attention", sources="nope")
+    folder = git_repo / "research" / "transformers"
+    folder.mkdir(parents=True)
+    (folder / "sources.json").write_text(json.dumps({"sources": [
+        {"key": "lecun2015", "title": "Deep learning", "authors": ["Yann LeCun"], "doi": "10.1038/nature14539"},
+        {"key": "fake", "title": "Made up", "doi": "10.1000/fake"}]}), encoding="utf-8")
+    text = tools.verify_refs("research/transformers")
+    assert "1 verified, 1 to drop" in text and "- DROP fake: no registry has DOI 10.1000/fake" in text
+    assert json.loads((folder / "sources.json").read_text(encoding="utf-8"))["sources"][1]["verified"] is False
+    assert tools.verify_refs("research/nothing").startswith("No sources.json in ")
+    assert "outside this project" in tools.verify_refs("../elsewhere")
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):

@@ -128,3 +128,27 @@ def make_gate(fake, store, client):
         )
 
     return make
+
+
+# What `bharatcode stats --models` prints (its MODEL USAGE box), for the stats and pack_cost tests.
+STATS = """┌────────────────────────────────────────────────────────┐
+│                      MODEL USAGE                       │
+├────────────────────────────────────────────────────────┤
+│ bharatcode/deepseek-v4.1-flash                         │
+│   Messages                                         12 │
+│   Input Tokens                                  120.5K │
+│   Output Tokens                                   8.2K │
+│   Cache Read                                     40.0K │
+│   Cache Write                                       0 │
+│   Cost                                        $0.0000 │
+├────────────────────────────────────────────────────────┤
+│ bharatcode/qwen-3.8-27b                                │
+│   Messages                                         30 │
+│   Input Tokens                                  300.0K │
+│   Output Tokens                                  20.0K │
+│   Cache Read                                        0 │
+│   Cache Write                                       0 │
+│   Cost                                        $0.0000 │
+└────────────────────────────────────────────────────────┘
+"""
+

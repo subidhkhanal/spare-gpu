@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import bc_config, router, waits
-from . import COMPONENTS, HEAVY, STANDARD, SWITCHABLE, Models, config, frontmatter, helpers, install_files, select
+from . import COMPONENTS, HEAVY, STANDARD, SWITCHABLE, Models, all_markdown_names, config, frontmatter, helpers, install_files, select
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
@@ -150,6 +150,13 @@ def run(folder: Path, how: str = "") -> list[Finding]:
         loose = [h for h in helpers(components) if task.get(h) != "deny"]
         if loose:
             found.append(Finding(FAIL, f"helpers not denied for your other agents (they cost tokens on every step): {', '.join(loose)}"))
+
+    known = {f"{kind}/{name}.md" for kind, name in all_markdown_names()}
+    strays = sorted(f"{kind}/{p.name}" for kind in ("command", "agent") for p in (folder / kind).glob("*.md")
+                    if _marked(p) and f"{kind}/{p.name}" not in known and p.name != "auto.md")
+    if strays:
+        found.append(Finding(WARN, "marked as spare-gpu's but not part of this pack (an older version's?): " + ", ".join(strays)
+                             + "; `gtu integrate --pack` removes retired files, or delete them by hand"))
 
     for conflict in bc_config.pack_conflicts(folder, doc):
         found.append(Finding(WARN, f"conflict: {conflict}"))

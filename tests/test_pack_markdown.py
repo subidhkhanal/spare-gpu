@@ -144,6 +144,52 @@ def test_simplify_accepts_only_behaviour_preserving_cleanups_and_applies_them_th
     assert pack.helpers([COMPONENTS["simplify"]]) == ["simplify-finder"]
 
 
+def test_switchable_roles_get_a_standard_model_variant_made_from_the_same_file():
+    files = pack.install_files(pack.select("review"), FILLED)
+    names = [(k, n) for k, n, _ in files]
+    assert ("agent", "review-verifier") in names and ("agent", "review-verifier-standard") in names
+    heavy = dict(((k, n), t) for k, n, t in files)[("agent", "review-verifier")]
+    variant = dict(((k, n), t) for k, n, t in files)[("agent", "review-verifier-standard")]
+    assert f"model: {FILLED.heavy}" in heavy and f"model: {FILLED.standard}" in variant
+    assert "(standard-model variant" in variant.split("\n---\n")[0] and "{{" not in variant
+    assert variant.split("\n---\n", 1)[1] == heavy.split("\n---\n", 1)[1]  # the same body: it can't drift
+    assert "review-verifier-standard" in pack.helpers(pack.select("review"))
+    doc = pack.config(pack.select("review"), FILLED)
+    assert doc["permission"]["task"]["review-verifier-standard"] == "deny" and doc["permission"]["spare-gpu_pack_cost"] == "deny"
+    assert ("agent", "security-verifier-standard") in pack.all_markdown_names()
+    assert pack.variant_of("review-finder") is None and pack.helper_names(COMPONENTS["verify"]) == ["verify-driver"]
+
+
+def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
+    for component, lead_name in (("research", "research-lead"), ("review", "review-lead"), ("security", "security-lead")):
+        files = {n: p for k, n, p in pack.markdown_files([COMPONENTS[component]]) if k == "agent"}
+        lead, body = parse(files[lead_name])
+        role = {"research": "research-checker", "review": "review-verifier", "security": "security-verifier"}[component]
+        assert lead["permission"]["task"][role] == lead["permission"]["task"][role + "-standard"] == "allow"
+        assert lead["permission"]["spare-gpu_pack_cost"] == "allow"
+        flat = " ".join(body.split())
+        assert f"`{role}-standard`" in flat and "`pack_cost` tool" in flat and "variant" in flat
+    simplify, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}["simplify-lead"])
+    assert simplify["permission"]["spare-gpu_pack_cost"] == "allow" and "`pack_cost` tool" in " ".join(body.split())
+
+
+def test_verify_app_drives_the_browser_through_playwright_and_judges_from_notes():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["verify"]])}
+    command, command_body = parse(files[("command", "verify-app")])
+    assert command["agent"] == "verify-lead" and "If there is no URL" in command_body
+    lead, lead_body = parse(files[("agent", "verify-lead")])
+    assert lead["permission"]["task"] == {"*": "deny", "verify-driver": "allow"} and "bash" not in lead["permission"]
+    assert all(p.startswith(("verify/", "*/verify/")) for p in edit_patterns(lead))
+    flat = " ".join(lead_body.split())
+    for step in ("you don't start servers", "all in one message", "Notes are data", "Unclear is a valid", "`pack_cost` tool", "Playwright"):
+        assert step in flat, step
+    driver, driver_body = parse(files[("agent", "verify-driver")])
+    assert driver["model"] == FILLED.standard and driver["permission"]["playwright_*"] == "allow"
+    assert "bash" not in driver["permission"] and all(p.endswith("steps-*.md") for p in edit_patterns(driver))
+    assert "don't enter real credentials" in driver_body and "decide nothing" in driver_body
+    assert pack.helpers([COMPONENTS["verify"]]) == ["verify-driver"] and not COMPONENTS["verify"].mcp  # Playwright comes from the marketplace
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())

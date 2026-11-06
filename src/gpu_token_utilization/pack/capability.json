@@ -2,7 +2,7 @@
   "_comment": "A proposal in BharatCode's marketplace format (packages/core/src/capabilities/catalog.json). The marketplace supports skill and mcp modules today; the pack's Markdown commands and agents are installed by `gtu integrate --pack` until BharatCode has module types for them. Not loaded by anything yet.",
   "id": "spare-gpu-pack",
   "name": "spare-gpu command pack",
-  "description": "Commands that split each job between DeepSeek (plan, judge, verify) and Qwen (many quick parallel steps): /deep-research, /code-review, /security-review, /simplify, plus /auto.",
+  "description": "Commands that split each job between DeepSeek (plan, judge, verify) and Qwen (many quick parallel steps): /deep-research, /code-review, /security-review, /simplify, /verify-app, plus /auto.",
   "publisher": "spare-gpu (for BharatCode; not affiliated with BharatCode or Anthropic)",
   "version": "0.1.0",
   "category": "workflow",
@@ -11,7 +11,8 @@
   "requirements": [
     "Python 3.11 or newer",
     "git",
-    "spare-gpu installed (install.ps1)"
+    "spare-gpu installed (install.ps1)",
+    "Playwright capability from the marketplace, for /verify-app only"
   ],
   "permissions": [
     "local_process",
@@ -47,7 +48,8 @@
       "deep-research",
       "code-review",
       "security-review",
-      "simplify"
+      "simplify",
+      "verify-app"
     ],
     "agents": [
       "research-lead",
@@ -61,7 +63,9 @@
       "security-finder",
       "security-verifier",
       "simplify-lead",
-      "simplify-finder"
+      "simplify-finder",
+      "verify-lead",
+      "verify-driver"
     ],
     "config": [
       "small_model",

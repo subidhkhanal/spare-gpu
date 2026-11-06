@@ -208,6 +208,9 @@ def _install_pack(pad: str, channel: str, only: str | None, lite: bool) -> bool:
             typer.echo(f"{pad}{'Added' if what == 'added' else 'Updated'} {shown} ({folder / kind / (name + '.md')}).")
     if not files:
         typer.echo(f"{pad}No commands or agents to add for: {', '.join(c.name for c in components)}.")
+    for key in bc_config.remove_markdown(folder, list(pack.RETIRED)):  # left by an earlier version of the pack
+        kind, name = key.split("/", 1)
+        typer.echo(f"{pad}Removed {'/' + name if kind == 'command' else 'the ' + name + ' agent'}: no longer part of the pack.")
     for conflict in bc_config.pack_conflicts(folder, doc):
         typer.echo(f"{pad}Conflict: {conflict}.")
     typer.echo(f"{pad}To undo the pack: gtu integrate --pack --uninstall")

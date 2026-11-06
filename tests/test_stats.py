@@ -5,7 +5,7 @@ import sys
 
 from gpu_token_utilization import stats
 
-from test_mcp import STATS
+from conftest import STATS
 
 FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
 
@@ -28,3 +28,12 @@ def test_usage_comes_from_the_cli_or_is_none(monkeypatch):
     monkeypatch.delenv("GTU_BHARATCODE_CMD")
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     assert stats.usage(7) is None  # no CLI at all
+
+
+def test_escape_sequences_dates_and_paths_do_not_break_the_parsing():
+    noisy = "\x1b[2K\x1b[?25l2026/10/30-2026/11/06\n~/.config/bharatcode\n" + STATS + "┌──┐\n│ TOOL USAGE │\n│ bharatcode/x │\n│   Messages 99 │\n"
+    import re
+    cleaned = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", noisy)  # what usage() strips
+    figures = stats.parse_stats(cleaned)
+    assert set(figures) == {"bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b"}  # no phantom date, path or tool-box model
+    assert figures["bharatcode/qwen-3.8-27b"]["messages"] == 30

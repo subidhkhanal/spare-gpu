@@ -104,3 +104,22 @@ def test_other_channels_without_the_pack_are_pointed_out(config_dir, pack_dir):
     assert "WARN: BharatCode Desktop's dev channel has a config folder without the pack: `gtu integrate --pack --channel dev`" in result.output
     assert cli.invoke(app, ["pack-check", "--channel", "nightly"]).exit_code == 1
     assert check.worst([check.Finding("PASS", "x")]) == "PASS" and check.worst([check.Finding("WARN", "x")]) == "WARN"
+
+
+def test_files_of_an_earlier_pack_version_are_removed_on_install_and_flagged_until_then(config_dir, pack_dir):
+    (config_dir / "command").mkdir()
+    (config_dir / "agent").mkdir()
+    marker = "---\n# Installed by spare-gpu\ndescription: old\n---\nold\n"
+    (config_dir / "command" / "context-report.md").write_text(marker, encoding="utf-8")  # retired in this version
+    (config_dir / "agent" / "context-lead.md").write_text(marker, encoding="utf-8")
+    (config_dir / "agent" / "mystery.md").write_text(marker, encoding="utf-8")  # marked, but never ours
+    result = cli.invoke(app, ["integrate", "--pack"])
+    assert result.exit_code == 0, result.output
+    assert "Removed /context-report: no longer part of the pack" in result.output
+    assert "Removed the context-lead agent: no longer part of the pack" in result.output
+    assert not (config_dir / "command" / "context-report.md").exists() and not (config_dir / "agent" / "context-lead.md").exists()
+    check = cli.invoke(app, ["pack-check"])
+    assert "WARN: marked as spare-gpu's but not part of this pack (an older version's?): agent/mystery.md" in check.output
+    (config_dir / "agent" / "context-lead.md").write_text(marker, encoding="utf-8")
+    uninstall = cli.invoke(app, ["integrate", "--pack", "--uninstall"])
+    assert "Removed the context-lead agent" in uninstall.output and not (config_dir / "agent" / "context-lead.md").exists()

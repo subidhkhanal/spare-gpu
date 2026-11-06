@@ -31,6 +31,9 @@ def test_a_config_that_stopped_denying_would_show_the_cost():
     doc["permission"]["task"].pop("research-scout")
     assert pack.pack_added_tokens(doc) == pack.TOKENS_PER_MCP_TOOL + pack.TOKENS_PER_SUBAGENT_LINE
     assert pack.pack_added_tokens({}) > BUDGET  # with no pack config at all, the pack would blow the budget
+    shared = pack.config(pack.select(None), MODELS)
+    shared["permission"].pop("spare-gpu_pack_cost")  # listed by every lead's component, described once
+    assert pack.pack_added_tokens(shared) == pack.TOKENS_PER_MCP_TOOL
 
 
 @pytest.mark.skipif(not RECORDED.exists(), reason="no measurement recorded yet: run scripts/check_overhead_budget.py on Windows")

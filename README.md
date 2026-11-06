@@ -90,7 +90,7 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 `/simplify [file or folder]` (nothing means the files in your uncommitted diff) has finders on Qwen propose reuse, simplification and efficiency cleanups with no behaviour change; a lead on DeepSeek accepts the safe ones and hands them to a `fix` job, which applies them in a private copy on DeepSeek, runs your test command, and keeps them only if it passes. The result is one set of changed files in `spare-gpu/<date>_<time>/` to accept or ignore.
 
-**Overhead budget.** With the pack installed, a normal session must carry at most 1,500 extra tokens per step. By construction it carries none (tests/test_overhead_budget.py); the measured proof is recorded with scripts/check_overhead_budget.py once run on Windows (research/pack-install/manual-check.md, check 11).
+**Overhead budget.** With the pack installed, a normal session must carry at most 1,500 extra tokens per step. By construction it carries none (tests/test_overhead_budget.py); the measured proof is recorded with scripts/check_overhead_budget.py once run on Windows (research/pack-install/manual-check.md, check 8).
 
 ### `/verify-app` (stretch; experimental)
 

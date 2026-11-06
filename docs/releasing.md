@@ -20,6 +20,6 @@ accepts (a branch zip, a local folder) and is for development. A fork installs f
 
 1. Run the Windows checks in `research/*/manual-check.md` and record the outcomes.
 2. Record real registry fixtures: `python scripts/record_fixtures.py`, then `pytest`.
-3. Measure the overhead budget: `scripts/check_overhead_budget.py` (research/context-report/manual-check.md, check 5) and commit `research/pack-install/overhead.json`.
+3. Measure the overhead budget: `scripts/check_overhead_budget.py` (research/pack-install/manual-check.md, check 8) and commit `research/pack-install/overhead.json`.
 4. Run the benchmarks (`scripts/eval_research.py`, `scripts/eval_review.py`) and fill the results tables; only commands that meet their ship rule lose the "experimental" label in the README.
 5. Tag and publish the release, then post the marketplace proposal drafted in `research/bharatcode-issue-draft.md`.
