@@ -173,7 +173,9 @@ def test_integrate_pack_installs_everything_and_says_what_it_did(config_dir, pac
     assert (config_dir / "command" / "deep-research.md").is_file() and (config_dir / "command" / "auto.md").is_file()
     settings = parse_jsonc((config_dir / "config.json").read_text(encoding="utf-8"))
     assert settings["permission"]["task"] == {"research-scout": "deny"} and settings["mcp"]["exa"]["type"] == "remote"
-    assert bc_config.parse_jsonc((config_dir / "opencode.jsonc").read_text(encoding="utf-8")).get("mcp", {}).get("spare-gpu")
+    entry = bc_config.parse_jsonc((config_dir / "opencode.jsonc").read_text(encoding="utf-8"))["mcp"]["spare-gpu"]
+    assert entry["command"][-2:] == ["mcp", "--pack"]  # the server serves the pack's tools only for a pack install
+    assert "which starts: " in out and "mcp --pack" in out
     again = cli.invoke(app, ["integrate", "--pack"])
     assert "Already up to date: the pack's settings" in again.output and "/deep-research is already there" in again.output
 
@@ -209,7 +211,8 @@ def test_pack_uninstall_removes_only_the_pack_and_plain_uninstall_removes_all(co
     assert "Removed the pack's settings file" in result.output
     assert not (config_dir / "config.json").exists() and not (config_dir / "agent" / "research-lead.md").exists()
     assert (config_dir / "command" / "auto.md").is_file()  # /auto and the MCP server stay
-    assert bc_config.parse_jsonc((config_dir / "opencode.jsonc").read_text(encoding="utf-8"))["mcp"]["spare-gpu"]
+    entry = bc_config.parse_jsonc((config_dir / "opencode.jsonc").read_text(encoding="utf-8"))["mcp"]["spare-gpu"]
+    assert entry["command"][-1] == "mcp" and "no longer starts with --pack" in result.output
     again = cli.invoke(app, ["integrate", "--pack", "--uninstall"])
     assert "wasn't installed" in again.output
     cli.invoke(app, ["integrate", "--pack"])

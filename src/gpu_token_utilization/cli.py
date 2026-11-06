@@ -161,7 +161,7 @@ def integrate(
     ok = True
     for name in channels:
         typer.echo(f"BharatCode {name}:")
-        ok = _register_channel("  ", name) and ok
+        ok = _register_channel("  ", name, with_pack) and ok
         if with_pack:
             ok = _install_pack("  ", name, only, lite) and ok
     typer.echo("Restart BharatCode Desktop (and close open BharatCode windows) to load spare-gpu.")
@@ -225,15 +225,21 @@ def _uninstall_pack(channel: str) -> None:
         typer.echo(f"Removed the pack's settings file {path} ({how}). Your own config was never changed.")
     else:
         typer.echo(f"The pack wasn't installed in {folder}; nothing changed.")
+    try:
+        if bc_config.registered_with_pack(bc_config.config_file(folder)):
+            bc_config.register(bc_config.config_file(folder), bc_config.server_command())
+            typer.echo("spare-gpu's MCP server no longer starts with --pack, so the pack's tools are gone from it.")
+    except (bc_config.ConfigError, OSError) as exc:
+        typer.echo(f"Couldn't take --pack off the spare-gpu MCP entry ({exc}); remove it by hand or run `gtu integrate`.")
 
 
-def _register_channel(pad: str, channel: str) -> bool:
+def _register_channel(pad: str, channel: str, with_pack: bool = False) -> bool:
     """Register spare-gpu in one channel's config. Stable is shared with the CLI, which can confirm
     the server connects; Desktop-only channels are checked by Desktop when it starts."""
     if channel == "stable":
-        return _register(pad, _report_cli_for_integration(pad))
+        return _register(pad, _report_cli_for_integration(pad), with_pack=with_pack)
     folder = bc_config.channel_config_dir(channel)
-    return _register(pad, None, (folder, f"BharatCode Desktop's {channel} channel"))
+    return _register(pad, None, (folder, f"BharatCode Desktop's {channel} channel"), with_pack)
 
 
 def _report_cli_for_integration(pad: str):
@@ -248,12 +254,12 @@ def _report_cli_for_integration(pad: str):
     return status
 
 
-def _register(pad: str, status, where: tuple[Path, str] | None = None) -> bool:
+def _register(pad: str, status, where: tuple[Path, str] | None = None, with_pack: bool = False) -> bool:
     """Register spare-gpu in BharatCode's config, saying what changed and how to undo it. When the
     file can't be edited safely, print the snippet to paste instead."""
     folder, how = where or bc_config.locate_config_dir()
     path = bc_config.config_file(folder)
-    command = bc_config.server_command()
+    command = bc_config.server_command(with_pack)
     typer.echo(f"{pad}Config file: {path} ({how}).")
     backup = path.with_name(path.name + bc_config.BACKUP_SUFFIX)
     had_backup = backup.exists() and backup.stat().st_mtime
@@ -775,12 +781,13 @@ def _run_when_free(command_id: str) -> None:
 @app.command()
 def mcp(
     folder: Path = typer.Option(None, "--dir", help="Project folder to serve. Default: the current folder."),
+    with_pack: bool = typer.Option(False, "--pack", help="Also serve the command pack's tools (set by `gtu integrate --pack`)."),
 ) -> None:
     """Run spare-gpu's MCP server over stdio, so an agent (BharatCode's CLI) can queue and check
     jobs. Started by the agent, not by hand; see the README for the config snippet."""
     from .mcp_server import serve
 
-    serve(folder or Path.cwd())
+    serve(folder or Path.cwd(), pack=with_pack)
 
 
 @app.command()

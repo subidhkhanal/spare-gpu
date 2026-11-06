@@ -17,7 +17,7 @@ from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, desktop, freerun, router, runner, runstate, waits, worktree
+from . import __version__, actions, desktop, freerun, refs, router, runner, runstate, scholar, waits, worktree
 from .api import ApiKeyMissing, find_api_key
 from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
@@ -70,13 +70,15 @@ class SpareTools:
 
     def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
                  launch: Callable[[Path], int] | None = None,
-                 http: Callable[[], httpx.Client] | None = None):
+                 http: Callable[[], httpx.Client] | None = None,
+                 scholar_http: Callable[[], httpx.Client] | None = None):
         self.base = Path(base)
         # Everything that reaches outside is injectable, so tests use fakes: the gate (BharatCode's
-        # live stats), the background job runner, and the wait figures.
+        # live stats), the background job runner, the wait figures, and the scholarly registries.
         self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
         self._launch = launch or runner.launch
         self._http = http or (lambda: httpx.Client(timeout=10.0))
+        self._scholar_http = scholar_http or scholar.client
 
     # --- helpers -------------------------------------------------------------------------
 
@@ -275,8 +277,38 @@ class SpareTools:
         return "\n".join(lines)
 
 
-def build_server(base: Path, tools: SpareTools | None = None):
-    """The MCP server for one project folder (the agent's working directory by default)."""
+    # --- the pack's tools (only with `gtu mcp --pack`: every tool costs every session tokens) ---
+
+    def scholar_search(self, query: str, limit: int = 5, sources: str | None = None) -> str:
+        chosen = tuple(s.strip().lower() for s in (sources or "").split(",") if s.strip()) or scholar.SOURCES
+        try:
+            with self._scholar_http() as http:
+                papers, notes = scholar.search(query, limit=limit, sources=chosen, http=http)
+        except scholar.ScholarError as exc:
+            return f"Couldn't search: {exc}."
+        return scholar.describe(papers, notes)
+
+    def verify_refs(self, folder: str) -> str:
+        root = self._root()
+        path = Path(folder.strip() or ".")
+        path = (path if path.is_absolute() else root / path).resolve()
+        if root not in path.parents and path != root:
+            return f"Didn't check it: {folder} is outside this project ({root})."
+        try:
+            with self._scholar_http() as http:
+                verdicts, file = refs.verify_file(path, http=http)
+        except FileNotFoundError:
+            return (f"No {refs.SOURCES_FILE} in {path}. The scouts' ids go there first, as "
+                    '{"sources": [{"key": ..., "title": ..., "authors": [...], "year": ..., "doi"/"arxiv"/"openalex"/"url": ...}]}.')
+        except (OSError, ValueError) as exc:
+            return f"Couldn't read {refs.SOURCES_FILE}: {exc}."
+        return refs.describe(verdicts, file)
+
+
+def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False):
+    """The MCP server for one project folder (the agent's working directory by default). With
+    `pack`, the command pack's tools too: they exist only for a server started by a pack install,
+    and the pack's config hides them from every agent but the pack's own."""
     from mcp.server.mcpserver import MCPServer
     from mcp.types import ToolAnnotations
 
@@ -343,6 +375,36 @@ def build_server(base: Path, tools: SpareTools | None = None):
         """
         return tools.ask(question, your_model)
 
+    if pack:
+        @server.tool(annotations=notes(True, world=True))
+        def scholar_search(query: str, limit: int = 5, sources: str | None = None) -> str:
+            """Search the open scholarly registries (OpenAlex, Crossref, arXiv) for papers on a topic:
+            for /deep-research's scouts. Returns up to `limit` papers from each registry, merged, each
+            with title, authors, year, venue, exact ids (DOI, arXiv, OpenAlex), URL, a short abstract
+            and citation count. Cite a paper only with an id from here or from a page you fetched,
+            never from memory. Google Scholar isn't used: it forbids automated access.
+
+            Args:
+                query: Topic words or a title, in plain words (no boolean syntax).
+                limit: Papers per registry, 1 to 25 (default 5).
+                sources: Comma-separated subset of openalex, crossref, arxiv (default: all three).
+            """
+            return tools.scholar_search(query, limit, sources)
+
+        @server.tool(annotations=notes(False))
+        def verify_refs(folder: str) -> str:
+            """Check every reference in <folder>/sources.json against the registries (DOI, arXiv id,
+            OpenAlex id, or a URL that must answer and carry the title), for /deep-research's checker
+            before a report is final. A reference is kept only when its id resolves and the registry's
+            title, authors and year match the report's; the verdicts are written back into the file,
+            and the answer lists what to keep and what to DROP.
+
+            Args:
+                folder: The research folder holding sources.json (e.g. research/transformers), relative to
+                    the project, or the file itself.
+            """
+            return tools.verify_refs(folder)
+
     @server.tool(annotations=notes(False, world=True))
     def spare_delegate(type: Literal["tests", "docs", "review"], path: str, note: str | None = None,
                        your_model: str | None = None) -> str:
@@ -374,5 +436,5 @@ def build_server(base: Path, tools: SpareTools | None = None):
     return server
 
 
-def serve(base: Path) -> None:
-    build_server(base).run("stdio")
+def serve(base: Path, pack: bool = False) -> None:
+    build_server(base, pack=pack).run("stdio")

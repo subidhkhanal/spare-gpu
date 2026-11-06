@@ -212,17 +212,33 @@ def _leaves(doc: dict, prefix: tuple[str, ...] = ()) -> list[tuple[tuple[str, ..
     return out
 
 
-def server_command() -> list[str]:
+PACK_FLAG = "--pack"
+
+
+def server_command(with_pack: bool = False) -> list[str]:
     """How BharatCode should start our server: an absolute path, so it works even if BharatCode
     was opened before PATH was updated. The gtu running this setup comes first: whatever `gtu`
-    is first on PATH could be an older install without the MCP server."""
+    is first on PATH could be an older install without the MCP server. With `with_pack`, the
+    server also serves the command pack's tools."""
+    extra = [PACK_FLAG] if with_pack else []
     exe = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if exe and exe.suffix.lower() == ".exe" and exe.stem.lower() == "gtu" and exe.exists():
-        return [str(exe.resolve()), "mcp"]
+        return [str(exe.resolve()), "mcp", *extra]
     found = shutil.which("gtu")
     if found and Path(found).resolve().parent == Path(sys.executable).resolve().parent:
-        return [str(Path(found).resolve()), "mcp"]  # the gtu of this very install
-    return [sys.executable, "-m", "gpu_token_utilization", "mcp"]
+        return [str(Path(found).resolve()), "mcp", *extra]  # the gtu of this very install
+    return [sys.executable, "-m", "gpu_token_utilization", "mcp", *extra]
+
+
+def registered_with_pack(path: Path) -> bool:
+    """Whether spare-gpu's entry in `path` starts the server with the pack's tools."""
+    if not path.exists():
+        return False
+    try:
+        entry = (parse_jsonc(path.read_text(encoding="utf-8-sig")).get("mcp") or {}).get(SERVER_NAME) or {}
+    except ValueError:
+        return False
+    return isinstance(entry, dict) and PACK_FLAG in (entry.get("command") or [])
 
 
 def server_entry(command: list[str]) -> dict:

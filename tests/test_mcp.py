@@ -20,6 +20,7 @@ from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
+PACK_TOOLS = {"scholar_search", "verify_refs"}  # only for a server started with `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -244,6 +245,41 @@ def test_protocol_offers_exactly_five_task_shaped_tools(tools, git_repo):
         assert not any(gone in description for gone in REMOVED), name  # no description points at a removed tool
     assert listed["spare_work_status"].annotations.read_only_hint is True
     assert listed["spare_cancel_work"].annotations.destructive_hint is True
+
+
+def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
+    async def go(pack):
+        async with mcp.Client(build_server(git_repo, tools, pack=pack)) as client:
+            return {t.name: t for t in (await client.list_tools()).tools}
+
+    assert set(anyio.run(go, False)) == TOOLS  # a plain install never pays for them
+    listed = anyio.run(go, True)
+    assert set(listed) == TOOLS | PACK_TOOLS
+    assert "/deep-research" in listed["scholar_search"].description and "Google Scholar" in listed["scholar_search"].description
+    assert listed["scholar_search"].annotations.read_only_hint is True
+    assert "sources.json" in listed["verify_refs"].description and "DROP" in listed["verify_refs"].description
+    assert listed["scholar_search"].input_schema["required"] == ["query"]
+
+
+def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
+    from test_scholar import registries
+
+    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()),
+                       scholar_http=registries)
+    text = tools.scholar_search("attention is all you need")
+    assert text.startswith("1. Attention Is All You Need (2017)") and "arxiv: 1706.03762" in text
+    assert tools.scholar_search("attention", limit=2, sources="arxiv").count("found in: arxiv") == 2
+    assert "unknown source 'nope'" in tools.scholar_search("attention", sources="nope")
+    folder = git_repo / "research" / "transformers"
+    folder.mkdir(parents=True)
+    (folder / "sources.json").write_text(json.dumps({"sources": [
+        {"key": "lecun2015", "title": "Deep learning", "authors": ["Yann LeCun"], "doi": "10.1038/nature14539"},
+        {"key": "fake", "title": "Made up", "doi": "10.1000/fake"}]}), encoding="utf-8")
+    text = tools.verify_refs("research/transformers")
+    assert "1 verified, 1 to drop" in text and "- DROP fake: no registry has DOI 10.1000/fake" in text
+    assert json.loads((folder / "sources.json").read_text(encoding="utf-8"))["sources"][1]["verified"] is False
+    assert tools.verify_refs("research/nothing").startswith("No sources.json in ")
+    assert "outside this project" in tools.verify_refs("../elsewhere")
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):
