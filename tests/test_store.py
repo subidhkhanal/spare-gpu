@@ -16,6 +16,11 @@ def test_store_gitignores_its_folder(tmp_path):
     assert (tmp_path / ".gtu" / ".gitignore").read_text() == "*\n"
 
 
+def test_a_store_elsewhere_never_gitignores_that_folder(tmp_path):
+    Store(tmp_path / "gtu.db").close()  # GTU_DB pointing at a repo root, say
+    assert not (tmp_path / ".gitignore").exists()
+
+
 def test_add_get_and_list_jobs(store, job_repo):
     a = store.add_job("tests", "src/a.py", job_repo)
     b = store.add_job("review", "src", job_repo, note="focus on errors")

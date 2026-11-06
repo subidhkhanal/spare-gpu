@@ -116,6 +116,7 @@ function Install-SpareGpu {
     # 4. `gtu` on your PATH, for new windows (`gtu integrate --uninstall`, `gtu list`, ...)
     $scripts = Split-Path $gtu
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $userPath) { $userPath = '' }  # a fresh account may have no user PATH at all
     if ($env:SPARE_GPU_SKIP_PATH -ne '1' -and -not (($userPath -split ';') -contains $scripts)) {
         [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $scripts).TrimStart(';'), 'User')
         Say "added $scripts to your PATH (new windows will have the gtu command)"

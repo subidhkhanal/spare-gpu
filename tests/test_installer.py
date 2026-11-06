@@ -34,6 +34,10 @@ def test_the_installed_version_is_printed_and_checked():
     assert "did not run" in TEXT  # a broken install is reported, not announced as done
 
 
+def test_a_missing_user_path_does_not_abort_the_installer():
+    assert "if (-not $userPath) { $userPath = '' }" in TEXT  # a fresh account may have no user PATH at all
+
+
 def test_the_script_loads_without_installing_when_asked():
     assert "if ($env:SPARE_GPU_NO_RUN -ne '1')" in TEXT
 

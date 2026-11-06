@@ -212,9 +212,10 @@ class Store:
         self.path = Path(path)
         if str(path) != ":memory:":  # ":memory:": a throwaway store, e.g. for advice in a fresh folder
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            # Keep the store out of whatever repo it is created in.
+            # Keep spare-gpu's own folder out of whatever repo it is created in. Only that folder:
+            # a GTU_DB pointing elsewhere must not git-ignore someone's whole directory.
             marker = self.path.parent / ".gitignore"
-            if not marker.exists():
+            if self.path.parent.name == ".gtu" and not marker.exists():
                 marker.write_text("*\n", encoding="utf-8")
         # Several processes share this file: `gtu start`, other gtu commands, and the MCP server.
         # Wait up to 30 s for another writer instead of failing at once, and use WAL so readers

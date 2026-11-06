@@ -371,5 +371,6 @@ class DesktopAgent:
             return False
         if last.get("error"):
             result.error = _error_text(last["error"])
-        result.text = texts[-1].strip() if texts else ""
+        # Every text part, like BharatCodeCli: a review's body often comes before a closing remark.
+        result.text = "\n".join(t.strip() for t in texts if t.strip())
         return True

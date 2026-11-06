@@ -641,7 +641,10 @@ def start(
         other = runstate.running_pid(folder)
         if other:
             _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
-        job_config = JobConfig.from_env()
+        try:
+            job_config = JobConfig.from_env()
+        except ValueError as exc:
+            _fail(str(exc))
         # spare-gpu runs inside BharatCode Desktop: every job is a Desktop session, on Desktop's own
         # server and sign-in, so no API key of its own is needed. Outside Desktop, review jobs can
         # still use the API with a key; tests and docs jobs wait until Desktop runs them. (An agent

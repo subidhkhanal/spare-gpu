@@ -158,6 +158,7 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
     except ApiKeyMissing:
         key_found = False
     if not key_found:
-        out.append("PROBLEM: no BharatCode API key found (run `gtu setkey`); a real run would stop at once.")
+        out.append("PROBLEM: no BharatCode API key found (run `gtu setkey`); a run outside BharatCode Desktop would "
+                   "stop at once (inside Desktop no key is needed).")
     out.append("Estimates are rough: BharatCode CLI steps vary with how much the model reads and retries.")
     return "\n".join(out)

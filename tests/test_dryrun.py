@@ -71,6 +71,7 @@ def test_dry_run_needs_no_api_key_but_mentions_it(repo, monkeypatch):
     monkeypatch.delenv("BHARATCODE_API_KEY")
     result = runner.invoke(app, ["start", "--dry-run"])
     assert result.exit_code == 0 and "PROBLEM: no BharatCode API key found (run `gtu setkey`)" in result.output
+    assert "a run outside BharatCode Desktop would stop at once" in result.output  # inside Desktop no key is needed
 
 
 def test_dry_run_with_nothing_queued(repo):
@@ -143,3 +144,16 @@ def test_a_fix_job_without_the_cli_is_a_problem_in_the_dry_run(store, git_repo, 
     job = store.add_job("fix", ".", str(git_repo), note="src/calc.py:2 add a docstring")
     assert any("bharatcode" in p for p in dryrun._problems(job))  # like tests and docs: it runs the CLI
     assert dryrun._problems(store.add_job("review", "src", str(git_repo))) == []
+
+
+def test_a_test_command_outside_the_allowlist_is_an_error_line_not_a_traceback(git_repo, monkeypatch):
+    from typer.testing import CliRunner
+
+    from gpu_token_utilization.cli import app
+
+    monkeypatch.chdir(git_repo)
+    monkeypatch.delenv("GTU_DB", raising=False)
+    monkeypatch.setenv("GTU_TEST_COMMAND", "pypy -m pytest")
+    result = CliRunner().invoke(app, ["start"])
+    assert result.exit_code == 1 and "error: test command 'pypy -m pytest' is not in the allowlist" in result.output
+    assert "Traceback" not in result.output and not isinstance(result.exception, ValueError)
