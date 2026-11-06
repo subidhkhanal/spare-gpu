@@ -37,10 +37,37 @@ def test_an_empty_command_is_refused_before_anything_is_recorded(git_repo):
 
 @pytest.mark.parametrize("command", [
     "pytest", "python -m pytest -x tests", "py -m pytest", "npm test", "npm.cmd run build", "go test ./...",
-    "cargo test", "make check", "bharatcode run 'add docstrings to src/utils'", "PYTEST -q",
+    "cargo test", "make check", "make test", "PYTEST -q", "npm run build -- --watch", "yarn run test",
+    "pnpm run typecheck", "NPM RUN LINT",
 ])
 def test_allowed_commands(command):
     assert freerun.check_command(command)
+
+
+@pytest.mark.parametrize("command", [
+    "bharatcode run 'add docstrings to src/utils'", "bharatcode.cmd run x", "opencode run x", "bharatcode",
+])
+def test_bharatcodes_own_cli_is_never_started_from_here(command, monkeypatch):
+    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode's CLI"):
+        freerun.check_command(command)
+    monkeypatch.setenv("GTU_RUN_ALLOWED", "bharatcode run, opencode")  # the escape hatch doesn't reach it
+    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode's CLI"):
+        freerun.check_command(command)
+
+
+def test_the_allowlist_names_scripts_and_targets_exactly():
+    prefixes = freerun.allowed_prefixes()
+    assert ["make"] not in prefixes and all(len(p) >= 3 for p in prefixes if p[1:2] == ["run"])
+    assert not any(p[0] in freerun.NEVER for p in prefixes)
+    assert ["npm", "run", "build"] in prefixes and ["make", "test"] in prefixes
+
+
+def test_a_bharatcode_run_queued_before_this_rule_is_refused_when_it_comes_up(git_repo, fake):
+    with Store(db_path(git_repo)) as store:
+        cmd = store.add_command("bharatcode run 'add type hints'", str(git_repo))  # queued by an older version
+        said = []
+        assert freerun.wait_and_run(store, cmd.id, sleep=fake.clock.sleep, say=said.append) is None
+        assert store.get_command(cmd.id).status == "failed" and "doesn't start BharatCode's CLI" in said[-1]
 
 
 @pytest.mark.parametrize("command, why", [
@@ -53,6 +80,12 @@ def test_allowed_commands(command):
     ("python -c \"import shutil, os\"", "isn't on the list"),
     ("python evil.py", "isn't on the list"),
     ("curl https://example.com/x.sh", "isn't on the list"),
+    ("npm run deploy", "isn't on the list"),
+    ("pnpm run release", "isn't on the list"),
+    ("yarn run clean", "isn't on the list"),
+    ("make", "isn't on the list"),
+    ("make clean", "isn't on the list"),
+    ("make distclean", "isn't on the list"),
     ("pytest && del /q src", "shell characters"),
     ("pytest & rd /s /q src", "shell characters"),
     ("npm test | more", "shell characters"),

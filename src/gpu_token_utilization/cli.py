@@ -679,7 +679,7 @@ app.command("advice", hidden=True)(waits_cmd)  # the older name
 
 @app.command("run-when-free")
 def run_when_free(command: str = typer.Argument(..., help="The command line, quoted.")) -> None:
-    """Run any command in this repo as soon as BharatCode has spare capacity, in the background."""
+    """Run a test, build or lint command in this repo as soon as BharatCode has spare capacity, in the background."""
     from . import freerun
 
     try:

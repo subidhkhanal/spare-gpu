@@ -1,4 +1,4 @@
-"""Run any command once BharatCode has spare capacity (`gtu run-when-free`).
+"""Run a test, build or lint command once BharatCode has spare capacity (`gtu run-when-free`).
 
 Queueing records the command and starts a small detached waiter, so the caller (often an agent)
 never blocks. The waiter asks the capacity gate, as `gtu start` does, until it opens, then runs
@@ -28,19 +28,30 @@ from .store import Command, Store
 CHECK_EVERY_S = 60.0  # never faster than the live stats are sampled
 ALLOWED_ENV = "GTU_RUN_ALLOWED"  # extra allowed command prefixes, comma-separated
 
+# Script runners and make name their scripts and targets exactly: a bare `npm run` or `make`
+# would run whatever the project defines, deploy, publish and clean included.
+SCRIPTS = ("test", "build", "lint", "check", "typecheck")
 # What may run unattended, enforced here rather than left to the agent's judgement: test, build
-# and lint tools, and BharatCode's CLI. Each entry is a command prefix; the program is matched by
-# name (any folder, .exe/.cmd/.bat), the rest word for word.
+# and lint tools only. Each entry is a command prefix; the program is matched by name (any
+# folder, .exe/.cmd/.bat), the rest word for word, and arguments after the prefix are passed on
+# (`npm run build -- --watch`).
 ALLOWED = (
     "pytest", "python -m pytest", "py -m pytest", "python -m unittest", "py -m unittest",
     "python -m mypy", "python -m ruff", "ruff", "mypy", "flake8", "tox",
-    "npm test", "npm run", "pnpm test", "pnpm run", "yarn test", "yarn run", "npx tsc", "tsc", "eslint",
+    "npm test", "pnpm test", "yarn test", "npx tsc", "tsc", "eslint",
+    *(f"{runner} run {script}" for runner in ("npm", "pnpm", "yarn") for script in SCRIPTS),
     "go test", "go build", "go vet", "cargo test", "cargo build", "cargo check", "cargo clippy",
-    "dotnet test", "dotnet build", "mvn test", "mvn verify", "gradle test", "gradlew test", "make",
-    "bharatcode run",
+    "dotnet test", "dotnet build", "mvn test", "mvn verify", "gradle test", "gradlew test",
+    *(f"make {target}" for target in SCRIPTS),
 )
-# Characters cmd.exe acts on. Commands never go through a shell, but npm, bharatcode and other
-# .cmd/.bat programs are run by cmd.exe whatever we do, so these are refused outright.
+# BharatCode's own CLI is never started from here: a `bharatcode run` queued this way would work
+# in the user's real checkout, with their full config and none of a job's permissions. Agent
+# work goes through jobs (spare_delegate in a chat, `gtu add` in a terminal), which run in a
+# private copy under a permission file. Refused by program name, so GTU_RUN_ALLOWED can't
+# bring it back, and a command queued before this rule is refused when it comes up to run.
+NEVER = ("bharatcode", "opencode")
+# Characters cmd.exe acts on. Commands never go through a shell, but npm and other .cmd/.bat
+# programs are run by cmd.exe whatever we do, so these are refused outright.
 SHELL_CHARACTERS = set("&|<>^%;`\n\r")
 
 
@@ -100,23 +111,23 @@ def check_command(command: str) -> list[str]:
     if any(sep in words[0] for sep in ("/", "\\", ":")):
         raise FreeRunError(f"give the program by name (e.g. `pytest`), not a path like `{words[0]}`; "
                            "it's looked up on PATH")
+    if _program(words[0]) in NEVER:
+        raise FreeRunError(f"spare-gpu doesn't start BharatCode's CLI from here: `{words[0]}` would work in your "
+                           "real checkout with your full config. Hand agent work to a job instead (spare_delegate "
+                           "in a chat, or `gtu add` in a terminal)")
     for prefix in allowed_prefixes():
         if len(words) >= len(prefix) and _program(words[0]) == _program(prefix[0]) \
                 and [w.lower() for w in words[1:len(prefix)]] == [p.lower() for p in prefix[1:]]:
             return words
     raise FreeRunError(
         f"`{command}` isn't on the list of commands spare-gpu runs unattended. Allowed: test, build and lint "
-        f"tools ({', '.join(ALLOWED[:6])}, npm test, npm run <script>, go test, cargo test, make, ...) and "
-        f"`bharatcode run`. To allow more, set {ALLOWED_ENV} (comma-separated command prefixes)"
+        f"tools ({', '.join(ALLOWED[:6])}, npm test, npm run {'/'.join(SCRIPTS)}, go test, cargo test, "
+        f"make {'/'.join(SCRIPTS)}, ...). To allow more, set {ALLOWED_ENV} (comma-separated command prefixes)"
     )
 
 
 def _argv(words: list[str]) -> list[str]:
-    """The program to start: bharatcode through node directly, like the jobs do, else from PATH."""
-    if _program(words[0]) == "bharatcode":
-        from .agent_cli import resolve_command
-
-        return [*resolve_command(), *words[1:]]
+    """The program to start, from PATH."""
     found = shutil.which(words[0])
     if not found:
         raise FreeRunError(f"`{words[0]}` wasn't found on PATH")
@@ -198,7 +209,7 @@ def _still_allowed(store: Store, command_id: str, say: Callable[[str], None]) ->
         return None
     try:
         return _argv(check_command(cmd.command))
-    except Exception as exc:  # FreeRunError, or BharatCode's CLI couldn't be found
+    except FreeRunError as exc:  # the allowlist (or this rule set) changed since it was queued
         say(f"Not running it: {exc}")
         store.update_command(command_id, status="failed", finished_at=_now())
         return None
