@@ -27,6 +27,9 @@ SCHEMA = "https://opencode.ai/config.json"
 # Web search for /deep-research: queries go to Exa. Keyless, so OAuth auto-detection is off, as the
 # marketplace's Cloudflare-docs entry does it.
 EXA_MCP = {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}
+# How many tools each MCP server the pack adds exposes (Desktop listed exa_web_search_exa and
+# exa_web_fetch_exa, 7 Nov 2026). Their tools are hidden from every agent but the pack's own.
+MCP_TOOL_COUNT = {"exa": 2}
 SERVER = "spare-gpu"  # the MCP server the pack's tools live in; BharatCode names its tools <server>_<tool>
 # Heavy-model roles that also ship as a standard-model variant (<name>-standard). The lead starts
 # the variant the spare_waits tool names: the router moves a role down only when the role is
@@ -237,11 +240,13 @@ def config(components, models: Models, source: Path = PACK_DIR) -> dict:
     for component in components:
         for tool in component.tools:
             permission[f"{SERVER}_{tool}"] = "deny"  # BharatCode then leaves the tool out of every other agent's request
-    if permission:
-        doc["permission"] = permission
     mcp = {}
     for component in components:
         mcp.update(component.mcp)
+    for server in mcp:
+        permission[f"{server}_*"] = "deny"  # its tools, too; the agent that needs them allows them again
+    if permission:
+        doc["permission"] = permission
     if mcp:
         doc["mcp"] = mcp
     return doc
@@ -261,7 +266,10 @@ def pack_added_tokens(doc: dict, helper_list: list[str] | None = None) -> int:
     task = permission.get("task") or {}
     names = helper_list if helper_list is not None else helpers(COMPONENTS.values())
     visible = [h for h in names if task.get(h) != "deny"]
-    return TOKENS_PER_MCP_TOOL * len(set(tools)) + TOKENS_PER_SUBAGENT_LINE * len(visible)  # a shared tool is described once
+    added_servers = sum(MCP_TOOL_COUNT.get(server, 1) for server in doc.get("mcp") or {}
+                        if permission.get(f"{server}_*") != "deny")
+    return (TOKENS_PER_MCP_TOOL * (len(set(tools)) + added_servers)  # a shared tool is described once
+            + TOKENS_PER_SUBAGENT_LINE * len(visible))
 
 
 def config_text(doc: dict, marker_line: str) -> str:
@@ -277,9 +285,9 @@ def describe(doc: dict) -> str:
     task = doc.get("permission", {}).get("task", {})
     if task:
         parts.append(f"{len(task)} helper agent(s) hidden from your own agents")
-    tools = [k for k in doc.get("permission", {}) if k != "task"]
+    tools = [k for k in doc.get("permission", {}) if k != "task" and not k.endswith("_*")]
     if tools:
         parts.append(f"{len(tools)} pack-only tool(s) hidden from them too")
     if doc.get("mcp"):
-        parts.append("MCP: " + ", ".join(doc["mcp"]))
+        parts.append("MCP: " + ", ".join(doc["mcp"]) + " (its tools only for the pack's agents)")
     return "; ".join(parts) or "nothing yet"

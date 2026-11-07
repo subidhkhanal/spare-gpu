@@ -79,6 +79,7 @@ def test_the_config_file_splits_models_and_hides_helpers_and_pack_tools(pack_dir
     for tool in ("scholar_search", "verify_refs", "security_filter", "pack_cost"):
         assert doc["permission"][f"spare-gpu_{tool}"] == "deny"
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}
+    assert doc["permission"]["exa_*"] == "deny"  # Exa's tools only for the scout, which allows exa_* itself
     text = pack.config_text(doc, bc_config.PACK_LINE)
     assert text.startswith("{\n  " + bc_config.PACK_LINE + "\n") and parse_jsonc(text) == doc
     assert "titles and explore on Qwen 3.8 27B" in pack.describe(doc) and "MCP: exa" in pack.describe(doc)

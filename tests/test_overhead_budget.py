@@ -23,6 +23,7 @@ def test_the_installed_pack_adds_nothing_to_a_normal_request_by_construction():
     tools = {t for c in pack.COMPONENTS.values() for t in c.tools}
     assert len(tools) == 4 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
     assert set(doc["permission"]["task"]) == set(pack.helpers(pack.COMPONENTS.values()))
+    assert doc["mcp"] and all(doc["permission"][f"{server}_*"] == "deny" for server in doc["mcp"])  # e.g. Exa's search
 
 
 def test_a_config_that_stopped_denying_would_show_the_cost():
@@ -34,6 +35,9 @@ def test_a_config_that_stopped_denying_would_show_the_cost():
     shared = pack.config(pack.select(None), MODELS)
     shared["permission"].pop("spare-gpu_pack_cost")  # listed by every lead's component, described once
     assert pack.pack_added_tokens(shared) == pack.TOKENS_PER_MCP_TOOL
+    exa = pack.config(pack.select(None), MODELS)
+    exa["permission"].pop("exa_*")  # the pack's own MCP server, left visible: each of its tools costs every step
+    assert pack.pack_added_tokens(exa) == pack.MCP_TOOL_COUNT["exa"] * pack.TOKENS_PER_MCP_TOOL
 
 
 @pytest.mark.skipif(not RECORDED.exists(), reason="no measurement recorded yet: run scripts/check_overhead_budget.py on Windows")
