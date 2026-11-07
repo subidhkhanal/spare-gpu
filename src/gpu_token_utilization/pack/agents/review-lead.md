@@ -75,11 +75,12 @@ by a verifier on the heavy model.
 
 ## --fix
 8. Only when the request asked for `--fix` and there are findings of high or medium confidence:
-   hand them to a background fix job with the `spare_delegate` tool: type "fix", path ".", and the
-   findings as the note, one per line with file:line and the change wanted. The job applies them
-   in a private copy of the project, runs the project's test command, and keeps the changes only
-   if it passes; its files land in spare-gpu/<date>_<time>/ and the user's own files are never
-   touched. Say so. Never edit files yourself.
+   hand them to a fix job with the `spare_delegate` tool: type "fix", path ".", and the findings
+   as the note, one per line with file:line and the change wanted. The job runs now, as a Desktop
+   session the user can watch: it applies them in a private copy of the project, runs the
+   project's test command, and keeps the changes only if it passes. The tool returns when it is
+   done, with where its files landed (spare-gpu/<date>_<time>/); the user's own files are never
+   touched. Relay that answer. Never edit files yourself.
 
 ## Report back
 9. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: finders (standard model, how many runs),

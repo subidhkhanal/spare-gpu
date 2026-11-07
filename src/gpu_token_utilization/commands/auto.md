@@ -18,7 +18,7 @@ Follow exactly one of these, checked in this order, and call exactly one tool:
    - path: the file or folder the request names, exactly as written;
    - note: any other instruction in the request, in its own words;
    - your_model: "deepseek-v4.1-flash" (it runs there unless the other model would start it sooner).
-   Then reply with spare_delegate's summary as it comes back: the job, which model and why, and where its files will land. Don't do the work yourself and don't wait for it to finish.
+   The job runs now, in front of the user, as a Desktop session named "spare-gpu: ..." that they can open and watch; the tool returns when it is done. Then reply with spare_delegate's answer as it comes back: how it went, where its files landed, which model and why. Don't do the work yourself.
 
 3. Anything else (a question, an explanation, a quick piece of writing): call `spare_ask` with
    - question: the request, exactly as written between the markers;

@@ -1,17 +1,18 @@
-"""Coordination between a running `gtu start` and `gtu stop`, in the store's folder (.gtu/).
+"""Coordination between whoever is running jobs and `gtu stop`, in the store's folder (.gtu/).
 
-run.json  written by `gtu start` while it runs: its process id.
-stop      created by `gtu stop`; `gtu start` checks for it about once a second and stops cleanly.
+run.json  written while jobs run (by `gtu start`, or by the MCP server while a delegated job
+          runs in front of the user): the process id, so a second runner doesn't start.
+stop      created by `gtu stop` (or spare_cancel_work for one job); the runner checks for it
+          between steps and every few seconds inside a step, and stops cleanly, leaving the
+          job paused and resumable. Nothing is ever killed.
 
-If a clean stop doesn't happen in time (e.g. stuck in a long request), `gtu stop` kills the
-process tree, then `tidy` marks interrupted jobs paused and drops their unfinished edits.
+`tidy` makes jobs left 'running' by a crashed process resumable.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,50 +83,14 @@ def running_pid(folder: Path) -> int | None:
     return pid if isinstance(pid, int) and alive(pid) else None
 
 
-def _looks_like_gtu(pid: int) -> bool:
-    """Guard against a reused pid before killing anything."""
-    if os.name == "nt":
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
-        name = out.split(",")[0].strip('"').lower() if out.startswith('"') else ""
-    else:
-        try:
-            name = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").lower()
-        except OSError:
-            name = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout.lower()
-    return any(word in name for word in ("python", "gtu"))
-
-
-def wait_for_exit(pid: int, seconds: float, poll: float = 0.2) -> bool:
+def wait_until_stopped(folder: Path, seconds: float, poll: float = 0.2) -> bool:
+    """True once no run is going in `folder` (the runner cleared its run file, or its process is gone)."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if not alive(pid):
-            return True
+    while running_pid(folder) is not None:
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(poll)
-    return not alive(pid)
-
-
-def kill_tree(pid: int) -> bool:
-    """Kill the process and its children. False if it doesn't look like gtu."""
-    if not _looks_like_gtu(pid):
-        return False
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
-    else:
-        import signal
-
-        # Not killpg on gtu's own group: that may be the user's shell. A child may run in its own
-        # session, so kill each child's group, then gtu itself.
-        children = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
-        for child in children:
-            try:
-                os.killpg(int(child), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, ValueError):
-                pass
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    return wait_for_exit(pid, 5)
+    return True
 
 
 def tidy(store: Store) -> list[str]:

@@ -1,33 +1,43 @@
-"""MCP server: spare-gpu as tools an agent in BharatCode Desktop (or any MCP client) can call.
+"""MCP server: spare-gpu as tools an agent can call (BharatCode Desktop, or any MCP client).
 
 Started with `gtu mcp`, over stdio. Five tools, each shaped around a task the user wants done
 rather than around our internal functions. Selection accuracy drops as tool count grows and when
 tools overlap, so related questions are merged (one status tool answers "what's queued", "is it
-done" and "why isn't it running"). Each tool is a thin wrapper over the code the matching `gtu`
-command uses, sharing the repo's .gtu/gtu.db (safe alongside a running `gtu start`). Tools return
-plain text for the agent to relay, and none blocks: long work is handed to a background process.
+done" and "where are its files"). Each tool is a thin wrapper over the code the matching `gtu`
+command uses, sharing the repo's .gtu/gtu.db (safe alongside a `gtu start` in a terminal).
+Tools return plain text for the agent to relay. spare_delegate runs the job in front of the user,
+as a visible Desktop session, and returns when it is done; while it runs, the server sends MCP
+progress notifications so the client's per-call timeout keeps being reset.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
 import httpx
+from mcp.server.mcpserver import Context  # at module level: the tool's annotation must resolve
 
-from . import __version__, actions, desktop, pack, refs, router, runner, runstate, scholar, security, stats, waits, worktree
-from .api import ApiKeyMissing, find_api_key
+from . import __version__, actions, desktop, pack, refs, router, runstate, scholar, security, stats, waits, workers, worktree
+from .api import ApiKeyMissing
+from .budget import Budgets
+from .jobs import PLANS, JobConfig
+from .scheduler import Scheduler
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
 
 INSTRUCTIONS = (
-    "spare-gpu does coding chores (writing tests, adding docs, code review) for a project folder as "
-    "background BharatCode Desktop sessions, never touching the user's checkout: each finished job's "
-    "edited files are copied to the project's spare-gpu/<date>_<time>/ folder. It measures how long each model would wait right now, and can hand a "
-    "switch-safe task to whichever model starts it sooner, checking the result before keeping it. "
-    "Relay the tools' answers to the user as they are."
+    "spare-gpu does coding chores (writing tests, adding docs, code review, applying a fix) for a project "
+    "folder as BharatCode Desktop sessions the user can watch, in a private copy of the project, never "
+    "touching the user's checkout: each finished job's edited files are copied to the project's "
+    "spare-gpu/<date>_<time>/ folder. spare_delegate runs the job now and returns when it is done. It "
+    "measures how long each model would wait right now, and can hand a switch-safe task to whichever "
+    "model starts it sooner, checking the result before keeping it. Relay the tools' answers to the user "
+    "as they are."
 )
 # Desktop already shows each session's tokens in detail; spare-gpu points there rather than estimate.
 SESSION_DETAIL = ("Each job runs as a BharatCode Desktop session named \"spare-gpu: ...\"; open it in Desktop "
@@ -68,15 +78,20 @@ def ask_folder() -> Path:
 class SpareTools:
     """The five tools as plain functions returning text, for one project folder."""
 
-    def __init__(self, base: Path, launch: Callable[[Path], int] | None = None,
-                 http: Callable[[], httpx.Client] | None = None,
-                 scholar_http: Callable[[], httpx.Client] | None = None):
+    def __init__(self, base: Path, http: Callable[[], httpx.Client] | None = None,
+                 scholar_http: Callable[[], httpx.Client] | None = None,
+                 make_worker: Callable[..., workers.Worker] | None = None, plans: dict | None = None,
+                 sleep: Callable[[float], None] = time.sleep):
         self.base = Path(base)
-        # Everything that reaches outside is injectable, so tests use fakes: the job runner, the
-        # wait figures (BharatCode's live stats), and the scholarly registries.
-        self._launch = launch or runner.launch
+        # Everything that reaches outside is injectable, so tests use fakes: the worker that does the
+        # steps (Desktop or the API), the job plans, the wait figures (BharatCode's live stats), and
+        # the scholarly registries.
         self._http = http or (lambda: httpx.Client(timeout=10.0))
         self._scholar_http = scholar_http or scholar.client
+        self._make_worker = make_worker or workers.build
+        self._plans = plans or PLANS
+        self._sleep = sleep
+        self._running = threading.Lock()  # one job at a time in this process; a second call waits its turn
 
     # --- helpers -------------------------------------------------------------------------
 
@@ -97,35 +112,6 @@ class SpareTools:
         if not stamp:
             return "-"
         return datetime.fromisoformat(stamp).astimezone().strftime("%d %b %H:%M")
-
-    def _ensure_runner(self, store: Store, repo: Path) -> str:
-        """Start the background runner unless it's already going. Returns what to tell the user."""
-        pid = runstate.running_pid(store.path.parent)
-        if pid:
-            return f"spare-gpu's runner (process {pid}) is already going; it picks this up next."
-        try:
-            # Inside Desktop the runner works through Desktop's server and sign-in; it's detached
-            # and can't find that server itself, so pass it on. No API key is needed then.
-            inside = desktop.discover()
-            desktop.export_url(inside)
-        except desktop.DesktopNotFound:
-            inside = None
-        if inside is None:
-            try:
-                if find_api_key() is None:
-                    return "It can't run yet: no BharatCode API key is set up. Run `gtu setup` in a terminal."
-            except ApiKeyMissing as exc:
-                return f"It can't run yet: {exc}. Run `gtu setup` in a terminal."
-        try:
-            pid = self._launch(repo)
-        except (runner.RunnerError, OSError) as exc:
-            return f"Couldn't start the background runner: {exc}"
-        if inside is not None:
-            return (f"Started spare-gpu's runner in the background (process {pid}). Each job runs as its own "
-                    "BharatCode Desktop session, named \"spare-gpu: ...\", while Desktop is open; it stops when the "
-                    "queue is empty.")
-        return (f"Started spare-gpu's runner in the background (process {pid}). It starts now, waits politely if "
-                "BharatCode says busy, keeps going after you close BharatCode, and stops when the queue is empty.")
 
     # --- the five tools -------------------------------------------------------------------
 
@@ -157,10 +143,11 @@ class SpareTools:
                     files = f". Edited files: {j.output_dir}/" if j.output_dir else ""
                     lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}{on}{files}")
         if pid:
-            lines.append(f"spare-gpu's runner is going (process {pid}).")
+            lines.append(f"A job is running now (process {pid}); it shows in Desktop as a session named "
+                         "\"spare-gpu: ...\".")
         elif waiting:
-            lines.append("spare-gpu's runner isn't going, so waiting jobs won't start; queueing another job "
-                         "starts it, or run `gtu start`.")
+            lines.append("Nothing is running now. Waiting jobs start with `gtu start` in a terminal; a job handed "
+                         "over with spare_delegate runs at once.")
         if jobs:
             lines.append(SESSION_DETAIL)
         return "\n".join(lines)
@@ -292,9 +279,11 @@ class SpareTools:
             default = None
         return router.preferred_model(default or router.DELEGATE_PREFERRED)
 
-    def delegate(self, kind: str, path: str, note: str | None = None, your_model: str | None = None) -> str:
+    def delegate(self, kind: str, path: str, note: str | None = None, your_model: str | None = None,
+                 progress: Callable[[str], None] = lambda line: None) -> str:
         """Queue a task on whichever model starts it sooner (if its type is switch-safe), pinned to
-        that model, and start the runner. Returns a short summary, never the work itself."""
+        that model, run it now, in front of the user, and return how it went. `progress` gets each
+        line the runner would print (the MCP layer turns them into progress notifications)."""
         try:
             outcome = actions.queue_job(lambda repo: Store(db_path(repo)), self._root(), kind, path, note)
         except actions.ActionError as exc:
@@ -304,14 +293,70 @@ class SpareTools:
             preferred = self._preferred(your_model)
             choice = router.decide(store, store.path.parent, job.kind, preferred, self._http)
             store.set_route(job.id, choice.model, choice.preferred, choice.reason)
-            runner_line = self._ensure_runner(store, Path(job.repo))
-        lines = [f"Handed off: {job.kind} for {job.target} (job {job.id}), working in the background. When it "
-                 f"finishes, its edited files are copied to {worktree.OUTPUT_DIR}/<date>_<time>/ in this project; "
-                 "your files aren't touched.", choice.summary()]
+            result = self._run_now(store, job.id, progress)
+        lines = [result, choice.summary()]
         if outcome.note:
             lines.append(outcome.note)
-        lines += [runner_line, "spare_work_status shows progress and, once it finishes, where its files are."]
         return "\n".join(lines)
+
+    def _run_now(self, store: Store, job_id: str, progress: Callable[[str], None]) -> str:
+        """Run one queued job to its end and say how it went. Another run in this process goes
+        first; a `gtu start` (or another server) already running in the folder keeps the job queued
+        for its loop, so two runners never work the same queue."""
+        folder = store.path.parent
+        job = store.get_job(job_id)
+        what = f"{job.kind} for {job.target} (job {job.id})"
+        with self._running:
+            other = runstate.running_pid(folder)
+            if other and other != os.getpid():
+                return (f"Queued: {what} waits behind the run already going in this project (process {other}), "
+                        "which picks it up next. spare_work_status shows it.")
+            try:
+                job_config = JobConfig.from_env()
+            except ValueError as exc:
+                return f"Queued, not started: {exc}"
+            try:
+                worker = self._make_worker(store, progress, job_config)
+            except ApiKeyMissing as exc:
+                return (f"Queued, not started: {what} needs BharatCode Desktop open, or an API key ({exc}). "
+                        "Run `gtu setup` in a terminal, then `gtu start`.")
+            runstate.clear(folder)
+            runstate.write_run(folder)
+            try:
+                scheduler = Scheduler(
+                    store, worker.client, agent=worker.agent, plans=self._plans, budgets=Budgets.from_env(),
+                    config=job_config, log=progress, sleep=self._sleep, desktop_missing=worker.desktop_missing,
+                    should_stop=lambda: runstate.stop_requested(folder) or store.get_job(job_id).status == "cancelled",
+                )
+                status = scheduler.run_job(job_id)
+            finally:
+                runstate.clear(folder)
+                worker.close()
+        return self._outcome(store, store.get_job(job_id), status, worker.inside_desktop)
+
+    def _outcome(self, store: Store, job, status: str, inside_desktop: bool) -> str:
+        what = f"{job.kind} for {job.target} (job {job.id})"
+        tokens = store.request_summary(job.id)["total_tokens"]
+        spent = f" It used {tokens:,} tokens." if tokens else ""
+        where = (" Its full transcript is the Desktop session named \"spare-gpu: ...\"." if inside_desktop else "")
+        if status == "done":
+            if job.output_dir:
+                return (f"Done: {what} finished; its edited files are in {job.output_dir}/ in this project. Your "
+                        f"files weren't touched.{spent}{where}")
+            return f"Done: {what} finished, but it changed no files.{spent}{where}"
+        if status == "failed":
+            step = next((s for s in store.steps(job.id) if s["status"] == "failed"), None)
+            why = f": {step['output']}" if step and step["output"] else ""
+            return f"Failed: {what}{why}.{spent}{where}".replace("..", ".")
+        if status == "cancelled":
+            return f"Cancelled: {what} was stopped; nothing was copied to {worktree.OUTPUT_DIR}/.{spent}"
+        if status == "waiting":
+            return (f"Queued, not started: {what} needs BharatCode Desktop. {desktop.DESKTOP_NEEDED}")
+        used = Budgets.from_env().per_job
+        return (f"Paused: {what} stopped before it finished"
+                + (f" (its token budget of {used:,} is used up; raise GTU_JOB_TOKEN_BUDGET)" if tokens >= used else
+                   " (a stop was asked for)")
+                + f". Progress is saved; `gtu start` in a terminal resumes it.{spent}")
 
 
     # --- the pack's tools (only with `gtu mcp --pack`: every tool costs every session tokens) ---
@@ -500,21 +545,21 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             return tools.pack_cost()
 
     @server.tool(annotations=notes(False, world=True))
-    def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,
-                       your_model: str | None = None) -> str:
-        """Hand a self-contained task (write tests, write docs, or review code for a file or folder
-        in this repo) to a background BharatCode Desktop session on whichever model will start it
-        sooner, so the user doesn't wait in DeepSeek's queue. Only task types measured as
-        switch-safe ever move to the other model; the result is checked before it's kept, and if
-        the check keeps nothing it reruns once on the preferred model. Returns at once with a short
-        summary; when it finishes, its edited files are in spare-gpu/<date>_<time>/ in the project.
-        The work itself never comes back into this chat.
+    async def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,
+                             your_model: str | None = None, ctx: Context | None = None) -> str:
+        """Run a self-contained task (write tests, write docs, review code, or apply a fix for a file
+        or folder in this repo) now, as a BharatCode Desktop session the user can watch, on
+        whichever model will start it sooner, so the user doesn't wait in DeepSeek's queue. Only task
+        types measured as switch-safe ever move to the other model; the result is checked before
+        it's kept, and if the check keeps nothing it reruns once on the preferred model. The call
+        returns when the job is done (minutes for tests and docs), with the result and where its
+        edited files are: spare-gpu/<date>_<time>/ in the project. The user's own files are never
+        touched, and the work itself never comes back into this chat.
 
-        Use it when the user wants the task done now without waiting: "write tests for src/pay.py
-        on whichever model is free", "get this reviewed now, don't wait in the queue", "delegate the
-        docs for utils", "queue tests for the payments module". For a plain question (not a
-        coding chore) use spare_ask. Work that should wait for a quiet moment is queued from a
-        terminal with `gtu add` and run by `gtu start`.
+        Use it when the user wants the task done now: "write tests for src/pay.py on whichever
+        model is free", "get this reviewed now, don't wait in the queue", "delegate the docs for
+        utils", "run tests for the payments module". For a plain question (not a coding chore) use
+        spare_ask. Work for later is queued from a terminal with `gtu add` and run by `gtu start`.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
@@ -528,9 +573,46 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             your_model: The model you are running on, as your system prompt names it (e.g.
                 "deepseek-v4.1-flash"); it's the one the task would otherwise use.
         """
-        return tools.delegate(type, path, note, your_model)
+        return await run_with_progress(ctx, lambda progress: tools.delegate(type, path, note, your_model, progress))
 
     return server
+
+
+HEARTBEAT_S = 10.0  # progress notifications this often keep the client's per-call timeout being reset
+
+
+async def run_with_progress(ctx, work: Callable[[Callable[[str], None]], str]) -> str:
+    """Run `work` (blocking) in a thread, and while it runs send the client a progress notification
+    every few seconds carrying the latest line `work` reported. BharatCode Desktop resets its tool
+    timeout on each one, so a job that takes minutes is fine; a client that asked for no progress
+    gets none (the SDK makes report_progress a no-op then)."""
+    import anyio
+
+    lines: list[str] = []
+    done = anyio.Event()
+
+    async def heartbeat() -> None:
+        sent = 0
+        while not done.is_set():
+            with anyio.move_on_after(HEARTBEAT_S):
+                await done.wait()
+            if ctx is not None and (lines or not done.is_set()):
+                sent += 1
+                try:
+                    await ctx.report_progress(sent, None, lines[-1] if lines else "working")
+                except Exception:  # noqa: BLE001  progress is best effort; the result still comes back
+                    pass
+
+    async def run() -> str:
+        try:
+            return await anyio.to_thread.run_sync(work, lines.append)
+        finally:
+            done.set()
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(heartbeat)
+        result = await run()
+    return result
 
 
 def serve(base: Path, pack: bool = False) -> None:

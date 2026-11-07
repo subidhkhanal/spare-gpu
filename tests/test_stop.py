@@ -1,4 +1,4 @@
-"""`gtu stop`: halt a running `gtu start` cleanly; jobs end up paused and resumable."""
+"""`gtu stop`: ask the running job to stop, cleanly and without killing anything; jobs end up paused and resumable."""
 
 import json
 import os
@@ -156,10 +156,11 @@ folder = pathlib.Path(sys.argv[1]); folder.mkdir(parents=True, exist_ok=True)
 obey = sys.argv[2] == "obey"
 while not (obey and (folder / "stop").exists()):
     time.sleep(0.1)
+(folder / "run.json").unlink()  # what a real runner does in its `finally`
 """
 
 
-def test_stop_asks_first_and_the_run_stops_cleanly(folder):
+def test_stop_asks_and_the_run_stops_cleanly(folder):
     proc = subprocess.Popen([sys.executable, "-c", STANDIN, str(folder), "obey"])
     wait_for_run_file(folder)
     result = runner.invoke(app, ["stop", "--wait", "10"])
@@ -169,13 +170,18 @@ def test_stop_asks_first_and_the_run_stops_cleanly(folder):
     assert not (folder / "run.json").exists() and not (folder / "stop").exists()
 
 
-def test_stop_kills_a_run_that_does_not_respond(folder):
+def test_stop_never_kills_a_run_that_has_not_answered_yet(folder):
     proc = subprocess.Popen([sys.executable, "-c", STANDIN, str(folder), "ignore"])
-    wait_for_run_file(folder)
-    result = runner.invoke(app, ["stop", "--wait", "1"])
-    assert result.exit_code == 0, result.output
-    assert "didn't stop within 1 s" in result.output and "killed" in result.output
-    assert proc.wait(timeout=10) is not None
+    try:
+        wait_for_run_file(folder)
+        result = runner.invoke(app, ["stop", "--wait", "1"])
+        assert result.exit_code == 0, result.output
+        assert "hasn't stopped within 1 s" in result.output and "stop request stays" in result.output
+        assert proc.poll() is None  # still alive: nothing was killed
+        assert (folder / "stop").exists()  # the request is left for it to notice
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
 
 
 def test_start_refuses_to_run_twice(folder, monkeypatch):

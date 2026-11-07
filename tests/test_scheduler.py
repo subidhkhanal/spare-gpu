@@ -207,3 +207,65 @@ def test_opencode_config_is_never_committed(fake, store, client, git_repo):
     plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
     make_scheduler(store, client, fake, plans, isolate=True).run()
     assert result_files(store, job.id) == {"test_calc.py"}  # never opencode.json
+
+
+# --- run_job: one job, in front of whoever asked -------------------------------------------
+
+def test_run_job_runs_only_that_job_to_the_end_and_leaves_the_rest_queued(fake, store, client, job_repo):
+    mine = store.add_job("docs", "a.py", job_repo)
+    other = store.add_job("review", "b.py", job_repo)
+    calls = []
+    scheduler = make_scheduler(store, client, fake, counting_plan(["one", "two"], calls))
+    assert scheduler.run_job(mine.id) == "done"
+    assert store.get_job(mine.id).status == "done" and store.get_job(other.id).status == "queued"
+    assert [c[0] for c in calls] == ["one", "two"]
+
+
+def test_run_job_waits_out_busy_answers_and_reports_a_failed_step(fake, store, client, job_repo):
+    job = store.add_job("review", "a.py", job_repo)
+    fake.busy(1)
+    calls, logs = [], []
+    scheduler = make_scheduler(store, client, fake, counting_plan(["one"], calls), log=logs.append)
+    assert scheduler.run_job(job.id) == "done" and fake.clock.sleeps == [60.0]
+
+    def broken(ctx):
+        raise ValueError("no element found")
+
+    failing = store.add_job("docs", "b.py", job_repo)
+    assert make_scheduler(store, client, fake, {"docs": [("write", broken)]}).run_job(failing.id) == "failed"
+    assert store.steps(failing.id)[0]["output"] == "ValueError: no element found"
+
+
+def test_run_job_pauses_when_the_budget_is_used_up(fake, store, client, job_repo):
+    from gpu_token_utilization.budget import Budgets
+    from gpu_token_utilization.store import RequestLog
+
+    job = store.add_job("review", "a.py", job_repo)
+    store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, total_tokens=500, job_id=job.id))
+    calls = []
+    scheduler = make_scheduler(store, client, fake, counting_plan(["one"], calls), budgets=Budgets(per_job=400))
+    assert scheduler.run_job(job.id) == "paused" and calls == []
+    assert store.get_job(job.id).status == "paused"
+
+
+def test_run_job_stops_cleanly_when_asked_and_ends_a_cancelled_job(fake, store, client, job_repo):
+    job = store.add_job("docs", "a.py", job_repo)
+    asked = {"stop": False}
+
+    def first(ctx):
+        asked["stop"] = True  # `gtu stop` arrives while the first step runs
+        return "one"
+
+    plans = {"docs": [("one", first), ("two", lambda ctx: "two")]}
+    scheduler = make_scheduler(store, client, fake, plans, should_stop=lambda: asked["stop"])
+    assert scheduler.run_job(job.id) == "paused" and scheduler.stopped
+    assert [s["status"] for s in store.steps(job.id)] == ["done", "pending"]  # resumable
+
+    cancelled = store.add_job("review", "b.py", job_repo)
+
+    def cancel_self(ctx):
+        ctx.store.cancel_job(ctx.job.id)
+        return "x"
+
+    scheduler = make_scheduler(store, client, fake, {"review": [("one", cancel_self), ("two", lambda ctx: "two")]})
+    assert scheduler.run_job(cancelled.id) == "cancelled" and store.get_job(cancelled.id).status == "cancelled"

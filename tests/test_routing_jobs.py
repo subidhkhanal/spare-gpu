@@ -9,7 +9,9 @@ import pytest
 
 from gpu_token_utilization import router, waits
 from gpu_token_utilization.client import BharatCodeError
-from gpu_token_utilization.mcp_server import SpareTools, db_path
+from gpu_token_utilization.mcp_server import db_path
+
+from conftest import quick_tools
 from gpu_token_utilization.router import Choice
 from gpu_token_utilization.scheduler import Scheduler, kept_nothing
 from gpu_token_utilization.store import Store
@@ -133,9 +135,9 @@ def fresh_wait_cache(monkeypatch):
 def test_delegate_routes_a_switch_safe_task_and_says_why(git_repo):
     (git_repo / ".gtu").mkdir(exist_ok=True)
     (git_repo / ".gtu" / "switch-safe").write_text("tests\n", encoding="utf-8")
-    tools = SpareTools(git_repo, launch=lambda repo: 4242, http=wait_figures)
+    tools = quick_tools(git_repo, wait_figures)
     text = tools.delegate("tests", "src", your_model=f"bharatcode/{DEEPSEEK}")
-    assert text.startswith("Handed off: tests for src (job ")
+    assert text.startswith("Done: tests for src (job ")
     assert "Runs on Qwen 3.8 27B: saves about 2m 05s of waiting over DeepSeek V4.1 Flash" in text
     assert "DeepSeek V4.1 Flash ≈ 2m 05s" in text and "Qwen 3.8 27B ≈ 0 s (free slot, empty queue)" in text
     with Store(db_path(git_repo)) as store:
@@ -145,7 +147,7 @@ def test_delegate_routes_a_switch_safe_task_and_says_why(git_repo):
 
 def test_delegate_from_qwen_would_move_up_to_deepseek_but_its_lane_is_full(git_repo):
     # moving up to DeepSeek is allowed for any type, but here DeepSeek's lane has a queue
-    text = SpareTools(git_repo, launch=lambda repo: 4242, http=wait_figures).delegate("docs", "src", your_model=QWEN)
+    text = quick_tools(git_repo, wait_figures).delegate("docs", "src", your_model=QWEN)
     assert "Runs on Qwen 3.8 27B: no other model has a free slot right now" in text
 
 
@@ -163,10 +165,10 @@ def test_delegate_from_qwen_moves_up_to_deepseek_when_qwen_is_packed(git_repo):
                 {"id": QWEN, "api": lane(2, 8, 2)}, {"id": DEEPSEEK, "api": lane(1, 0, 4)}]})
         return httpx.Client(transport=httpx.MockTransport(handle))
 
-    text = SpareTools(git_repo, launch=lambda repo: 4242, http=flipped).delegate("tests", "src", your_model=QWEN)
+    text = quick_tools(git_repo, flipped).delegate("tests", "src", your_model=QWEN)
     assert "Runs on DeepSeek V4.1 Flash: saves about 2m 05s of waiting over Qwen 3.8 27B" in text
 
 
 def test_delegate_without_the_callers_model_prefers_deepseek_outside_desktop(git_repo):
-    text = SpareTools(git_repo, launch=lambda repo: 4242, http=wait_figures).delegate("review", "src")
+    text = quick_tools(git_repo, wait_figures).delegate("review", "src")
     assert "Runs on DeepSeek V4.1 Flash" in text

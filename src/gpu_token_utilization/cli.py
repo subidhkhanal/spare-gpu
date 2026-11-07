@@ -13,12 +13,12 @@ from . import __version__
 from .api import (API_KEY_ENV, ApiError, ApiKeyMissing, KeyRejected, clean_key, find_api_key,
                   get_api_key, key_problem, list_models, verify_key)
 from . import keystore
-from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
+from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, desktop, dryrun, pack, router, runstate, waits, worktree
+from . import actions, bc_config, dryrun, pack, router, runstate, waits, workers, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -587,33 +587,22 @@ def start(
             job_config = JobConfig.from_env()
         except ValueError as exc:
             _fail(str(exc))
-        # spare-gpu runs inside BharatCode Desktop: every job is a Desktop session, on Desktop's own
-        # server and sign-in, so no API key of its own is needed. Outside Desktop, review jobs can
-        # still use the API with a key; tests and docs jobs wait until Desktop runs them.
-        client, worker, desktop_missing = None, None, None
         try:
-            worker = desktop.DesktopAgent(desktop.discover(), timeout=job_config.agent_timeout)
-            log(f"Running jobs through BharatCode Desktop ({worker.conn.url}); no API key needed.")
-        except desktop.DesktopNotFound as exc:
-            if os.environ.get(desktop.PASSWORD_ENV):  # started from Desktop, yet its server wasn't found
-                log(f"Not using BharatCode Desktop: {exc}.")
-            try:
-                client = BharatCodeClient(store=store, retry=RetryPolicy.from_env(),
-                                          on_retry=lambda message: log(f"  {message}"))
-            except ApiKeyMissing as exc:
-                _fail(_no_key(exc))
-            desktop_missing = desktop.DESKTOP_NEEDED
+            worker = workers.build(store, log, job_config)
+        except ApiKeyMissing as exc:
+            _fail(_no_key(exc))
+        client, agent, desktop_missing = worker.client, worker.agent, worker.desktop_missing
         runstate.clear(folder)  # a stop request left over from an earlier run doesn't apply to this one
         runstate.write_run(folder)
         def route(job):
             # A job delegated from a chat already has its model; a queued one is routed here, just
             # before it starts, from the worker's own model (or GTU_PREFERRED_MODEL).
-            preferred = job.preferred_model or router.preferred_model(worker.model)
+            preferred = job.preferred_model or router.preferred_model(agent.model)
             return router.decide(store, folder, job.kind, preferred, lambda: httpx.Client(timeout=10.0))
 
         try:
             scheduler = Scheduler(
-                store, client, agent=worker,
+                store, client, agent=agent,
                 budgets=Budgets.from_env(), config=job_config, log=log,
                 should_stop=lambda: runstate.stop_requested(folder), desktop_missing=desktop_missing, route=route,
             )
@@ -636,9 +625,9 @@ def start(
 
 @app.command()
 def stop(
-    wait: float = typer.Option(10.0, "--wait", min=0, help="Seconds to wait for a clean stop before killing it."),
+    wait: float = typer.Option(10.0, "--wait", min=0, help="Seconds to wait for the clean stop."),
 ) -> None:
-    """Stop a running `gtu start` now. Jobs are paused, not failed; `gtu start` resumes them."""
+    """Stop the running job cleanly (nothing is killed). Jobs are paused, not failed; `gtu start` resumes them."""
     with Store.open_default() as store:
         try:
             lines = actions.stop_runner(store, wait)

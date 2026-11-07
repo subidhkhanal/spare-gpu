@@ -29,7 +29,7 @@ from .budget import BudgetExceeded, Budgets
 from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult, Usage
 from .jobs import PLANS, JobConfig
 from .runstate import StopRequested
-from .store import Job, RequestLog, Store
+from .store import FINAL_STATUSES, Job, RequestLog, Store
 
 # Files jobs may create for their own tooling that must never be committed.
 NEVER_COMMIT = ("opencode.json",)
@@ -242,6 +242,43 @@ class Scheduler:
                 if max_steps is not None and completed >= max_steps:
                     return completed
         return completed
+
+    def run_job(self, job_id: str) -> str:
+        """Run one job to its end, in front of whoever asked. Returns its final status: done, failed
+        or cancelled; paused when its budget ran out or a stop was asked for; waiting when it needs
+        BharatCode Desktop and that isn't here."""
+        while True:
+            job = self.store.get_job(job_id)
+            if job.status in FINAL_STATUSES:
+                return job.status
+            if self.should_stop():
+                self._stop_now()
+                return self.store.get_job(job_id).status
+            if self.desktop_missing and job.kind in AGENT_KINDS:
+                self._log(f"Job {job.id} ({job.kind}): it needs BharatCode Desktop, which isn't "
+                          "available here. It stays queued for the next `gtu start`.")
+                return "waiting"
+            reason = self._over_budget(job)
+            if reason is not None:
+                self.store.set_status(job.id, "paused")
+                self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
+                return "paused"
+            outcome = self.run_step(job)
+            if outcome == "stopped":
+                if self.store.get_job(job_id).status == "cancelled":  # spare_cancel_work, not `gtu stop`
+                    self._finish(job, "cancelled")
+                    self._log(f"Job {job.id}: cancelled; its copy is removed and nothing was exported.")
+                    return "cancelled"
+                self._stop_now()
+                return "paused"
+            if outcome == "busy":
+                self._wait_out_busy()
+            elif outcome == "budget":
+                return "paused"
+            elif outcome == "done":
+                self.busy_wait = BUSY_WAIT
+            elif outcome in ("failed", "finished"):
+                return self.store.get_job(job_id).status
 
     def _wait_out_busy(self) -> None:
         """BharatCode answered busy: wait, longer each time in a row, then try the step again."""

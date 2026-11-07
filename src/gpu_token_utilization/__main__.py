@@ -1,4 +1,4 @@
-"""`python -m gpu_token_utilization ...` is the same as `gtu ...` (used to start the background runner)."""
+"""`python -m gpu_token_utilization ...` is the same as `gtu ...`."""
 
 from .cli import app
 

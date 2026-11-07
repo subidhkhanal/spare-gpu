@@ -1,6 +1,6 @@
 """spare-gpu's MCP server: each of the five tools against fakes (BharatCode's API, live stats and
-history, and the background processes), missing-store handling, the real protocol (in memory and
-over stdio, the way BharatCode Desktop runs it), and sharing the store between processes."""
+history, and a worker whose steps finish at once), missing-store handling, the real protocol (in
+memory and over stdio, the way BharatCode Desktop runs it), and sharing the store between processes."""
 
 import json
 import subprocess
@@ -12,11 +12,12 @@ import httpx
 import mcp
 import pytest
 
-from gpu_token_utilization import actions, waits, worktree
+from gpu_token_utilization import actions, runstate, waits, worktree
+from gpu_token_utilization.api import ApiKeyMissing
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
-from conftest import desktop_db
+from conftest import desktop_db, quick_plans, quick_tools
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
 PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
@@ -37,19 +38,9 @@ def fresh_waits():
 
 
 @pytest.fixture
-def started():
-    """What the tools asked to start in the background (nothing real is started here)."""
-    return {"runner": []}
-
-
-@pytest.fixture
-def tools(git_repo, fake, started):
-    def launch(repo):
-        started["runner"].append(repo)
-        return 4242
-
+def tools(git_repo, fake):
     # wait figures from the fake: its live stats, and no queue-waits endpoint (so "no data")
-    return SpareTools(git_repo, launch=launch, http=lambda: httpx.Client(transport=fake.transport()))
+    return quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()))
 
 
 def readable(text: str) -> bool:
@@ -74,42 +65,66 @@ def finished_review(git_repo, tokens=355, wait_ms=12500):
     return job
 
 
-# --- spare_delegate: the store, the runner and refusals (routing itself is in test_routing_jobs) ---
+# --- spare_delegate: runs the job now, in front, and says how it went (routing is in test_routing_jobs) ---
 
-def test_delegate_writes_to_the_same_store_as_the_cli(tools, git_repo):
+def test_delegate_runs_the_job_now_in_the_same_store_as_the_cli(tools, git_repo):
     text = tools.delegate("tests", "src", note="cover negative numbers")
-    assert readable(text) and text.startswith("Handed off: tests for src (job ") and "spare-gpu/<date>_<time>/" in text
+    assert readable(text) and text.startswith("Done: tests for src (job ") and "changed no files" in text
     with Store(git_repo / ".gtu" / "gtu.db") as store:  # exactly where `gtu add` puts it
         (job,) = store.list_jobs()
-    assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "queued")
+    assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "done")
+    assert runstate.running_pid(git_repo / ".gtu") is None  # the run file is cleared once it's done
 
 
-def test_delegate_starts_the_background_runner_and_returns_at_once(tools, git_repo, started, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", KEY)
+def test_delegate_reports_where_the_files_landed_and_narrates_progress(git_repo, fake):
+    def write(ctx):
+        (ctx.workdir / "tests" / "test_new.py").parent.mkdir(exist_ok=True)
+        (ctx.workdir / "tests" / "test_new.py").write_text("def test_ok():\n    assert True\n")
+
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(write))
+    lines = []
+    text = tools.delegate("tests", "src", progress=lines.append)
+    assert text.startswith("Done: tests for src (job ") and "its edited files are in spare-gpu/" in text
+    folder = text.split("its edited files are in ")[1].split("/ in this project")[0]
+    assert (git_repo / folder / "tests" / "test_new.py").is_file()
+    assert "Your files weren't touched" in text and "Desktop session named" in text
+    assert not (git_repo / "tests").exists()
+    assert any("step 1 of 2 (write) started" in line for line in lines) and any("finished;" in line for line in lines)
+
+
+def test_delegate_without_desktop_or_a_key_leaves_the_job_queued_and_says_what_to_do(git_repo, fake):
+    def no_worker(store, log, config):
+        raise ApiKeyMissing("no BharatCode API key found")
+
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), make_worker=no_worker)
     text = tools.delegate("review", "src")
-    assert started["runner"] == [git_repo.resolve()]
-    assert "Started spare-gpu's runner in the background (process 4242)" in text
+    assert text.startswith("Queued, not started: review for src") and "gtu setup" in text
+    with Store(db_path(git_repo)) as store:
+        assert store.list_jobs()[0].status == "queued"
 
 
-def test_delegate_without_a_key_queues_and_says_to_run_setup(tools, started):
-    text = tools.delegate("review", "src")
-    assert "Handed off: review for src" in text and "no BharatCode API key" in text and "gtu setup" in text
-    assert started["runner"] == []
+def test_delegate_while_another_run_is_going_leaves_the_job_for_that_run(tools, git_repo, monkeypatch):
+    monkeypatch.setattr(runstate, "running_pid", lambda folder: 99999)  # a `gtu start` in a terminal
+    text = tools.delegate("docs", "src")
+    assert text.startswith("Queued: docs for src") and "process 99999" in text
+    with Store(db_path(git_repo)) as store:
+        assert store.list_jobs()[0].status == "queued"
 
 
-def test_delegate_when_the_runner_is_already_going_starts_nothing(tools, git_repo, started, monkeypatch):
-    from gpu_token_utilization import runstate
+def test_a_cancelled_job_stops_and_says_so(git_repo, fake):
+    def cancel_self(ctx):
+        ctx.store.cancel_job(ctx.job.id)  # spare_cancel_work from another chat, mid-job
 
-    monkeypatch.setenv("BHARATCODE_API_KEY", KEY)
-    tools.delegate("review", "src")
-    runstate.write_run(git_repo / ".gtu")  # this test process plays the running runner
-    assert "already going" in tools.delegate("docs", "src") and len(started["runner"]) == 1
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(cancel_self))
+    text = tools.delegate("docs", "src")
+    assert text.startswith("Cancelled: docs for src") and "nothing was copied" in text
+    assert not (git_repo / ".gtu" / "worktrees").exists() or not any((git_repo / ".gtu" / "worktrees").iterdir())
 
 
 def test_delegate_from_a_subfolder_resolves_the_repo_root(git_repo, fake):
     http = lambda: httpx.Client(transport=fake.transport())
-    text = SpareTools(git_repo / "src", launch=lambda repo: 1, http=http).delegate("review", "src/calc.py")
-    assert "Handed off: review for src/calc.py" in text
+    text = quick_tools(git_repo / "src", http).delegate("review", "src/calc.py")
+    assert "Done: review for src/calc.py" in text
     assert (git_repo / ".gtu" / "gtu.db").exists() and not (git_repo / "src" / ".gtu").exists()
 
 
@@ -122,22 +137,22 @@ def test_delegate_refusals_are_explained(tools, git_repo, path, problem):
 
 def test_delegate_with_unsaved_changes(tools, git_repo):
     (git_repo / "scratch.txt").write_text("wip")
-    assert tools.delegate("review", "src").startswith("Handed off: review for src")
+    assert tools.delegate("review", "src").startswith("Done: review for src")
 
 
 def test_delegate_in_a_folder_that_is_not_a_git_repo(tmp_path, fake):
     (tmp_path / "a.py").write_text("x = 1\n")
     http = lambda: httpx.Client(transport=fake.transport())
-    text = SpareTools(tmp_path, launch=lambda repo: 1, http=http).delegate("review", ".")
-    assert text.startswith("Handed off: review for ."), text
+    text = quick_tools(tmp_path, http).delegate("review", ".")
+    assert text.startswith("Done: review for ."), text
 
 
 def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, fake, monkeypatch):
     monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
     (tmp_path / "a.py").write_text("x = 1\n")
     http = lambda: httpx.Client(transport=fake.transport())
-    text = SpareTools(tmp_path, launch=lambda repo: 1, http=http).delegate("review", ".")
-    assert text.startswith("Handed off: review for .") and "isn't a git repo" in text
+    text = quick_tools(tmp_path, http).delegate("review", ".")
+    assert text.startswith("Done: review for .") and "isn't a git repo" in text
 
 
 # --- spare_work_status ------------------------------------------------------------------------
@@ -148,7 +163,7 @@ def test_work_status_merges_queue_and_results(tools, git_repo, fake):
     text = tools.work_status()
     assert readable(text) and text.index("Waiting:") < text.index("Finished:")
     assert "docs src/calc.py, queued" in text and f"- {done.id}: review src, done" in text and "355 tokens" in text
-    assert "runner isn't going" in text
+    assert "Nothing is running now" in text
 
 
 def test_work_status_with_nothing_yet(tools, git_repo):
@@ -276,7 +291,7 @@ def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_
 
     (git_repo / ".gtu").mkdir()
     (git_repo / ".gtu" / "switch-safe").write_text("review-verifier\n", encoding="utf-8")  # the project's own override
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=wait_figures)
+    tools = quick_tools(git_repo, wait_figures)
     text = tools.waits(roles=True)
     assert "- review-verifier: start `review-verifier-standard` (saves about" in text
     assert "- research-checker: start `research-checker` (research-checker jobs aren't marked switch-safe" in text
@@ -293,7 +308,7 @@ def test_pack_cost_without_a_start_time_or_desktop_data_says_so(tools, git_repo)
 
 
 def test_security_filter_through_the_tool(git_repo, fake):
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()))
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()))
     text = tools.security_filter(json.dumps([
         {"file": "app.py", "line": 1, "description": "SQL injection via the id parameter.", "confidence": 0.9},
         {"file": "app.py", "line": 2, "description": "Missing rate limiting on login.", "confidence": 0.9},
@@ -305,8 +320,7 @@ def test_security_filter_through_the_tool(git_repo, fake):
 def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
     from test_scholar import registries
 
-    tools = SpareTools(git_repo, launch=lambda repo: 1, http=lambda: httpx.Client(transport=fake.transport()),
-                       scholar_http=registries)
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), scholar_http=registries)
     text = tools.scholar_search("attention is all you need")
     assert text.startswith("1. Attention Is All You Need (2017)") and "arxiv: 1706.03762" in text
     assert tools.scholar_search("attention", limit=2, sources="arxiv").count("found in: arxiv") == 2
@@ -341,8 +355,8 @@ def test_protocol_calls_return_plain_text(tools, git_repo):
 
     handed, status = anyio.run(go)
     assert not handed.is_error and readable(handed.content[0].text)
-    assert "Handed off: review for src" in handed.content[0].text
-    assert "review src, queued" in status.content[0].text
+    assert "Done: review for src" in handed.content[0].text
+    assert "review src, done" in status.content[0].text
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode Desktop uses on Windows")
@@ -440,3 +454,29 @@ def test_a_cancelled_job_stays_cancelled_when_the_runner_reports_late(store):
     store.set_status(job.id, "running")
     store.cancel_job(job.id)
     assert store.set_status(job.id, "done").status == "cancelled"
+
+
+def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, fake, monkeypatch):
+    """BharatCode Desktop resets its per-call timeout on every progress notification, so a job that
+    takes minutes must keep them coming; here the heartbeat is made fast and the step slow."""
+    from gpu_token_utilization import mcp_server
+
+    monkeypatch.setattr(mcp_server, "HEARTBEAT_S", 0.05)
+
+    def slow(ctx):
+        import time
+        time.sleep(0.3)
+
+    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(slow))
+    seen = []
+
+    async def go():
+        async with mcp.Client(build_server(git_repo, tools)) as client:
+            async def on_progress(progress, total, message):
+                seen.append((progress, message))
+            return await client.call_tool("spare_delegate", {"type": "docs", "path": "src"}, progress_callback=on_progress)
+
+    result = anyio.run(go)
+    assert not result.is_error and result.content[0].text.startswith("Done: docs for src")
+    assert len(seen) >= 2 and seen[-1][0] > seen[0][0]  # several heartbeats, counting up
+    assert any("step 1 of 2 (write) started" in (message or "") for _, message in seen)  # carrying the latest line

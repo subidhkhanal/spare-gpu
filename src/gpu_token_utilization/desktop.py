@@ -3,8 +3,8 @@
 Desktop runs BharatCode's server (the OpenCode HTTP API) on 127.0.0.1 with a password made for
 each launch, and starts MCP servers such as ours as its child processes. They inherit
 OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD, but not the port, so the port is found as
-the one a parent process listens on (or given in GTU_DESKTOP_URL, which the MCP server sets for
-the background runner it starts). A job step is then one Desktop session:
+the one a parent process listens on (or given in GTU_DESKTOP_URL). A job step is then one Desktop
+session:
 - created in the job's worktree (`?directory=`), so it shows up in Desktop like any other chat;
 - with the job's deny-first permission file (agent.permission_config), written into the worktree;
 - with the model chosen per task (the router's "sticky per task" rule);
@@ -180,11 +180,6 @@ def default_model(conn: Connection, transport: httpx.BaseTransport | None = None
         return (data.get("default") or {}).get("bharatcode")
     except (httpx.HTTPError, ValueError, AttributeError):
         return None
-
-
-def export_url(conn: Connection) -> None:
-    """Pass the found server on to processes we start (the background runner can't see Desktop)."""
-    os.environ[URL_ENV] = conn.url
 
 
 # --- running a job step as a Desktop session ----------------------------------------------------

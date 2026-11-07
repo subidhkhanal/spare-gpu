@@ -5,6 +5,7 @@ import pytest
 
 from gpu_token_utilization import keystore
 from gpu_token_utilization.keystore import TARGET_ENV
+from gpu_token_utilization import workers
 from gpu_token_utilization.client import BharatCodeClient, RetryPolicy
 from gpu_token_utilization.fakeapi import FakeBharatCode
 from gpu_token_utilization.fakedesktop import FakeDesktop, Step
@@ -115,6 +116,44 @@ def git_repo(tmp_path):
 def desktop_fake():
     """A fake BharatCode Desktop server; desktop_fake.agent() is a DesktopAgent talking to it."""
     return FakeDesktop()
+
+
+class QuickAgent:
+    """Stands in for DesktopAgent in tests whose plans never call it: only the model matters."""
+    label = "BharatCode Desktop"
+    timeout = 60
+
+    def __init__(self, model="bharatcode/deepseek-v4.1-flash"):
+        self.model = model
+
+    def with_model(self, model):
+        return QuickAgent(model)
+
+
+def quick_worker(store=None, log=None, config=None):
+    """What workers.build returns inside Desktop, without a Desktop."""
+    return workers.Worker(client=None, agent=QuickAgent(), desktop_missing=None, inside_desktop=True)
+
+
+def quick_plans(write=None):
+    """Plans whose steps finish at once; `write(ctx)` may put a file in the job's copy."""
+    def step(ctx):
+        if write:
+            write(ctx)
+        return "wrote it"
+
+    return {kind: [("write", step), ("verify", lambda ctx: "Kept 1 passing test(s), dropped 0.")]
+            for kind in ("tests", "docs", "review", "fix")}
+
+
+def quick_tools(base, http, **kwargs):
+    """SpareTools whose delegated jobs run at once against the fakes (no Desktop, no waiting)."""
+    from gpu_token_utilization.mcp_server import SpareTools
+
+    kwargs.setdefault("make_worker", quick_worker)
+    kwargs.setdefault("plans", quick_plans())
+    kwargs.setdefault("sleep", lambda seconds: None)
+    return SpareTools(base, http=http, **kwargs)
 
 
 @pytest.fixture

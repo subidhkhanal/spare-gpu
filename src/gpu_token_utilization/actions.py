@@ -51,8 +51,9 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
 
 
 def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
-    """Stop a running `gtu start`: ask first, kill after `wait` seconds. Jobs are paused, not
-    failed. Returns what happened, line by line, for the user."""
+    """Ask the running jobs to stop and wait up to `wait` seconds for it. Nothing is killed: the
+    runner notices between steps and every few seconds inside one, aborts the current Desktop
+    session and leaves the job paused, not failed. Returns what happened, line by line."""
     folder = store.path.parent
     lines = []
     pid = runstate.running_pid(folder)
@@ -61,28 +62,33 @@ def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
         paused = runstate.tidy(store)  # e.g. after a crash: don't leave jobs marked running
         return ["Nothing is running." + (f" Paused interrupted job(s): {', '.join(paused)}." if paused else "")]
     runstate.request_stop(folder)
-    lines.append(f"Asked `gtu start` (process {pid}) to stop...")
-    if runstate.wait_for_exit(pid, wait):
+    lines.append(f"Asked the running job (process {pid}) to stop...")
+    if runstate.wait_until_stopped(folder, wait):
         lines.append("It stopped cleanly.")
-    elif runstate.kill_tree(pid):
-        lines.append(f"It didn't stop within {wait:g} s, so it was killed. A Desktop session it had started may still be finishing in Desktop; stop it there if you need to.")
+        runstate.clear(folder)
+        paused = runstate.tidy(store)
     else:
-        raise ActionError(f"process {pid} doesn't look like gtu, so it was not killed; stop it yourself.")
-    runstate.clear(folder)
-    paused = runstate.tidy(store)
+        lines.append(f"It hasn't stopped within {wait:g} s; it stops at its next check, within a few seconds of "
+                     "the current request finishing. The stop request stays in place.")
+        paused = []
     held = [j.id for j in store.list_jobs(include_finished=False) if j.status == "paused"]
     if paused or held:
         lines.append(f"Paused job(s): {', '.join(sorted(set(paused + held)))}. "
-                     "Unfinished edits were discarded; finished steps are kept on each job's branch.")
+                     "Unfinished edits were discarded; finished steps are kept in each job's copy.")
     return lines
 
 
 def cancel_job(store: Store, job_id: str) -> Outcome:
-    """Cancel a job that hasn't finished and remove its worktree; its branch is kept."""
+    """Cancel a job that hasn't finished. A queued or paused job's copy is removed here; a running
+    job's copy is removed by its runner, which notices the cancellation within a few seconds,
+    aborts the step and cleans up."""
     try:
+        was_running = store.get_job(job_id).status == "running"
         job = store.cancel_job(job_id)
     except StoreError as exc:
         raise ActionError(str(exc)) from None
+    if was_running:
+        return Outcome(job, "it was running; it stops within a few seconds")
     warning = None
     try:
         worktree.remove(Path(job.repo), job.id)

@@ -1,16 +1,12 @@
-"""`gtu setup`: registering the MCP server in BharatCode's config without breaking it, and the
-background runner that `spare_add_job` / `spare_start` launch."""
+"""`gtu setup` and `gtu integrate`: registering the MCP server in BharatCode's config without breaking it."""
 
 import json
-import subprocess
 import sys
-import textwrap
-import time
 
 import pytest
 from typer.testing import CliRunner
 
-from gpu_token_utilization import bc_config, runner, runstate
+from gpu_token_utilization import bc_config
 from gpu_token_utilization.bc_config import ConfigError, parse_jsonc, register, unregister
 from gpu_token_utilization.cli import app
 
@@ -258,44 +254,3 @@ def test_integrate_uses_desktops_config_folder(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "BharatCode Desktop's config folder" in result.output
     assert entry_in(tmp_path / "BharatCode" / "Config" / "opencode.jsonc") is not None
-
-
-# --- the background runner -------------------------------------------------------------------
-
-# Stands in for `gtu start`: registers itself like the real runner, then waits to be killed.
-FAKE_RUNNER = textwrap.dedent("""
-    import time
-    from pathlib import Path
-    from gpu_token_utilization import runstate
-    runstate.write_run(Path(".gtu"))
-    print("fake runner up", flush=True)
-    time.sleep(120)
-""")
-
-
-def test_launch_returns_once_the_runner_has_registered(tmp_path):
-    pid = runner.launch(tmp_path, [sys.executable, "-c", FAKE_RUNNER])
-    try:
-        assert runstate.running_pid(tmp_path / ".gtu") == pid
-    finally:
-        runstate.kill_tree(pid) or subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
-    assert "fake runner up" in (tmp_path / ".gtu" / "runner.log").read_text(encoding="utf-8")
-
-
-def test_launch_reports_a_runner_that_fails_at_once(tmp_path):
-    with pytest.raises(runner.RunnerError, match="stopped straight away"):
-        runner.launch(tmp_path, [sys.executable, "-c", "print('no key, giving up'); raise SystemExit(1)"])
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="detaching is Windows-specific here")
-def test_the_runner_outlives_the_process_that_started_it(tmp_path):
-    # BharatCode starts the MCP server; the MCP server starts the runner; BharatCode closes.
-    parent = (f"import sys; from gpu_token_utilization import runner; "
-              f"print(runner.launch(sys.argv[1], [sys.executable, '-c', {FAKE_RUNNER!r}]))")
-    proc = subprocess.run([sys.executable, "-c", parent, str(tmp_path)], capture_output=True, text=True, timeout=60)
-    pid = int(proc.stdout.strip())
-    time.sleep(1)  # the parent is gone now
-    try:
-        assert runstate.alive(pid) and runstate.running_pid(tmp_path / ".gtu") == pid
-    finally:
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
