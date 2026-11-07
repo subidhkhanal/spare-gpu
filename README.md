@@ -4,7 +4,7 @@
 
 - **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek.
 - **One command: `/auto`.** Type `/auto` and what you want: a question, tests, docs or a code review. The reply says which model it used and how much waiting that saved.
-- **Does the chores in the background.** Tests, docs and reviews run as their own Desktop session, so your chat stays free.
+- **Does the chores where you can watch.** Tests, docs, reviews and fixes run right away as their own Desktop session, named "spare-gpu: ...", in a private copy of your project. Open it to watch; the chat tells you how it went when it's done.
 - **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. The files a job edited are copied to `spare-gpu/<date>_<time>/` in your project. Your own files are never touched: open the folder and copy over what you want.
 - **Keeps you in control of tokens.** Every job has a token budget, and a job that crashes resumes where it stopped.
 
@@ -37,9 +37,9 @@ Type `/auto` and then what you want, in plain words:
 | You type | What happens |
 |---|---|
 | `/auto what does a race condition mean?` | Answers the question right in the chat, on the faster model |
-| `/auto write tests for src/payments.py` | Writes tests in the background and keeps only the ones that pass |
-| `/auto write docs for src/utils.py` | Adds docstrings and README text in the background, without changing code |
-| `/auto review src/gate.py` | Writes a code review in the background |
+| `/auto write tests for src/payments.py` | Writes tests now, in a session you can watch, and keeps only the ones that pass |
+| `/auto write docs for src/utils.py` | Adds docstrings and README text, without changing code |
+| `/auto review src/router.py` | Writes a code review |
 | `/auto` | Shows how long each model would wait right now |
 
 For example, on 5 Nov DeepSeek had a 3-minute queue while Qwen had a free slot:
@@ -80,7 +80,7 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 ### `/code-review` (experimental until the benchmark in research/code-review/ is run)
 
-`/code-review [low|medium|high|deep] [commit or branch] [--fix]` reviews your uncommitted changes (or a commit or branch). A lead on DeepSeek slices the diff by concern (correctness, edge cases, error handling, concurrency, API misuse, tests) and starts one finder per slice on Qwen, all at once; the finders report candidates with a failure scenario each; a verifier on DeepSeek re-reads the code for every candidate and keeps only those with concrete evidence, ranked by severity. Effort sets the number of finders (2, 4, 6, or 6 twice with a refuting verifier pass). With `--fix`, the kept findings go to a background `fix` job that applies them in a private copy, runs your test command, and keeps the changes only if it passes (a fix may not change existing tests); the result lands in `spare-gpu/<date>_<time>/`. Finders and the verifier have no shell beyond git's read-only commands and can't edit files. BharatCode's own `/review` is one pass by one model; this runs locally before you push, on your own quota. Nazar reviews pull requests on GitHub; this is for the changes still on your machine.
+`/code-review [low|medium|high|deep] [commit or branch] [--fix]` reviews your uncommitted changes (or a commit or branch). A lead on DeepSeek slices the diff by concern (correctness, edge cases, error handling, concurrency, API misuse, tests) and starts one finder per slice on Qwen, all at once; the finders report candidates with a failure scenario each; a verifier on DeepSeek re-reads the code for every candidate and keeps only those with concrete evidence, ranked by severity. Effort sets the number of finders (2, 4, 6, or 6 twice with a refuting verifier pass). With `--fix`, the kept findings go to a `fix` job that runs right away as a Desktop session you can watch: it applies them in a private copy, runs your test command, and keeps the changes only if it passes (a fix may not change existing tests); the result lands in `spare-gpu/<date>_<time>/`. Finders and the verifier have no shell beyond git's read-only commands and can't edit files. BharatCode's own `/review` is one pass by one model; this runs locally before you push, on your own quota. Nazar reviews pull requests on GitHub; this is for the changes still on your machine.
 
 ### `/security-review` (experimental until the benchmark in research/security-review/ is run)
 
@@ -98,7 +98,7 @@ Questions aren't measured: a quick answer from whichever model is free is the po
 
 ## What you get
 
-Background work lands in your project when it's done. Ask "is my job done?" to check on it.
+A job's result lands in your project when it's done, and the chat says where. Ask "is my job done?" at any time to see what ran.
 
 ```
 your-project/
@@ -116,17 +116,17 @@ You don't have to type `/auto`. spare-gpu also understands plain requests in any
 | You say | What happens |
 |---|---|
 | "write tests for src/pay.py on whichever model is free" | Hands it to the model that starts sooner |
-| "queue tests for src/payments" | Runs it in the background; the result lands in `spare-gpu/` |
+| "run tests for src/payments" | Runs it now; the result lands in `spare-gpu/` |
 | "how long is DeepSeek's queue?" | Shows each model's current wait |
 | "is my tests job done?" | Shows queued, running and finished jobs |
-| "what did spare-gpu do last night?" | Finished jobs, where their files landed and the tokens used (`gtu report` in a terminal has the full summary) |
+| "what did spare-gpu do today?" | Finished jobs, where their files landed and the tokens used (`gtu report` in a terminal has the full summary) |
 | "cancel the docs job" | Cancels it |
 
 ## Why it's useful
 
 - **Less waiting.** DeepSeek's queue can reach minutes at busy times, while Qwen often has a free slot, and the other way round. `/auto` sends your work to whichever is free, without you watching queues.
-- **No quality loss on background work.** Jobs only move to Qwen for job types where Qwen was measured to be just as good, and every result is checked before it's kept. Questions are the one unmeasured case: they go to the faster model by design, and the reply says which model answered.
-- **Less babysitting.** Chores run on their own, get checked, and wait for you in the `spare-gpu/` folder.
+- **No quality loss on delegated work.** Jobs only move to Qwen for job types where Qwen was measured to be just as good, and every result is checked before it's kept. Questions are the one unmeasured case: they go to the faster model by design, and the reply says which model answered.
+- **Nothing hidden.** Every job is a Desktop session you can open while it runs, its result is checked before it's kept, and it waits for you in the `spare-gpu/` folder.
 - **No surprises.** It never edits your files, never pushes, and only runs your test, build and lint commands.
 
 ## Good to know

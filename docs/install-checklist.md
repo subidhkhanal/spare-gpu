@@ -42,9 +42,10 @@ In a folder with a small git repo of your own:
    under a minute; a real morning run (08:00–11:00 IST) took 73 s, 60 s of it in BharatCode's queue.
 5. [ ] `gtu add review <that file>` then `gtu start --dry-run` shows the job and a token estimate,
    and sends nothing.
-6. [ ] `gtu start` runs the review; `git branch` shows a new `gtu/<job-id>` branch, and your
-   own branch and files are unchanged (`git status` is clean).
-7. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
+6. [ ] `gtu start` runs the review in front of you, printing each step; the report lands in
+   `spare-gpu/<date>_<time>/`, no branch is made, and your own files are unchanged (`git status`
+   shows nothing but that folder, which ignores itself).
+7. [ ] `gtu report` prints a summary and saves it under `.gtu/reports/`.
 
 ## D. Tests and docs jobs (need BharatCode Desktop)
 
@@ -56,8 +57,9 @@ In a folder with a small git repo of your own:
 4. [ ] In Desktop's terminal, in the repo: `gtu start`. It says "Running jobs through BharatCode
    Desktop"; the queued tests job runs as a Desktop session named "spare-gpu: ..." and its files
    in `spare-gpu\<date>_<time>\` are only passing tests.
-5. [ ] In another terminal while a job runs: `gtu stop` says it stopped, and `gtu list` shows the
-   job as paused, not failed.
+5. [ ] In another terminal while a job runs: `gtu stop` asks the run to stop and says it stopped
+   cleanly (nothing is killed), and `gtu list` shows the job as paused, not failed; `gtu start`
+   resumes it.
 
 ## E. Windows specifics
 

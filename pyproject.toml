@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spare-gpu"
 dynamic = ["version"]
-description = "/auto for BharatCode Desktop: run each task on whichever model starts it sooner, DeepSeek or Qwen. Questions answered in the chat; tests, docs and reviews done in the background into spare-gpu/<date>_<time>/."
+description = "/auto and a command pack for BharatCode Desktop: each task runs on whichever model starts it sooner, DeepSeek or Qwen. Questions answered in the chat; tests, docs, reviews and fixes run as Desktop sessions you can watch, in a private copy, into spare-gpu/<date>_<time>/."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

@@ -17,8 +17,7 @@
   "permissions": [
     "local_process",
     "workspace_files",
-    "network",
-    "background_process"
+    "network"
   ],
   "modules": [
     {
