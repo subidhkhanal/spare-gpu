@@ -190,6 +190,16 @@ def test_verify_app_drives_the_browser_through_playwright_and_judges_from_notes(
     assert pack.helpers([COMPONENTS["verify"]]) == ["verify-driver"] and not COMPONENTS["verify"].mcp  # Playwright comes from the marketplace
 
 
+def test_every_installed_file_variants_included_parses_and_helpers_stay_hidden():
+    for kind, name, text in pack.install_files(pack.select(None), FILLED):
+        head = text.split("\n---\n", 1)[0][4:]
+        data = yaml.safe_load(head)  # a frontmatter that doesn't parse loses `hidden`: the picker offers the agent
+        if kind == "agent" and data["mode"] == "subagent":
+            assert data["hidden"] is True, name
+    variant = dict(((k, n), t) for k, n, t in pack.install_files(pack.select("review"), FILLED))[("agent", "review-verifier-standard")]
+    assert yaml.safe_load(variant.split("\n---\n", 1)[0][4:])["description"].endswith("measured switch-safe)")
+
+
 def test_every_leads_cost_summary_names_the_installed_models():
     files = dict(((k, n), t) for k, n, t in pack.install_files(pack.select(None), FILLED))
     leads = [n for k, n in files if k == "agent" and n.endswith("-lead")]

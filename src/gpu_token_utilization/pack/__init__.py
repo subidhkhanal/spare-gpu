@@ -205,7 +205,9 @@ def variant_text(raw: str) -> str:
     """A switchable agent's file as its standard-model variant: the model placeholder swapped, and
     the description saying so. Made at install time from the one source file, so the two can't drift."""
     text = raw.replace(HEAVY, STANDARD)
-    return re.sub(r"^(description: .*)$", r"\1 (standard-model variant: started when the heavy model is queued and "
+    # No ": " in the added words: the description is a plain YAML value, and a colon there breaks the
+    # frontmatter, so BharatCode would miss `hidden` and offer the variant in the agent picker.
+    return re.sub(r"^(description: .*)$", r"\1 (standard-model variant, started when the heavy model is queued and "
                   "the role is measured switch-safe)", text, count=1, flags=re.M)
 
 
