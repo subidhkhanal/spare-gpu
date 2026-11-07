@@ -1,0 +1,321 @@
+"""`gtu doctor`: a plain install passes; each problem is named with its fix; the MCP server is really
+started; `--live` reads what the (fake) BharatCode CLI says Desktop sees, measures one tiny run and
+fills the manual-check rows it can decide. Fakes only: no real BharatCode, no network."""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from gpu_token_utilization import bc_config, doctor, pack, runstate
+from gpu_token_utilization.cli import app
+from gpu_token_utilization.store import Store
+
+from test_pack_install import COMMAND, LEAD, SCOUT
+
+cli = CliRunner()
+REPO_RESEARCH = Path(__file__).resolve().parents[1] / "research"
+
+
+@pytest.fixture(autouse=True)
+def research(tmp_path, monkeypatch):
+    """A copy of the manual-check tables, so a test never writes into the repo's own."""
+    folder = tmp_path / "research"
+    for name in ("pack-install", "safety-fixes"):
+        (folder / name).mkdir(parents=True)
+        shutil.copy(REPO_RESEARCH / name / "manual-check.md", folder / name / "manual-check.md")
+    monkeypatch.setattr(doctor, "RESEARCH", folder)
+    return folder
+
+
+@pytest.fixture(autouse=True)
+def known_models(monkeypatch):
+    monkeypatch.setenv("GTU_MODELS", "deepseek-v4.1-flash,qwen-3.8-27b")
+
+
+@pytest.fixture
+def config_dir(tmp_path, monkeypatch):
+    folder = tmp_path / "BharatCode" / "Config"
+    folder.mkdir(parents=True)
+    (folder / "opencode.jsonc").write_text('{\n  "$schema": "https://opencode.ai/config.json"\n}', encoding="utf-8")
+    monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(folder))
+    return folder
+
+
+@pytest.fixture
+def pack_dir(tmp_path, monkeypatch):
+    source = tmp_path / "pack"
+    (source / "commands").mkdir(parents=True)
+    (source / "agents").mkdir()
+    (source / "commands" / "deep-research.md").write_text(COMMAND, encoding="utf-8")
+    (source / "agents" / "research-lead.md").write_text(LEAD, encoding="utf-8")
+    (source / "agents" / "research-scout.md").write_text(SCOUT, encoding="utf-8")
+    monkeypatch.setattr(pack, "PACK_DIR", source)
+    for fn in (pack.markdown_files, pack.helpers, pack.config, pack.install_files):
+        monkeypatch.setattr(fn, "__defaults__", (source,))
+    return source
+
+
+@pytest.fixture
+def project(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    monkeypatch.delenv("GTU_DB", raising=False)
+    return git_repo
+
+
+def out(result):
+    return result.output
+
+
+# --- static ------------------------------------------------------------------------------------
+
+def test_a_plain_install_passes_and_the_server_is_really_started(config_dir, project):
+    assert cli.invoke(app, ["integrate"]).exit_code == 0
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 0, out(result)
+    text = out(result)
+    for line in ("PASS: spare-gpu ", "PASS: git: git version", "PASS: BharatCode's CLI 0.0.0-fake is installed and signed in",
+                 "PASS: BharatCode's config folder:", "PASS: spare-gpu is registered in opencode.jsonc and its command exists",
+                 "PASS: the /auto command is installed", "PASS: the command pack isn't installed (optional)",
+                 "PASS: spare-gpu's MCP server starts and offers 5 tools", "PASS: project:",
+                 "PASS: no jobs have run here yet", "PASS: test command for jobs:",
+                 "PASS: no API key set, which is fine inside Desktop", "PASS: job types that may move to the faster model: none"):
+        assert line in text, line
+    assert text.splitlines()[-2] == "Result: PASS" and "Add --live" in text.splitlines()[-1]
+    assert not any(line.startswith(("FAIL", "WARN")) for line in text.splitlines())
+
+
+def test_not_registered_and_a_dead_command_are_failures_with_the_fix(config_dir, project):
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 1 and "FAIL: spare-gpu isn't registered as an MCP server in opencode.jsonc; run `gtu integrate`" in out(result)
+    assert "WARN: the /auto command isn't installed; run `gtu integrate`" in out(result)
+    bc_config.register(config_dir / "opencode.jsonc", ["C:\\nowhere\\gtu.exe", "mcp"])
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "FAIL: the registered command C:\\nowhere\\gtu.exe doesn't exist, so Desktop can't start spare-gpu; run `gtu integrate`" in out(result)
+    assert "MCP server" not in out(result).split("FAIL: the registered")[1].split("PASS: project")[0]  # not started
+
+
+def test_a_server_that_fails_to_start_is_reported_with_its_error(config_dir, project):
+    bc_config.register(config_dir / "opencode.jsonc", [sys.executable, "-c", "raise SystemExit('boom')"])
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 1 and "FAIL: spare-gpu's MCP server didn't start from `" in out(result)
+    assert "Run that command in a terminal to see its error" in out(result)
+
+
+def test_missing_git_and_a_missing_cli_are_told_apart(config_dir, project, monkeypatch):
+    cli.invoke(app, ["integrate"])
+    real_which = shutil.which
+    monkeypatch.setattr(doctor.shutil, "which", lambda name, *a, **k: None if name == "git" else real_which(name, *a, **k))
+    monkeypatch.delenv("GTU_BHARATCODE_CMD")
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent))  # no bharatcode on it
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "FAIL: git isn't installed or isn't on PATH; jobs copy your project with git" in out(result)
+    assert "WARN: BharatCode's CLI isn't available. Desktop runs jobs without it" in out(result)
+    assert "PASS: spare-gpu's MCP server starts" in out(result)  # our own server needs neither
+
+
+def test_project_state_problems_each_get_a_line(config_dir, project):
+    cli.invoke(app, ["integrate"])
+    folder = project / ".gtu"
+    with Store(folder / "gtu.db") as store:
+        running = store.add_job("review", "src/calc.py", str(project))
+        store.set_status(running.id, "running")
+        paused = store.add_job("docs", "src", str(project))
+        store.set_status(paused.id, "paused")
+        done = store.add_job("tests", "src", str(project))
+        store.set_status(done.id, "running")
+        store.set_status(done.id, "done")
+    gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True)
+    (folder / runstate.RUN_FILE).write_text(json.dumps({"pid": int(gone.stdout)}))
+    runstate.request_stop(folder)
+    (folder / "worktrees" / done.id).mkdir(parents=True)
+    (folder / "worktrees" / running.id).mkdir()  # the running job's copy is legitimate
+    result = cli.invoke(app, ["doctor"])
+    text = out(result)
+    assert result.exit_code == 0, text  # warnings, not failures
+    assert "PASS: jobs here: 1 done, 1 paused, 1 running" in text
+    assert f"WARN: a run file is left from process {int(gone.stdout)}, which is gone" in text
+    assert "WARN: a stop request is pending with nothing running" in text
+    assert f"WARN: job(s) marked running with no runner: {running.id}; `gtu stop` pauses them" in text
+    assert f"PASS: paused job(s) {paused.id}: `gtu start` resumes them" in text
+    assert f"WARN: leftover job copies with no unfinished job: {done.id} in" in text and running.id not in text.split("leftover")[1].split("\n")[0]
+
+
+def test_bad_job_settings_fail_and_an_api_key_is_named(config_dir, project, monkeypatch):
+    cli.invoke(app, ["integrate"])
+    monkeypatch.setenv("GTU_TEST_COMMAND", "rm -rf /")
+    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "FAIL: job settings: test command 'rm -rf /' is not in the allowlist" in out(result)
+    assert "PASS: API key: found in the BHARATCODE_API_KEY environment variable (only needed outside Desktop)" in out(result)
+
+
+def test_with_the_pack_the_pack_checks_are_included(config_dir, pack_dir, project):
+    assert cli.invoke(app, ["integrate", "--pack"]).exit_code == 0
+    result = cli.invoke(app, ["doctor"])
+    assert result.exit_code == 0, out(result)
+    assert "PASS: pack: spare-gpu's MCP server starts with --pack" in out(result)
+    assert "PASS: pack: installed components: split, research" in out(result)
+    assert "PASS: spare-gpu's MCP server starts and offers 9 tools (the pack's: pack_cost, scholar_search, security_filter, verify_refs)" in out(result)
+    (config_dir / "config.json").unlink()  # the pack's settings file gone, the --pack flag left behind
+    result = cli.invoke(app, ["doctor"])
+    assert "WARN: spare-gpu's MCP server starts with --pack although the pack's settings file is gone" in out(result)
+
+
+def test_unknown_channel_is_refused(config_dir, project):
+    assert cli.invoke(app, ["doctor", "--channel", "nightly"]).exit_code == 1
+
+
+# --- live --------------------------------------------------------------------------------------
+
+def merged_config(config_dir):
+    """What `bharatcode debug config` would print: the pack's file merged with the user's."""
+    merged = {}
+    for name in ("config.json", "opencode.json", "opencode.jsonc"):
+        path = config_dir / name
+        if path.is_file():
+            doc = bc_config.parse_jsonc(path.read_text(encoding="utf-8"))
+            for key, value in doc.items():
+                if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                    merged[key] = {**merged[key], **value}
+                else:
+                    merged[key] = value
+    return merged
+
+
+@pytest.fixture
+def live_cli(tmp_path, monkeypatch, config_dir):
+    """The fake CLI's answers for the live checks; `make(tokens, visible=())` writes them."""
+    def make(tokens=12_000, visible=(), merged=None, lead_sees=True):
+        (tmp_path / "debug-config.json").write_text(json.dumps(merged if merged is not None else merged_config(config_dir)),
+                                                     encoding="utf-8")
+        five = {f"spare-gpu_{t}": True for t in doctor.SPARE_TOOLS}
+        hidden = {f"spare-gpu_{t}": False for t in ("pack_cost", "scholar_search", "verify_refs")}
+        for name in visible:
+            hidden[f"spare-gpu_{name}"] = True
+        agents = {"build": {"name": "build", "tools": {**five, **hidden, "edit": True}},
+                  "research-lead": {"name": "research-lead", "tools": {k: lead_sees for k in hidden}}}
+        (tmp_path / "debug-agents.json").write_text(json.dumps(agents), encoding="utf-8")
+        (tmp_path / "scenario.json").write_text(json.dumps({"steps": [{"tokens": tokens}], "text": "OK"}), encoding="utf-8")
+        monkeypatch.setenv("GTU_FAKE_CLI_DEBUG_CONFIG", str(tmp_path / "debug-config.json"))
+        monkeypatch.setenv("GTU_FAKE_CLI_DEBUG_AGENTS", str(tmp_path / "debug-agents.json"))
+        monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(tmp_path / "scenario.json"))
+
+    return make
+
+
+def result_cell(research, name, row):
+    for line in (research / name / "manual-check.md").read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"| {row} |"):
+            return line.rstrip().rsplit(" | ", 1)[1].rstrip(" |")
+    raise AssertionError(f"no row {row} in {name}")
+
+
+def test_live_checks_what_desktop_sees_and_fills_the_rows_it_can_decide(config_dir, pack_dir, project, live_cli, research):
+    assert cli.invoke(app, ["integrate", "--pack"]).exit_code == 0
+    live_cli(tokens=12_000)
+    result = cli.invoke(app, ["doctor", "--live"])
+    text = out(result)
+    assert result.exit_code == 0, text
+    assert "PASS: live: Desktop's merged config carries spare-gpu's MCP entry" in text
+    assert "PASS: live: Desktop's merged config denies the pack's 1 helpers and 3 tools to every other agent" in text
+    assert "PASS: live: a plain chat sees spare-gpu's five tools" in text
+    assert "PASS: live: none of the pack's 3 tools is in a plain chat's tool list" in text
+    assert "PASS: live: the research-lead agent sees 3 of the pack's tools" in text
+    assert "PASS: live: a one-step request ran end to end (reply 'OK'); context sent before your words: 11,950 tokens, with the pack" in text
+    assert "WARN: live: measured 11,950 tokens with the pack; run `gtu doctor --live` once more with the pack uninstalled" in text
+    assert "PASS: a job's copy leaves dist/, build/ and node_modules/ out" in text
+    assert "PASS: manual-check rows filled from these results: pack-install 1, pack-install 2, pack-install 6, pack-install 7, pack-install 8, safety-fixes 5" in text
+    assert "Still manual: pack-install 3, 4, 5, 9 and 10" in text
+    assert result_cell(research, "pack-install", 1).startswith("PASS (gtu doctor --live")
+    assert "permission.task denies all 1 helpers" in result_cell(research, "pack-install", 6)
+    assert "lists none of spare-gpu_pack_cost, spare-gpu_scholar_search, spare-gpu_verify_refs" in result_cell(research, "pack-install", 7)
+    assert result_cell(research, "pack-install", 8).startswith("PARTIAL") and "11,950 tokens per step with the pack" in result_cell(research, "pack-install", 8)
+    assert result_cell(research, "safety-fixes", 5).startswith("PASS (gtu doctor --live")
+    assert result_cell(research, "pack-install", 3) == ""  # rows the doctor can't decide stay empty
+    runs = (research / "pack-install" / "overhead-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(runs) == 1 and json.loads(runs[0])["pack_installed"] is True and json.loads(runs[0])["context_tokens"] == 11_950
+
+
+def test_live_measures_the_overhead_once_both_states_have_run(config_dir, pack_dir, project, live_cli, research):
+    cli.invoke(app, ["integrate", "--pack"])
+    live_cli(tokens=12_000)
+    assert cli.invoke(app, ["doctor", "--live"]).exit_code == 0
+    assert cli.invoke(app, ["integrate", "--pack", "--uninstall"]).exit_code == 0
+    live_cli(tokens=11_000)
+    result = cli.invoke(app, ["doctor", "--live"])
+    assert result.exit_code == 0, out(result)
+    assert "PASS: live: the pack adds 1,000 tokens per step (10,950 without, 11,950 with; budget 1,500); written to research/pack-install/overhead.json" in out(result)
+    recorded = json.loads((research / "pack-install" / "overhead.json").read_text(encoding="utf-8"))
+    assert recorded["added"] == 1_000 and recorded["within_budget"] is True and recorded["variant"] == "empty-mcp"
+    assert result_cell(research, "pack-install", 8).startswith("PASS (gtu doctor --live") and "added 1,000 tokens per step" in result_cell(research, "pack-install", 8)
+    # over budget: the newest measurement of each state counts
+    cli.invoke(app, ["integrate", "--pack"])
+    live_cli(tokens=13_000)
+    result = cli.invoke(app, ["doctor", "--live"])
+    assert result.exit_code == 1 and "FAIL: live: the pack adds 2,000 tokens per step" in out(result)
+    assert json.loads((research / "pack-install" / "overhead.json").read_text(encoding="utf-8"))["within_budget"] is False
+
+
+def test_live_names_a_pack_that_leaks_into_normal_chats(config_dir, pack_dir, project, live_cli, research):
+    cli.invoke(app, ["integrate", "--pack"])
+    merged = merged_config(config_dir)
+    del merged["permission"]["task"]["research-scout"]
+    del merged["permission"]["spare-gpu_scholar_search"]
+    live_cli(merged=merged, visible=("scholar_search",), lead_sees=False)
+    result = cli.invoke(app, ["doctor", "--live"])
+    assert result.exit_code == 1
+    assert "FAIL: live: in Desktop's merged config these are not denied for other agents: research-scout, spare-gpu_scholar_search" in out(result)
+    assert "FAIL: live: a plain chat can see the pack-only tools spare-gpu_scholar_search; they cost tokens on every step" in out(result)
+    assert "WARN: live: the research-lead agent sees 0 of the pack's tools (none: is spare-gpu's server started with --pack?)" in out(result)
+    assert result_cell(research, "pack-install", 6).startswith("FAIL") and result_cell(research, "pack-install", 7).startswith("FAIL")
+
+
+def test_live_without_the_cli_says_so_and_no_write_keeps_the_tables(config_dir, project, live_cli, research, monkeypatch):
+    cli.invoke(app, ["integrate"])
+    before = (research / "pack-install" / "manual-check.md").read_text(encoding="utf-8")
+    path = os.environ["PATH"]
+    monkeypatch.delenv("GTU_BHARATCODE_CMD")
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent))
+    result = cli.invoke(app, ["doctor", "--live"])
+    assert result.exit_code == 1 and "FAIL: live checks need BharatCode's CLI, which isn't available" in out(result)
+    assert "FAIL: a job's copy can't be made here: git isn't installed" in out(result)
+    monkeypatch.setenv("PATH", path)
+    monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))
+    live_cli()
+    assert cli.invoke(app, ["doctor", "--live", "--no-write"]).exit_code == 0
+    assert (research / "pack-install" / "manual-check.md").read_text(encoding="utf-8") == before
+
+
+def test_outside_a_checkout_the_measurement_is_not_recorded(config_dir, project, live_cli, tmp_path, monkeypatch):
+    cli.invoke(app, ["integrate"])
+    live_cli()
+    monkeypatch.setattr(doctor, "RESEARCH", tmp_path / "not-a-checkout")
+    result = cli.invoke(app, ["doctor", "--live"])
+    assert result.exit_code == 0, out(result)
+    assert "WARN: live: this isn't a checkout, so the measurement isn't recorded" in out(result)
+
+
+# --- pieces ------------------------------------------------------------------------------------
+
+def test_context_tokens_reads_the_first_step_and_the_reply():
+    lines = [json.dumps({"type": "step_finish", "part": {"tokens": {"input": 100, "cache": {"read": 20, "write": 5}}}}),
+             json.dumps({"type": "step_finish", "part": {"tokens": {"input": 999}}}),
+             json.dumps({"type": "text", "part": {"text": " OK "}}), "not json"]
+    assert doctor.context_tokens("\n".join(lines)) == (125, "OK")
+    assert doctor.context_tokens("") == (None, "")
+
+
+def test_fill_manual_checks_replaces_only_the_result_cell(research):
+    written = doctor.fill_manual_checks(research, {("pack-install", 2): "PASS | with a pipe", ("nowhere", 1): "x"})
+    assert written == ["pack-install 2"]
+    line = next(l for l in (research / "pack-install" / "manual-check.md").read_text(encoding="utf-8").splitlines() if l.startswith("| 2 |"))
+    assert line.endswith("| PASS / with a pipe |") and "Compare `opencode.jsonc` before and after." in line

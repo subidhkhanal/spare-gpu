@@ -3,6 +3,10 @@
 These checks need BharatCode Desktop on Windows, so they are run by hand. Record the outcome of
 each in the last column (date, pass/fail, what you saw). Nothing here was run by the implementer.
 
+`gtu doctor --live` (run from this checkout, with BharatCode's CLI installed) decides rows 1, 2, 6 and 7
+from what the CLI reports Desktop sees, and row 8 once it has run both with and without the pack; it
+writes its verdicts into the Result column itself, dated. The other rows need you at Desktop.
+
 Setup: `pip install -e .` from this checkout, then `gtu integrate --pack`, then fully close and
 reopen BharatCode Desktop. `gtu integrate --pack --uninstall` undoes it.
 

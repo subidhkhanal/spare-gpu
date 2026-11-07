@@ -5,6 +5,7 @@ of each in the last column (date, pass/fail, what you saw). Nothing here was run
 implementer; the automated tests cover the config spare-gpu writes, not what Desktop does with it.
 
 Setup: `pip install -e .` from this checkout (or the installer), `gtu integrate`, restart Desktop.
+`gtu doctor --live` decides row 5 on this machine and writes its verdict into the Result column.
 
 | # | Check | Steps | Pass condition | Result |
 |---|---|---|---|---|

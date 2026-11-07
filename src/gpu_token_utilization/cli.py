@@ -685,6 +685,31 @@ def mcp(
     serve(folder or Path.cwd(), pack=with_pack)
 
 
+@app.command()
+def doctor(
+    channel: str = typer.Option("stable", "--channel", help="Which BharatCode's config to check: stable, beta, dev or local."),
+    live: bool = typer.Option(False, "--live", help="Also ask BharatCode's CLI what Desktop really sees and run one tiny "
+                                                   "request (one short model call) to measure the per-step context."),
+    no_write: bool = typer.Option(False, "--no-write", help="With --live: don't write results into research/*/manual-check.md."),
+) -> None:
+    """Check the whole install and say what to fix: spare-gpu, git, BharatCode's CLI and config, the MCP
+    entry (and that the server really starts), the pack, this project's jobs and settings. Exit code 1 on a FAIL."""
+    from . import doctor as doctoring
+
+    if channel not in bc_config.CHANNELS:
+        _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)}.")
+    report = doctoring.run(Path.cwd(), channel=channel, live_mode=live, write=not no_write)
+    for finding in report.findings:
+        typer.echo(str(finding))
+    typer.echo(f"Result: {report.verdict}")
+    if live:
+        typer.echo(f"Still manual: {doctoring.MANUAL_LEFT}.")
+    else:
+        typer.echo("Add --live to check what Desktop really sees (needs BharatCode's CLI; one short model call).")
+    if report.verdict == doctoring.FAIL:
+        raise typer.Exit(1)
+
+
 @app.command("pack-check")
 def pack_check(
     channel: str = typer.Option("stable", "--channel", help="Which BharatCode's config to check: stable, beta, dev or local."),
