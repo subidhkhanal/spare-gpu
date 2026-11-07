@@ -1,7 +1,9 @@
 """Reading `bharatcode stats --models` for pack_cost and the benchmarks: the MODEL USAGE box is
 parsed with BharatCode's own rounding, and a missing CLI or stats command gives None."""
 
+import sqlite3
 import sys
+from pathlib import Path
 
 from gpu_token_utilization import stats
 
@@ -28,6 +30,38 @@ def test_usage_comes_from_the_cli_or_is_none(monkeypatch):
     monkeypatch.delenv("GTU_BHARATCODE_CMD")
     monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
     assert stats.usage(7) is None  # no CLI at all
+
+
+def desktop_env(tmp_path, channel_folder):
+    data = tmp_path / "local" / "BharatCode Beta" / "Data"
+    data.mkdir(parents=True)
+    db = sqlite3.connect(data / "bharatcode.db")
+    db.execute("create table message (id text)")
+    db.execute("insert into message values ('msg_1')")
+    db.commit()
+    db.close()
+    return {"XDG_STATE_HOME": str(tmp_path / "roaming" / channel_folder), "LOCALAPPDATA": str(tmp_path / "local")}, data / "bharatcode.db"
+
+
+def test_the_desktop_channel_that_started_us_names_its_session_database(tmp_path):
+    env, db = desktop_env(tmp_path, "ai.bharatcode.desktop.beta")
+    assert stats.desktop_db(env) == db
+    assert stats.desktop_db({**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop")}) is None  # stable: the CLI's own
+    assert stats.desktop_db({**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop.dev")}) is None  # no Dev data here
+    assert stats.desktop_db({**env, stats.DB_ENV: "C:\\chosen.db"}) is None  # already chosen
+    assert stats.desktop_db({"LOCALAPPDATA": env["LOCALAPPDATA"]}) is None  # not started by Desktop
+
+
+def test_inside_beta_the_cli_reads_a_snapshot_of_betas_sessions_never_the_live_file(tmp_path, monkeypatch):
+    env, db = desktop_env(tmp_path, "ai.bharatcode.desktop.beta")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    before = db.read_bytes()
+    show = [sys.executable, "-c", "import os, sqlite3; p = os.environ['OPENCODE_DB']; "
+            "print(p); print(sqlite3.connect(p).execute('select id from message').fetchone()[0])"]
+    path, row = stats.usage(1, command=show).splitlines()
+    assert Path(path) != db and Path(path).name == "bharatcode.db" and row == "msg_1"  # the copy holds Beta's sessions
+    assert not Path(path).exists() and db.read_bytes() == before  # the copy is gone; the live file untouched
 
 
 def test_escape_sequences_dates_and_paths_do_not_break_the_parsing():

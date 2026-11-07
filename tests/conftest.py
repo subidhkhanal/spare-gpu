@@ -27,7 +27,7 @@ def no_real_api_key(monkeypatch):
 def no_real_desktop(monkeypatch):
     """No test may find a real BharatCode Desktop server (pytest run from Desktop's terminal
     would inherit its password). Tests that need one use fakedesktop."""
-    for name in ("OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME", "GTU_DESKTOP_URL"):
+    for name in ("OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME", "GTU_DESKTOP_URL", "XDG_STATE_HOME", "OPENCODE_DB"):
         monkeypatch.delenv(name, raising=False)
 
 
