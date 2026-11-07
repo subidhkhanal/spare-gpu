@@ -51,7 +51,7 @@ MCP, several at once, and write down exactly what they saw. Nobody changes the a
    fail means for the app in one or two sentences each. Keep it short.
 
 ## Report back
-7. Call the `pack_cost` tool. End with a cost summary: drivers (standard model, how many runs),
+7. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: drivers (standard model, how many runs),
    you (heavy); the tokens per model from `pack_cost` (or that they weren't available); and the
    queue time saved, estimated as the number of standard-model runs times the difference between
    the heavy and the standard model's wait in the `spare_waits` answer. Say so when the data was

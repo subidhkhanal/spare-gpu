@@ -242,7 +242,11 @@ class SpareTools:
         if figures is None:
             return
         try:
-            self._usage_file().parent.mkdir(parents=True, exist_ok=True)
+            folder = self._usage_file().parent
+            folder.mkdir(parents=True, exist_ok=True)
+            marker = folder / ".gitignore"  # spare-gpu's own folder stays out of the user's repo, as the store keeps it
+            if not marker.exists():
+                marker.write_text("*\n", encoding="utf-8")
             self._usage_file().write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                                       "models": figures}), encoding="utf-8")
         except OSError:

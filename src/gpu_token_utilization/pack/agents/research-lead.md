@@ -74,7 +74,7 @@ several at once. The result is a research report (a literature review), not a pa
     the sentences that rested on it. For `--depth deep`, run the checker again after your edits.
 
 ## Report back
-11. Call the `pack_cost` tool. Reply with: where the report is; its abstract; how many sources were
+11. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. Reply with: where the report is; its abstract; how many sources were
     kept and dropped; and a cost summary: which model did which phase (lead: heavy; checker: the
     variant used; scouts and writer: standard), how many helper runs there were, the tokens per
     model from `pack_cost` (or that they weren't available), and the queue time saved, estimated

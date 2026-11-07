@@ -278,6 +278,7 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_
     for role in ("research-checker", "review-verifier", "security-verifier"):
         assert f"- {role}: start `{role}` (" in text  # unmeasured roles stay on the heavy model
     assert (git_repo / ".gtu" / "pack-usage.json").is_file()
+    assert (git_repo / ".gtu" / ".gitignore").read_text(encoding="utf-8") == "*\n"  # never shows up as a change
     cost = tools.pack_cost()
     assert cost.startswith("Tokens used on this machine since the spare_waits call 0 min ago")
     assert "- DeepSeek V4.1 Flash: +30,000 tokens in 0 message(s)" in cost

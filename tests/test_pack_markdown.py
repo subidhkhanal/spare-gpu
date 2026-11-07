@@ -190,6 +190,15 @@ def test_verify_app_drives_the_browser_through_playwright_and_judges_from_notes(
     assert pack.helpers([COMPONENTS["verify"]]) == ["verify-driver"] and not COMPONENTS["verify"].mcp  # Playwright comes from the marketplace
 
 
+def test_every_leads_cost_summary_names_the_installed_models():
+    files = dict(((k, n), t) for k, n, t in pack.install_files(pack.select(None), FILLED))
+    leads = [n for k, n in files if k == "agent" and n.endswith("-lead")]
+    assert len(leads) == 5
+    for name in leads:
+        flat = " ".join(files[("agent", name)].split())
+        assert f"The standard model is {FILLED.standard} and the heavy model is {FILLED.heavy}" in flat, name
+
+
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())

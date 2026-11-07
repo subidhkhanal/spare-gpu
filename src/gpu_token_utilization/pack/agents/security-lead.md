@@ -76,7 +76,7 @@ then verification with precedents, and only high-confidence findings in the repo
    valid result: say so plainly. Nothing here is proof the code is secure; say that too.
 
 ## Report back
-8. Call the `pack_cost` tool. End with a cost summary: finders (standard model, five runs or
+8. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: finders (standard model, five runs or
    more), verifier (the variant used, one or two runs), you (heavy); the tokens per model from
    `pack_cost` (or that they weren't available); and the queue time saved, estimated as the number of standard-model
    runs times the difference between the heavy and the standard model's wait in the `spare_waits`
