@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from gpu_token_utilization import waits
-from gpu_token_utilization.gate import LaneStats
+from gpu_token_utilization.waits import LaneStats
 from gpu_token_utilization.store import RequestLog
 
 NOW = datetime(2026, 11, 4, 9, 45, tzinfo=timezone.utc)  # 15:15 IST, so "10 minutes ago" is the same hour

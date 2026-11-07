@@ -11,7 +11,6 @@ from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.fakeapi import Reply
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.scheduler import Scheduler
-from gpu_token_utilization.store import RequestLog
 
 from conftest import git
 
@@ -30,11 +29,11 @@ def only_session(desktop):
 
 
 @pytest.fixture
-def run_jobs(store, client, make_gate, fake, desktop_fake):
+def run_jobs(store, client, fake, desktop_fake):
     def run(budgets=None, config=None, **kwargs):
         logs = []
         scheduler = Scheduler(
-            store, make_gate(), client,
+            store, client,
             agent=desktop_fake.agent(timeout=60),
             budgets=budgets or Budgets(),
             config=config or JobConfig(test_command=(sys.executable, "-m", "pytest")),
@@ -120,7 +119,6 @@ def test_tests_job_session_tokens_are_logged_per_step(git_repo, store, scenario,
     run_jobs()
     rows = [r for r in store.requests(job.id) if r["endpoint"] == "bharatcode-desktop"]
     assert [r["total_tokens"] for r in rows] == [11500, 300]
-    assert all(r["gate_source"] == "livestats" for r in rows)
 
 
 def test_tests_job_with_no_tests_generated_finishes_cleanly(git_repo, store, scenario, run_jobs):
@@ -355,52 +353,9 @@ def test_job_budget_stops_the_session_and_pauses_the_job(git_repo, store, scenar
     assert any("budget" in line for line in logs)
 
 
-def night_budgets(**kw):
-    """Budgets whose night began six hours ago, so usage logged "earlier tonight" stays in tonight
-    however long the suite runs (a run that crossed the default 12:00 IST start saw it as last night)."""
-    from datetime import datetime, timedelta
-
-    from gpu_token_utilization.budget import IST
-
-    return Budgets(night_start=(datetime.now(IST) - timedelta(hours=6)).time().replace(second=0, microsecond=0), **kw)
-
-
-def test_what_is_left_of_the_night_budget_caps_a_session(git_repo, store, scenario, run_jobs):
-    scenario(steps=[{"tokens": 2000, "sleep": 0.3} for _ in range(6)])
-    store.log_request(RequestLog(endpoint="bharatcode-desktop", attempt=1, total_tokens=995_000))  # earlier tonight
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs(budgets=night_budgets(per_night=1_000_000, per_job=200_000))
-    assert store.get_job(job.id).status == "paused"
-    assert 5000 <= store.request_summary(job.id)["total_tokens"] <= 7000  # stopped near the 5,000 left
-
-
-def test_night_budget_pauses_every_job(git_repo, store, scenario, run_jobs):
-    desktop = scenario(steps=[{"tokens": 100}])
-    store.log_request(RequestLog(endpoint="bharatcode-desktop", attempt=1, total_tokens=950_000))
-    first = store.add_job("tests", "src/calc.py", str(git_repo))
-    second = store.add_job("review", "src", str(git_repo))
-    logs = run_jobs(budgets=night_budgets(per_night=900_000))
-    assert not desktop.sessions
-    assert store.get_job(first.id).status == "paused" and store.get_job(second.id).status == "paused"
-    assert any("tonight's token budget is used up" in line for line in logs)
-
-
-def test_budget_night_starts_at_noon_ist():
-    from datetime import datetime, timezone
-
-    b = Budgets()
-    late = datetime(2026, 10, 29, 22, 0, tzinfo=timezone.utc)  # 03:30 IST on the 30th
-    assert b.night_began(late) == datetime(2026, 10, 29, 6, 30, tzinfo=timezone.utc)  # 12:00 IST on the 29th
-    afternoon = datetime(2026, 10, 30, 9, 0, tzinfo=timezone.utc)  # 14:30 IST on the 30th
-    assert b.night_began(afternoon) == datetime(2026, 10, 30, 6, 30, tzinfo=timezone.utc)
-
-
 def test_budget_settings_from_env(monkeypatch):
     monkeypatch.setenv("GTU_JOB_TOKEN_BUDGET", "1234")
-    monkeypatch.setenv("GTU_NIGHT_TOKEN_BUDGET", "5678")
-    monkeypatch.setenv("GTU_NIGHT_START", "20:00")
-    b = Budgets.from_env()
-    assert (b.per_job, b.per_night, b.night_start.hour) == (1234, 5678, 20)
+    assert Budgets.from_env().per_job == 1234
 
 
 # --- config --------------------------------------------------------------------------------

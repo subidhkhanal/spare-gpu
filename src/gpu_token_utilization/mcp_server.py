@@ -18,9 +18,8 @@ from typing import Callable, Literal
 
 import httpx
 
-from . import __version__, actions, desktop, freerun, pack, refs, router, runner, runstate, scholar, security, stats, waits, worktree
+from . import __version__, actions, desktop, pack, refs, router, runner, runstate, scholar, security, stats, waits, worktree
 from .api import ApiKeyMissing, find_api_key
-from .gate import Gate, GateConfig
 from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
 
 INSTRUCTIONS = (
@@ -69,14 +68,12 @@ def ask_folder() -> Path:
 class SpareTools:
     """The five tools as plain functions returning text, for one project folder."""
 
-    def __init__(self, base: Path, make_gate: Callable[[Store], Gate] | None = None,
-                 launch: Callable[[Path], int] | None = None,
+    def __init__(self, base: Path, launch: Callable[[Path], int] | None = None,
                  http: Callable[[], httpx.Client] | None = None,
                  scholar_http: Callable[[], httpx.Client] | None = None):
         self.base = Path(base)
-        # Everything that reaches outside is injectable, so tests use fakes: the gate (BharatCode's
-        # live stats), the background job runner, the wait figures, and the scholarly registries.
-        self._make_gate = make_gate or (lambda store: Gate(store, GateConfig.from_env()))
+        # Everything that reaches outside is injectable, so tests use fakes: the job runner, the
+        # wait figures (BharatCode's live stats), and the scholarly registries.
         self._launch = launch or runner.launch
         self._http = http or (lambda: httpx.Client(timeout=10.0))
         self._scholar_http = scholar_http or scholar.client
@@ -100,13 +97,6 @@ class SpareTools:
         if not stamp:
             return "-"
         return datetime.fromisoformat(stamp).astimezone().strftime("%d %b %H:%M")
-
-    def _decision(self, store: Store):
-        gate = self._make_gate(store)
-        try:
-            return gate.check(allow_probe=False)
-        finally:
-            gate.close()
 
     def _ensure_runner(self, store: Store, repo: Path) -> str:
         """Start the background runner unless it's already going. Returns what to tell the user."""
@@ -143,14 +133,12 @@ class SpareTools:
         try:
             with self._open() as store:
                 jobs = store.list_jobs()
-                commands = store.list_commands()
                 tokens = {j.id: store.request_summary(j.id)["total_tokens"] for j in jobs}
                 pid = runstate.running_pid(store.path.parent)
                 waiting = [j for j in jobs if j.status in ("queued", "paused")]
-                decision = self._decision(store) if waiting or any(c.status == "waiting" for c in commands) else None
         except NoStore as exc:
             return str(exc)
-        if not jobs and not commands:
+        if not jobs:
             return f"Nothing queued, running or finished yet in {self._root()}."
         # Named so a wrong folder is obvious (BharatCode can start the server outside the repo).
         lines = [f"spare-gpu's work in {self._root()}:"]
@@ -168,18 +156,11 @@ class SpareTools:
                         on += " (fell back after a failed check)"
                     files = f". Edited files: {j.output_dir}/" if j.output_dir else ""
                     lines.append(f"- {j.id}: {j.kind} {j.target}, {j.status} since {self._when(j.updated_at)}{spent}{on}{files}")
-        if commands:
-            lines.append("Commands to run when there's capacity:")
-            for c in commands[-10:]:
-                result = f", exit code {c.exit_code}" if c.exit_code is not None else ""
-                lines.append(f"- {c.id}: `{c.command}`, {c.status}{result} (log: {c.log_path})")
         if pid:
             lines.append(f"spare-gpu's runner is going (process {pid}).")
         elif waiting:
             lines.append("spare-gpu's runner isn't going, so waiting jobs won't start; queueing another job "
                          "starts it, or run `gtu start`.")
-        if decision is not None:
-            lines.append(("Capacity: " if decision.open else "Why it isn't running yet: ") + decision.describe())
         if jobs:
             lines.append(SESSION_DETAIL)
         return "\n".join(lines)
@@ -188,13 +169,7 @@ class SpareTools:
         work_id = work_id.strip()
         try:
             with self._open() as store:
-                try:
-                    store.get_command(work_id)
-                except StoreError:
-                    outcome = actions.cancel_job(store, work_id)
-                else:
-                    cmd = freerun.cancel(store, work_id)
-                    return f"Cancelled command {cmd.id} (`{cmd.command}`)."
+                outcome = actions.cancel_job(store, work_id)
         except NoStore as exc:
             return str(exc)
         except (actions.ActionError, StoreError) as exc:
@@ -405,27 +380,25 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
     @server.tool(annotations=notes(True, world=True))
     def spare_work_status() -> str:
         """Everything about spare-gpu's work in this repo in one answer: what's queued, what's
-        running, what finished (with job ids and tokens), and, if something is waiting, why it
-        isn't running yet (BharatCode's current load).
+        running, and what finished (with job ids, tokens and where each job's files landed).
 
         Use it for any "where are things" question: "what's queued?", "is my tests job done?",
-        "what is spare-gpu doing?", "why hasn't my job started?", "did my command run?", "what did
-        spare-gpu do last night?". Also use it to find a job id before cancelling. For how long
-        each model would wait right now use spare_waits; the full morning summary with token
-        totals is `gtu report` in a terminal."""
+        "what is spare-gpu doing?", "why hasn't my job started?", "what did spare-gpu do
+        today?". Also use it to find a job id before cancelling. For how long each model would
+        wait right now use spare_waits; the full summary with token totals is `gtu report` in a
+        terminal."""
         return tools.work_status()
 
     @server.tool(annotations=notes(False, destructive=True))
     def spare_cancel_work(job_id: str) -> str:
-        """Cancel a queued or running spare-gpu job, or a command queued with `gtu run-when-free`.
-        Nothing of a cancelled job is copied to the spare-gpu/ folder.
+        """Cancel a queued or running spare-gpu job. Nothing of a cancelled job is copied to the
+        spare-gpu/ folder.
 
-        Use it for "cancel the docs job", "drop job 1a2b3c4d", "don't run that command after all",
-        "stop the tests for payments".
+        Use it for "cancel the docs job", "drop job 1a2b3c4d", "stop the tests for payments".
 
         Args:
-            job_id: The 8-character id of the job or command. If the user describes it instead,
-                call spare_work_status first to find the id.
+            job_id: The 8-character id of the job. If the user describes it instead, call
+                spare_work_status first to find the id.
         """
         return tools.cancel_work(job_id)
 

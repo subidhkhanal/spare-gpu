@@ -238,22 +238,14 @@ def test_ask_is_a_session_that_may_not_edit_or_run_anything(fake, tmp_path):
 # --- inside Desktop, no API key is needed -------------------------------------------------------
 
 def test_a_review_job_runs_as_a_desktop_session_without_a_client(fake, tmp_path, store):
-    from datetime import time
-
-    from gpu_token_utilization.fakeapi import FakeBharatCode
-    from gpu_token_utilization.gate import Gate, GateConfig
     from gpu_token_utilization.scheduler import Scheduler
-
-    api = FakeBharatCode(api_key="unused")  # only its live stats are read, never with a key
-    gate = Gate(store, GateConfig(window=(time(0, 0), time(0, 0))), http=httpx.Client(transport=api.transport()),
-                now=api.clock.utcnow)
 
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "a.py").write_text("def f(x):\n    return 1 / x\n")
     job = store.add_job("review", "a.py", str(repo))
     fake.steps = [Step(900, text="## Likely bugs\n- `a.py:2` divides by zero when x is 0.")]
-    done = Scheduler(store, gate, None, agent=agent(fake), isolate=False, ignore_gate=True).run()
+    done = Scheduler(store, None, agent=agent(fake), isolate=False).run()
     assert done == 1 and store.get_job(job.id).status == "done"
     report = (repo / f"gtu-review-{job.id}.md").read_text()
     assert "divides by zero" in report

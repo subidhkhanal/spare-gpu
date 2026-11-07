@@ -11,7 +11,7 @@ def counting_plan(names, calls, crash_on=None):
 
     def make(name):
         def step(ctx):
-            calls.append((name, ctx.decision.reading.verdict))
+            calls.append((name, ctx.step_name))
             if crash_on and crash_on.get(name):
                 crash_on[name] -= 1
                 raise KeyboardInterrupt  # stands in for the process being killed mid-step
@@ -23,11 +23,11 @@ def counting_plan(names, calls, crash_on=None):
     return {kind: [(n, make(n)) for n in names] for kind in ("tests", "docs", "review")}
 
 
-def make_scheduler(store, gate, client, fake, plans, isolate=False):
-    return Scheduler(store, gate, client, plans=plans, sleep=fake.clock.sleep, isolate=isolate)
+def make_scheduler(store, client, fake, plans, isolate=False, **kwargs):
+    return Scheduler(store, client, plans=plans, sleep=fake.clock.sleep, isolate=isolate, **kwargs)
 
 
-def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinning(fake, store, client, make_gate, job_repo):
+def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinning(fake, store, client, job_repo):
     from gpu_token_utilization.budget import BudgetExceeded
 
     def too_big(ctx):
@@ -37,15 +37,14 @@ def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinni
     other = store.add_job("docs", "a.py", job_repo)
     calls, logs = [], []
     plans = {**counting_plan(["one"], calls), "review": [("review", too_big)]}  # the review step is the one that can't fit
-    fake.usage_quiet(3)
-    scheduler = Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
+    scheduler = Scheduler(store, client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
     assert scheduler.run() == 1  # the docs job ran; the review was paused once and left alone
     assert store.get_job(job.id).status == "paused" and store.get_job(other.id).status == "done"
     assert sum("paused, not enough token budget" in line for line in logs) == 1
-    assert any("Nothing left that fits the token budgets" in line for line in logs)
+    assert any("Nothing left that fits the token budget" in line for line in logs)
 
 
-def test_anything_else_that_breaks_a_step_fails_that_job_and_the_runner_carries_on(fake, store, client, make_gate, job_repo):
+def test_anything_else_that_breaks_a_step_fails_that_job_and_the_runner_carries_on(fake, store, client, job_repo):
     import xml.etree.ElementTree as ET
 
     def broken(ctx):
@@ -55,45 +54,35 @@ def test_anything_else_that_breaks_a_step_fails_that_job_and_the_runner_carries_
     other = store.add_job("docs", "b.py", job_repo)
     calls, logs = [], []
     plans = {"tests": [("write", broken)], "docs": counting_plan(["one"], calls)["docs"]}
-    scheduler = Scheduler(store, make_gate(), client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
+    scheduler = Scheduler(store, client, plans=plans, sleep=fake.clock.sleep, isolate=False, log=logs.append)
     assert scheduler.run() == 1
     assert store.get_job(job.id).status == "failed" and store.get_job(other.id).status == "done"
     assert store.steps(job.id)[0]["output"] == "ParseError: junit.xml: no element found"
     assert any("failed unexpectedly (ParseError" in line and "carry on" in line for line in logs)
 
 
-def test_pauses_while_busy_and_resumes_when_quiet(fake, store, client, make_gate, job_repo):
+def test_a_busy_answer_is_waited_out_and_the_step_tried_again_waiting_longer_each_time(fake, store, client, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
-    fake.usage_busy(4)  # then the default reply: quiet
-    calls = []
-    done = make_scheduler(store, make_gate(), client, fake, counting_plan(["one", "two"], calls)).run()
+    fake.busy(2)  # the first two chat requests get 503, then the default reply
+    calls, logs = [], []
+    done = make_scheduler(store, client, fake, counting_plan(["one", "two"], calls), log=logs.append).run()
     assert done == 2 and store.get_job(job.id).status == "done"
-    verdicts = [r["verdict"] for r in store.conn.execute("SELECT verdict FROM gate_readings ORDER BY id")]
-    assert verdicts[:7] == ["busy"] * 4 + ["quiet"] * 3
-    # Nothing ran until three quiet readings after the busy spell: 7 polls, a minute apart.
-    assert fake.clock.sleeps[:6] == [60.0] * 6
-    assert [c[0] for c in calls] == ["one", "two"]
-    assert all(verdict == "quiet" for _, verdict in calls)
+    assert [r["status_code"] for r in store.requests()] == [503, 503, 200, 200]
+    assert fake.clock.sleeps == [60.0, 120.0]  # a minute, then two: longer each time in a row
+    assert [c[0] for c in calls] == ["one", "one", "one", "two"]
+    assert "BharatCode is busy; trying again in 60 s." in logs and "BharatCode is busy; trying again in 120 s." in logs
 
 
-def test_requests_record_the_gate_view_at_send_time(fake, store, client, make_gate, job_repo):
-    store.add_job("tests", "a.py", job_repo)
-    fake.usage(times=3, active=1, queued=0)
-    make_scheduler(store, make_gate(), client, fake, counting_plan(["one"], [])).run()
-    (row,) = store.requests()
-    assert row["gate_source"] == "livestats" and row["queue_at_send"] == 0 and row["active_at_send"] == 1
-
-
-def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, client, make_gate, job_repo):
+def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, client, job_repo):
     job = store.add_job("docs", "a.py", job_repo)
     calls = []
     plans = counting_plan(["one", "two", "three"], calls, crash_on={"two": 1})
     with pytest.raises(KeyboardInterrupt):
-        make_scheduler(store, make_gate(), client, fake, plans).run()
+        make_scheduler(store, client, fake, plans).run()
     assert [s["status"] for s in store.steps(job.id)] == ["done", "running", "pending"]
 
     # A fresh process: new scheduler and gate on the same database.
-    done = make_scheduler(store, make_gate(), client, fake, plans).run()
+    done = make_scheduler(store, client, fake, plans).run()
     assert done == 2
     assert [c[0] for c in calls] == ["one", "two", "two", "three"]
     assert [s["status"] for s in store.steps(job.id)] == ["done", "done", "done"]
@@ -101,20 +90,17 @@ def test_killed_mid_job_resumes_without_repeating_finished_steps(fake, store, cl
     assert fake.chat_calls == 3  # step one's request was not sent again
 
 
-def test_busy_answer_closes_the_gate_and_the_step_is_retried(fake, store, client, make_gate, job_repo):
+def test_the_busy_wait_starts_over_once_a_step_gets_through(fake, store, client, job_repo):
     job = store.add_job("review", "a.py", job_repo)
-    fake.busy(1)  # first chat request gets 503
+    fake.busy(1)  # the first chat request gets 503; the default reply answers the rest
     calls = []
-    done = make_scheduler(store, make_gate(), client, fake, counting_plan(["one"], calls)).run()
-    assert done == 1 and store.get_job(job.id).status == "done"
-    sources = [r["source"] for r in store.conn.execute("SELECT source FROM gate_readings ORDER BY id")]
-    assert "own" in sources
-    own = sources.index("own")
-    assert sources[own + 1 : own + 4] == ["livestats"] * 3  # had to re-earn three quiet readings
-    assert [r["status_code"] for r in store.requests()] == [503, 200]
+    scheduler = make_scheduler(store, client, fake, counting_plan(["one", "two"], calls))
+    assert scheduler.run() == 2 and store.get_job(job.id).status == "done"
+    assert [r["status_code"] for r in store.requests()] == [503, 200, 200]
+    assert fake.clock.sleeps == [60.0] and scheduler.busy_wait == 60.0  # back to a minute once the step got through
 
 
-def test_cancelled_job_stops_between_steps(fake, store, client, make_gate, job_repo):
+def test_cancelled_job_stops_between_steps(fake, store, client, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     calls = []
 
@@ -124,7 +110,7 @@ def test_cancelled_job_stops_between_steps(fake, store, client, make_gate, job_r
         return "cancelled myself"
 
     plans = {k: [("one", cancel_self), ("two", lambda ctx: calls.append("two") or "")] for k in DEFAULT_PLANS}
-    make_scheduler(store, make_gate(), client, fake, plans).run()
+    make_scheduler(store, client, fake, plans).run()
     assert calls == ["one"]
     assert store.get_job(job.id).status == "cancelled"
 
@@ -160,11 +146,11 @@ def result_files(store, job_id):
     return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
 
-def test_job_works_on_its_own_copy_and_never_touches_main(fake, store, client, make_gate, git_repo):
+def test_job_works_on_its_own_copy_and_never_touches_main(fake, store, client, git_repo):
     main_head = git(git_repo, "rev-parse", "main")
     job = store.add_job("docs", "src/calc.py", str(git_repo))
     plans = writing_plan(["one", "two"], [])
-    make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+    make_scheduler(store, client, fake, plans, isolate=True).run()
 
     assert store.get_job(job.id).status == "done"
     # what it produced is in spare-gpu/<date>_<time>/
@@ -181,21 +167,21 @@ def test_job_works_on_its_own_copy_and_never_touches_main(fake, store, client, m
     assert git(git_repo, "branch", "--list", "gtu/*") == ""
 
 
-def test_crash_mid_step_discards_partial_edits_and_resumes(fake, store, client, make_gate, git_repo):
+def test_crash_mid_step_discards_partial_edits_and_resumes(fake, store, client, git_repo):
     job = store.add_job("tests", "src/calc.py", str(git_repo))
     calls = []
     plans = writing_plan(["one", "two", "three"], calls, crash_on={"two": 1})
     with pytest.raises(KeyboardInterrupt):
-        make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+        make_scheduler(store, client, fake, plans, isolate=True).run()
     wt = git_repo / ".gtu" / "worktrees" / job.id
     assert (wt / "half-done.txt").exists()  # left behind by the "killed" process
 
-    make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+    make_scheduler(store, client, fake, plans, isolate=True).run()
     assert calls == ["one", "two", "two", "three"]
     assert result_files(store, job.id) == {"one.txt", "two.txt", "three.txt"}  # not half-done.txt
 
 
-def test_unsaved_changes_are_what_the_job_starts_from(fake, store, client, make_gate, git_repo):
+def test_unsaved_changes_are_what_the_job_starts_from(fake, store, client, git_repo):
     job = store.add_job("docs", "src/calc.py", str(git_repo))
     (git_repo / "src" / "calc.py").write_text("edited but not committed\n")
     seen = []
@@ -205,12 +191,12 @@ def test_unsaved_changes_are_what_the_job_starts_from(fake, store, client, make_
         return "ok"
 
     plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
-    make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+    make_scheduler(store, client, fake, plans, isolate=True).run()
     assert store.get_job(job.id).status == "done" and seen == ["edited but not committed\n"]
     assert (git_repo / "src" / "calc.py").read_text() == "edited but not committed\n"  # still the user's
 
 
-def test_opencode_config_is_never_committed(fake, store, client, make_gate, git_repo):
+def test_opencode_config_is_never_committed(fake, store, client, git_repo):
     job = store.add_job("tests", "src/calc.py", str(git_repo))
 
     def step(ctx):
@@ -219,5 +205,5 @@ def test_opencode_config_is_never_committed(fake, store, client, make_gate, git_
         return "ok"
 
     plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
-    make_scheduler(store, make_gate(), client, fake, plans, isolate=True).run()
+    make_scheduler(store, client, fake, plans, isolate=True).run()
     assert result_files(store, job.id) == {"test_calc.py"}  # never opencode.json

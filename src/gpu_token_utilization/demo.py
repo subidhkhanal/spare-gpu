@@ -1,8 +1,8 @@
 """`gtu demo`: see the tool work a minute or two after installing it.
 
-Picks a small source file, sends one short review straight away (no gate, no git
-branch, no clean-repo requirement) and shows the answer. Real jobs are the same
-review, queued and run when BharatCode has capacity.
+Picks a small source file, sends one short review straight away (no git branch, no
+clean-repo requirement) and shows the answer. Real jobs are the same review, run as a
+job in a private copy of the project.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def run_demo(root: Path, file: Path, client: BharatCodeClient) -> DemoResult:
     rel = file.relative_to(root).as_posix()
     listing, _ = numbered_listing(root, rel, max_chars=MAX_BYTES * 3)
     result = client.chat(review_messages(listing), max_tokens=DEMO_MAX_TOKENS, reasoning_effort="none",
-                         gate={"gate_source": "demo"})
+                         gate={"gate_source": "demo"})  # marks the demo's request in the log
     out = root / ".gtu" / "demo" / f"review-{datetime.now():%Y%m%d-%H%M%S}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     gitignore = root / ".gtu" / ".gitignore"

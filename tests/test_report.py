@@ -1,4 +1,4 @@
-"""`gtu report`: summary of what ran, its cost, its output and the capacity it met."""
+"""`gtu report`: summary of what ran, its cost, its output and the queue waits it met."""
 
 import sys
 from datetime import datetime, timedelta, timezone
@@ -25,7 +25,7 @@ TESTS = IMPORT_SRC + (
 
 
 @pytest.fixture
-def ran(git_repo, store, client, make_gate, fake, scenario):
+def ran(git_repo, store, client, fake, scenario):
     """A tests job and a review job, run to completion against the fakes."""
     desktop = scenario(steps=[{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": TESTS}}, {"tokens": 500}])
     fake.usage_default.active = 1  # one of four slots busy: sends count as "into a free slot"
@@ -33,7 +33,7 @@ def ran(git_repo, store, client, make_gate, fake, scenario):
                      prompt_tokens=300, completion_tokens=40))
     tests_job = store.add_job("tests", "src/calc.py", str(git_repo))
     review_job = store.add_job("review", "src/calc.py", str(git_repo))
-    Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=60), budgets=Budgets(),
+    Scheduler(store, client, agent=desktop.agent(timeout=60), budgets=Budgets(),
               config=JobConfig(test_command=(sys.executable, "-m", "pytest")), sleep=fake.clock.sleep,
               now=fake.clock.utcnow).run()
     return store.get_job(tests_job.id), store.get_job(review_job.id)
@@ -47,12 +47,10 @@ def test_job_report_counts_what_ran(ran, store):
     assert (t.tests_kept, t.tests_dropped) == (2, 1)
     assert t.files == [("A", "tests/test_gtu_calc.py")]
     assert t.queue_waits_ms == []  # the CLI doesn't expose it
-    assert t.sends_with_stats == 2 and t.free_slot_share == 1.0
 
     r = reporting.build_job(store, review_job)
     assert r.api_requests == 1 and r.tokens == 340 and r.queue_waits_ms == [4200]
     assert r.files == [("A", f"gtu-review-{review_job.id}.md")]
-    assert r.queue_depths == [0]
 
 
 def test_the_report_names_the_folder_with_each_jobs_files(ran, store, git_repo):
@@ -61,7 +59,7 @@ def test_the_report_names_the_folder_with_each_jobs_files(ran, store, git_repo):
     assert folder.startswith("spare-gpu/") and (git_repo / folder / "tests" / "test_gtu_calc.py").is_file()
     reports = [reporting.build_job(store, j) for j in ran]
     now = datetime.now(timezone.utc)
-    text = reporting.summary_markdown(reports, store, Budgets(), now, now - timedelta(hours=1))
+    text = reporting.summary_markdown(reports, store, now, now - timedelta(hours=1))
     assert f"- Edited files: `{folder}/`" in text
     assert git(git_repo, "branch", "--list", "gtu/*") == ""  # no branches, ever
 
@@ -71,19 +69,18 @@ def test_an_unfinished_job_says_its_files_come_later(git_repo, store):
     store.set_status(job.id, "paused")
     r = reporting.build_job(store, store.get_job(job.id))
     now = datetime.now(timezone.utc)
-    text = reporting.summary_markdown([r], store, Budgets(), now, None)
+    text = reporting.summary_markdown([r], store, now, None)
     assert r.files == [] and "copied to `spare-gpu/` when it finishes" in text
 
 
-def test_summary_covers_jobs_tokens_and_capacity(ran, store):
+def test_summary_covers_jobs_tokens_and_waits(ran, store):
     reports = [reporting.build_job(store, j) for j in ran]
     now = datetime.now(timezone.utc)
-    text = reporting.summary_markdown(reports, store, Budgets(), now, now - timedelta(hours=1))
+    text = reporting.summary_markdown(reports, store, now, now - timedelta(hours=1))
     assert "| Job | Kind | Target | Status | Ran | Took | Tokens | Produced |" in text
     assert "2 tests kept, 1 discarded" in text
     assert "**Tokens:** 12,340 across these jobs" in text
     assert "BharatCode's reported queue wait: median 4.2 s, max 4.2 s over 1 request(s)" in text
-    assert "Sent into a free slot: 3 of 3 (100%)" in text
 
 
 def test_job_markdown_is_deterministic(ran, store):
@@ -106,7 +103,7 @@ def test_report_command_prints_and_saves(ran, store, git_repo, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "spare-gpu morning report" in result.output and ran[0].id in result.output
     saved = list((store.path.parent / "reports").glob("report-*.md"))
-    assert len(saved) == 1 and "## Capacity context" in saved[0].read_text()
+    assert len(saved) == 1 and "## Waiting" in saved[0].read_text()
     assert git(git_repo, "branch", "--list", "gtu/*") == ""
 
 

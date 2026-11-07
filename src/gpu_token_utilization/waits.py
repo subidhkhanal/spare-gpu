@@ -23,8 +23,31 @@ from typing import Callable
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .gate import IST, USAGE_URL, LaneStats, UsageSnapshot
+from .budget import IST
 from .store import Store
+
+USAGE_URL = "https://bharatcode.ai/api/serving/usage"
+
+
+class LaneStats(BaseModel):
+    """One model's API lane in BharatCode's live stats."""
+    model_config = ConfigDict(strict=True, extra="ignore")
+    active_requests: int = Field(ge=0)
+    queued_requests: int = Field(ge=0)
+    slot_capacity: int = Field(ge=0)
+    available: bool
+
+
+class ModelStats(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+    id: str
+    api: LaneStats | None = None
+
+
+class UsageSnapshot(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+    generated_at: datetime
+    models: list[ModelStats]
 
 QUEUE_WAITS_URL = "https://bharatcode.ai/api/serving/queue-waits"
 MODELS_ENV = "GTU_MODELS"

@@ -1,21 +1,18 @@
 """spare-gpu's MCP server: each of the five tools against fakes (BharatCode's API, live stats and
 history, and the background processes), missing-store handling, the real protocol (in memory and
-over stdio, the way BharatCode Desktop runs it), and sharing the store between processes.
-Commands queued with `gtu run-when-free` are covered in test_freerun.py."""
+over stdio, the way BharatCode Desktop runs it), and sharing the store between processes."""
 
 import json
 import subprocess
 import sys
 import textwrap
-from datetime import time
 
 import anyio
 import httpx
 import mcp
 import pytest
 
-from gpu_token_utilization import actions, freerun, waits, worktree
-from gpu_token_utilization.gate import Gate, GateConfig
+from gpu_token_utilization import actions, waits, worktree
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
@@ -47,16 +44,12 @@ def started():
 
 @pytest.fixture
 def tools(git_repo, fake, started):
-    def gate(store):
-        return Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
-                    http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
-
     def launch(repo):
         started["runner"].append(repo)
         return 4242
 
-    # wait figures from the fake too: its live stats, and no queue-waits endpoint (so "no data")
-    return SpareTools(git_repo, make_gate=gate, launch=launch, http=lambda: httpx.Client(transport=fake.transport()))
+    # wait figures from the fake: its live stats, and no queue-waits endpoint (so "no data")
+    return SpareTools(git_repo, launch=launch, http=lambda: httpx.Client(transport=fake.transport()))
 
 
 def readable(text: str) -> bool:
@@ -66,11 +59,6 @@ def readable(text: str) -> bool:
 def queue(repo, kind, path, note=None):
     """Queue a job the way `gtu add` does; the server itself only hands work over via spare_delegate."""
     return actions.queue_job(lambda root: Store(db_path(root)), repo, kind, path, note).job
-
-
-def queue_command(repo, command):
-    """Record a command the way `gtu run-when-free` does, without starting a real waiter."""
-    return freerun.queue(lambda root: Store(db_path(root)), repo, command, start=lambda cmd: None)
 
 
 def finished_review(git_repo, tokens=355, wait_ms=12500):
@@ -154,20 +142,13 @@ def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, fake, monk
 
 # --- spare_work_status ------------------------------------------------------------------------
 
-def test_work_status_merges_queue_results_and_why_it_waits(tools, git_repo, fake):
+def test_work_status_merges_queue_and_results(tools, git_repo, fake):
     done = finished_review(git_repo)
     queue(git_repo, "docs", "src/calc.py")
-    fake.usage_busy(1)
     text = tools.work_status()
     assert readable(text) and text.index("Waiting:") < text.index("Finished:")
     assert "docs src/calc.py, queued" in text and f"- {done.id}: review src, done" in text and "355 tokens" in text
-    assert "runner isn't going" in text and "Why it isn't running yet: Gate closed" in text
-
-
-def test_work_status_lists_commands_queued_from_the_terminal(tools, git_repo):
-    queue_command(git_repo, "npm run build")
-    text = tools.work_status()
-    assert "Commands to run when there's capacity:" in text and "`npm run build`, waiting" in text
+    assert "runner isn't going" in text
 
 
 def test_work_status_with_nothing_yet(tools, git_repo):
@@ -189,13 +170,6 @@ def test_cancel_work_jobs_and_unknown_ids(tools, git_repo):
     assert "no job with id 'zzzz'" in unknown and "spare_work_status" in unknown
 
 
-def test_cancel_work_cancels_a_waiting_command(tools, git_repo):
-    cmd = queue_command(git_repo, "npm run build")
-    assert tools.cancel_work(cmd.id) == f"Cancelled command {cmd.id} (`npm run build`)."
-    with Store(db_path(git_repo)) as store:
-        assert store.get_command(cmd.id).status == "cancelled"
-
-
 # --- spare_waits -------------------------------------------------------------------------------
 
 def test_waits_report_the_live_lane_and_say_when_they_cant_compare(tools, fake):
@@ -206,9 +180,7 @@ def test_waits_report_the_live_lane_and_say_when_they_cant_compare(tools, fake):
 
 
 def test_waits_need_no_store_and_create_none(git_repo, fake):
-    gate = lambda store: Gate(store, GateConfig(window=(time(0, 0), time(0, 0))),
-                              http=httpx.Client(transport=fake.transport()), now=fake.clock.utcnow)
-    text = SpareTools(git_repo, make_gate=gate, http=lambda: httpx.Client(transport=fake.transport())).waits()
+    text = SpareTools(git_repo, http=lambda: httpx.Client(transport=fake.transport())).waits()
     assert readable(text) and not (git_repo / ".gtu").exists()
 
 

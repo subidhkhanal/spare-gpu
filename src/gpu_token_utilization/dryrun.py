@@ -1,7 +1,6 @@
 """`gtu start --dry-run`: what would run, and roughly what it would cost, without doing any of it.
 
-Read-only: sends nothing (not even the live-stats poll), needs no API key, and creates no
-branches, worktrees, steps or gate readings.
+Read-only: sends nothing, needs no API key, and creates no branches, worktrees or steps.
 """
 
 from __future__ import annotations
@@ -86,11 +85,9 @@ def plan_jobs(store: Store, budgets: Budgets, config: JobConfig, now: datetime) 
         existing = store.steps(job.id)
         names = [s["name"] for s in existing if s["status"] in ("pending", "running")] if existing \
             else [name for name, _ in PLANS[job.kind]]
-        job_used, night_used = budgets.used(store, job.id, now)
+        job_used = budgets.used(store, job.id)
         plan = JobPlan(job, [estimate(store, job, n, config) for n in names], job_used)
-        if night_used >= budgets.per_night:
-            plan.skip_reason = "tonight's token budget is used up"
-        elif job_used >= budgets.per_job:
+        if job_used >= budgets.per_job:
             plan.skip_reason = "its token budget is used up"
         plan.problems = _problems(job)
         plans.append(plan)
@@ -113,7 +110,7 @@ def _rough(n: int) -> str:
     return f"{round(n, -3):,}" if n >= 10_000 else f"{round(n, -2):,}" if n >= 1_000 else f"{n:,}"
 
 
-def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, ignore_gate: bool) -> str:
+def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime) -> str:
     plans = plan_jobs(store, budgets, config, now)
     out = ["Dry run: nothing is sent, and no branches, worktrees or job steps are created.", ""]
     if not plans:
@@ -137,16 +134,8 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
         for problem in p.problems:
             out.append("  PROBLEM: " + problem.replace("\n", "\n    "))  # keep multi-line help under its job
         out.append("")
-    night = store.tokens_since(budgets.night_began(now).isoformat())
-    out.append(f"Total for jobs that would run: ~{_rough(low)}-{_rough(high)} tokens. "
-               f"Tonight so far: {night:,} of {budgets.per_night:,}.")
-    if ignore_gate:
-        out.append("Start: immediately; BharatCode's busy answers are retried politely. "
-                   "Add --wait-for-capacity to hold jobs for a free slot instead.")
-    else:
-        last = store.last_gate_reading()
-        seen = f" Last reading ({last.taken_at[11:16]} UTC): {last.reason}." if last else ""
-        out.append(f"Start: only once BharatCode's live stats show a free slot (--wait-for-capacity).{seen}")
+    out.append(f"Total for jobs that would run: ~{_rough(low)}-{_rough(high)} tokens.")
+    out.append("Start: immediately; BharatCode's busy answers are waited out and retried.")
     try:
         key_found = find_api_key() is not None
     except ApiKeyMissing:

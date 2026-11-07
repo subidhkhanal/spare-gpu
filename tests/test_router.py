@@ -5,7 +5,7 @@ import json
 import pytest
 
 from gpu_token_utilization import router, waits
-from gpu_token_utilization.gate import LaneStats
+from gpu_token_utilization.waits import LaneStats
 from gpu_token_utilization.router import State, choose
 from gpu_token_utilization.waits import ModelWaits, View
 

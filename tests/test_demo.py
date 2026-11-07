@@ -84,7 +84,7 @@ def test_demo_reviews_a_file_and_explains_next_steps(project):
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == 0, result.output
     out = result.output
-    assert "Reviewing src/calc.py" in out and "skips the capacity gate" in out
+    assert "Reviewing src/calc.py" in out and "sends one request now" in out
     assert "mean([]) divides by zero" in out
     assert "360 tokens" in out and "4.2 s waiting in BharatCode's queue" in out and "req-demo-1" in out
     assert "gtu add tests src/calc.py" in out and "gtu start" in out and "own copy of the project" in out

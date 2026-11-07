@@ -41,7 +41,6 @@ from pathlib import Path
 
 from gpu_token_utilization import desktop, worktree
 from gpu_token_utilization.budget import Budgets
-from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.scheduler import Scheduler
 from gpu_token_utilization.store import Store
@@ -86,9 +85,8 @@ def run_task(conn, task: dict, model: str, workdir: Path, job_budget: int, log=p
         store.set_route(job.id, model, model, "evaluation run")  # pinned: no routing during an eval
         config = JobConfig.from_env()
         agent = desktop.DesktopAgent(conn, model=f"bharatcode/{model}", timeout=config.agent_timeout)
-        budgets = Budgets(per_job=job_budget, per_night=max(job_budget * 4, 10_000_000))
-        Scheduler(store, Gate(store, GateConfig()), None, agent=agent, config=config, budgets=budgets,
-                  ignore_gate=True, log=log).run()
+        budgets = Budgets(per_job=job_budget)
+        Scheduler(store, None, agent=agent, config=config, budgets=budgets, log=log).run()
         status = store.get_job(job.id).status
         if status == "failed":
             # A failed job (service unreachable, say) says nothing about the model: retry it, never score it 0.

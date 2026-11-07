@@ -73,34 +73,6 @@ CREATE TABLE IF NOT EXISTS requests (
     usage_json         TEXT
 );
 
-CREATE TABLE IF NOT EXISTS gate_readings (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    taken_at      TEXT NOT NULL,
-    source        TEXT NOT NULL,
-    model         TEXT,
-    active        INTEGER,
-    queued        INTEGER,
-    slots         INTEGER,
-    verdict       TEXT NOT NULL CHECK (verdict IN ('quiet', 'busy', 'unknown')),
-    decision      TEXT NOT NULL CHECK (decision IN ('open', 'closed')),
-    quiet_streak  INTEGER NOT NULL,
-    busy_streak   INTEGER NOT NULL,
-    reason        TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS commands (
-    id           TEXT PRIMARY KEY,
-    command      TEXT NOT NULL,
-    repo         TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'waiting'
-                 CHECK (status IN ('waiting', 'running', 'done', 'failed', 'cancelled')),
-    pid          INTEGER,
-    exit_code    INTEGER,
-    log_path     TEXT,
-    created_at   TEXT NOT NULL,
-    started_at   TEXT,
-    finished_at  TEXT
-);
 """
 
 # Columns added after Phase 1; older databases get them on open.
@@ -144,24 +116,6 @@ class Job:
 
 
 @dataclass
-class Command:
-    """A command to run once BharatCode has spare capacity (`gtu run-when-free`)."""
-    id: str
-    command: str
-    repo: str
-    status: str
-    pid: int | None
-    exit_code: int | None
-    log_path: str | None
-    created_at: str
-    started_at: str | None
-    finished_at: str | None
-
-
-COMMAND_FINAL = ("done", "failed", "cancelled")
-
-
-@dataclass
 class RequestLog:
     endpoint: str
     attempt: int
@@ -189,22 +143,6 @@ class RequestLog:
     scheduler_admitted_at_ms: int | None = None
     # The reply's whole `usage` block as JSON, so fields we don't parse (cached tokens, say) are kept.
     usage_json: str | None = None
-
-
-@dataclass
-class GateReading:
-    taken_at: str
-    source: str
-    verdict: str
-    decision: str
-    quiet_streak: int
-    busy_streak: int
-    reason: str
-    model: str | None = None
-    active: int | None = None
-    queued: int | None = None
-    slots: int | None = None
-    id: int | None = None
 
 
 class Store:
@@ -440,72 +378,6 @@ class Store:
             (limit,),
         ).fetchall()
         return [r[0] for r in rows]
-
-    # commands run when there's capacity
-
-    def add_command(self, command: str, repo: str) -> Command:
-        command_id = "c" + secrets.token_hex(4)[1:]  # 8 characters like a job id, but starts with c
-        with self.conn:
-            self.conn.execute("INSERT INTO commands (id, command, repo, created_at) VALUES (?, ?, ?, ?)",
-                              (command_id, command, repo, utc_now()))
-        return self.get_command(command_id)
-
-    def get_command(self, command_id: str) -> Command:
-        row = self.conn.execute("SELECT * FROM commands WHERE id = ?", (command_id,)).fetchone()
-        if row is None:
-            raise StoreError(f"no command with id {command_id!r}")
-        return Command(**dict(row))
-
-    def list_commands(self) -> list[Command]:
-        rows = self.conn.execute("SELECT * FROM commands ORDER BY created_at, rowid").fetchall()
-        return [Command(**dict(r)) for r in rows]
-
-    def update_command(self, command_id: str, **fields) -> Command:
-        """Set fields; a cancelled command stays cancelled whatever a runner reports later."""
-        allowed = {"status", "pid", "exit_code", "log_path", "started_at", "finished_at"}
-        if not fields or set(fields) - allowed:
-            raise StoreError(f"can't update command fields {sorted(set(fields) - allowed)}")
-        sets = ", ".join(f"{k} = ?" for k in fields)
-        with self.conn:
-            self.conn.execute(f"UPDATE commands SET {sets} WHERE id = ? AND status != 'cancelled'",
-                              (*fields.values(), command_id))
-        return self.get_command(command_id)
-
-    def cancel_command(self, command_id: str) -> Command:
-        self.get_command(command_id)
-        marks = ", ".join("?" for _ in COMMAND_FINAL)
-        with self.conn:
-            changed = self.conn.execute(
-                f"UPDATE commands SET status = 'cancelled', finished_at = ? WHERE id = ? AND status NOT IN ({marks})",
-                (utc_now(), command_id, *COMMAND_FINAL),
-            ).rowcount
-        found = self.get_command(command_id)
-        if not changed:
-            raise StoreError(f"command {command_id} is already {found.status}")
-        return found
-
-    # gate readings
-
-    def add_gate_reading(self, reading: GateReading) -> GateReading:
-        with self.conn:
-            cur = self.conn.execute(
-                """INSERT INTO gate_readings (taken_at, source, model, active, queued, slots, verdict, decision,
-                       quiet_streak, busy_streak, reason)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    reading.taken_at, reading.source, reading.model, reading.active, reading.queued, reading.slots,
-                    reading.verdict, reading.decision, reading.quiet_streak, reading.busy_streak, reading.reason,
-                ),
-            )
-        reading.id = cur.lastrowid
-        return reading
-
-    def last_gate_reading(self, exclude_bypass: bool = False) -> GateReading | None:
-        """The newest reading; with `exclude_bypass`, the newest one that carries a real decision
-        (an ungated `gtu start` records "bypass" readings, which are always marked open)."""
-        where = "WHERE source != 'bypass'" if exclude_bypass else ""
-        row = self.conn.execute(f"SELECT * FROM gate_readings {where} ORDER BY id DESC LIMIT 1").fetchone()
-        return GateReading(**dict(row)) if row else None
 
     def request_summary(self, job_id: str | None = None) -> dict:
         where, args = ("WHERE job_id = ?", (job_id,)) if job_id is not None else ("", ())

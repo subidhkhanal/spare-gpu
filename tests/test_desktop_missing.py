@@ -15,14 +15,14 @@ from conftest import git
 runner = CliRunner()
 
 
-def test_without_desktop_tests_and_docs_jobs_wait_and_review_still_runs(fake, store, client, make_gate, git_repo):
+def test_without_desktop_tests_and_docs_jobs_wait_and_review_still_runs(fake, store, client, git_repo):
     tests_job = store.add_job("tests", "src", str(git_repo))
     docs_job = store.add_job("docs", "src", str(git_repo))
     review_job = store.add_job("review", "src", str(git_repo))
     fake.queue(Reply(content="## Likely bugs\nNothing found."))
     logs = []
-    Scheduler(store, make_gate(), client, sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append,
-              ignore_gate=True, desktop_missing=desktop.DESKTOP_NEEDED).run()
+    Scheduler(store, client, sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append,
+              desktop_missing=desktop.DESKTOP_NEEDED).run()
     assert store.get_job(review_job.id).status == "done"
     assert store.get_job(tests_job.id).status == "queued" and store.get_job(docs_job.id).status == "queued"
     assert not store.steps(tests_job.id)  # nothing started, no worktree or branch made for it

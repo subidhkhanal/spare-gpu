@@ -36,7 +36,7 @@ def add(*args):
 def db_counts(repo):
     with Store(repo / ".gtu" / "gtu.db") as s:
         return {t: s.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                for t in ("jobs", "job_steps", "requests", "gate_readings")}, [j.status for j in s.list_jobs()]
+                for t in ("jobs", "job_steps", "requests")}, [j.status for j in s.list_jobs()]
 
 
 @respx.mock  # no routes: any HTTP request at all would fail the test
@@ -55,10 +55,10 @@ def test_dry_run_lists_jobs_steps_and_costs_and_changes_nothing(repo):
     assert "0 tokens (runs locally, no requests)" in out
     assert re.search(r"~3[\d,]+-[\d,]+ tokens \(estimate: 3-7 session steps", out)
     assert f"Job {review_id}  review" in out and "estimate from the code size" in out
-    assert "Total for jobs that would run:" in out and "Start: immediately; BharatCode's busy answers are retried politely." in out
+    assert "Total for jobs that would run:" in out and "Start: immediately; BharatCode's busy answers are waited out and retried." in out
     assert "PROBLEM" not in out
 
-    assert db_counts(repo) == before  # no steps, requests or gate readings created
+    assert db_counts(repo) == before  # no steps or requests created
     assert git(repo, "branch", "--list", "gtu/*") == ""
     assert not (repo / ".gtu" / "worktrees").exists()
 
@@ -75,13 +75,6 @@ def test_dry_run_needs_no_api_key_but_mentions_it(repo, monkeypatch):
 def test_dry_run_with_nothing_queued(repo):
     result = runner.invoke(app, ["start", "--dry-run"])
     assert result.exit_code == 0 and "No queued jobs" in result.output
-
-
-def test_dry_run_with_wait_for_capacity_says_it_would_hold_jobs(repo):
-    add("review", "src/calc.py")
-    result = runner.invoke(app, ["start", "--dry-run", "--wait-for-capacity"])
-    assert "Start: only once BharatCode's live stats show a free slot (--wait-for-capacity)." in result.output
-    assert "--wait-for-capacity: jobs start only" not in result.output  # the real-run note isn't printed
 
 
 def test_partly_done_job_shows_only_remaining_steps_and_its_usage(repo):

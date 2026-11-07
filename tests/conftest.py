@@ -1,8 +1,6 @@
 import json
 import uuid
-from datetime import time
 
-import httpx
 import pytest
 
 from gpu_token_utilization import keystore
@@ -10,7 +8,6 @@ from gpu_token_utilization.keystore import TARGET_ENV
 from gpu_token_utilization.client import BharatCodeClient, RetryPolicy
 from gpu_token_utilization.fakeapi import FakeBharatCode
 from gpu_token_utilization.fakedesktop import FakeDesktop, Step
-from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.store import Store
 
 KEY = "bc_live_fake_key"
@@ -84,7 +81,7 @@ def job_repo(tmp_path):
 
 @pytest.fixture
 def client(fake, store):
-    # Scheduler-style client: no retries, the gate decides when to try again.
+    # Scheduler-style client: no retries; the scheduler waits out a busy answer and tries the step again.
     return BharatCodeClient(
         api_key=KEY, store=store, transport=fake.transport(), retry=RetryPolicy(max_retries=0),
         sleep=fake.clock.sleep, clock=fake.clock, rng=lambda: 0.5,  # 0.5 = no jitter
@@ -112,18 +109,6 @@ def git_repo(tmp_path):
     git(repo, "commit", "-q", "-m", "initial")
     return repo
 
-
-@pytest.fixture
-def make_gate(fake, store, client):
-    def make(probe=True, **overrides):
-        # Tests run at any hour, so the fallback window is all day unless a test says otherwise.
-        cfg = GateConfig(**{"window": (time(0, 0), time(0, 0)), **overrides})
-        return Gate(
-            store, cfg, http=httpx.Client(transport=fake.transport()),
-            client=client if probe else None, now=fake.clock.utcnow,
-        )
-
-    return make
 
 
 @pytest.fixture

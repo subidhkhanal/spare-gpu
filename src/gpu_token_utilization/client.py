@@ -187,8 +187,7 @@ class BharatCodeClient:
     ) -> ChatResult:
         """Send the full history (the API is stateless) and return one non-streamed reply.
 
-        `gate` holds the capacity gate's view at send time (gate_source, queue_at_send,
-        active_at_send) and is copied into every logged attempt.
+        `gate` is extra fields for every logged attempt (the demo marks its request with it).
         """
         if not 1 <= max_tokens <= MAX_OUTPUT_TOKENS:
             raise ValueError(f"max_tokens must be between 1 and {MAX_OUTPUT_TOKENS}")

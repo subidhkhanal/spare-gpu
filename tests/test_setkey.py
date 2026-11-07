@@ -190,7 +190,7 @@ def test_start_with_a_queued_job_and_no_key_says_how_to_set_it(git_repo, monkeyp
     monkeypatch.chdir(git_repo)
     monkeypatch.delenv("GTU_DB", raising=False)
     assert runner.invoke(app, ["add", "review", "src"]).exit_code == 0
-    assert_says_how_to_set_a_key(runner.invoke(app, ["start", "--now"]))
+    assert_says_how_to_set_a_key(runner.invoke(app, ["start"]))
 
 
 @respx.mock

@@ -15,7 +15,6 @@ from .api import (API_KEY_ENV, ApiError, ApiKeyMissing, KeyRejected, clean_key, 
 from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
-from .gate import WAIT_ENV, Gate, GateConfig
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
@@ -520,8 +519,8 @@ def demo(
         _fail(f"{file} is outside {root}")
 
     typer.echo(f"Reviewing {rel} ({target.stat().st_size} bytes) with BharatCode's {DEFAULT_MODEL}.")
-    typer.echo("The demo skips the capacity gate and sends one request now. This usually takes "
-               "under a minute, but can take two or more when BharatCode is busy.\n")
+    typer.echo("The demo sends one request now. This usually takes under a minute, but can take two or "
+               "more when BharatCode is busy.\n")
     with Store.open_default() as store:
         client = BharatCodeClient(store=store, timeout=DEMO_TIMEOUT, retry=DEMO_RETRY,
                                   on_retry=lambda message: typer.echo(message))
@@ -559,44 +558,16 @@ def demo(
 
 
 @app.command()
-def why() -> None:
-    """Show whether the capacity gate would send work now, and why."""
-    with Store.open_default() as store:
-        gate = Gate(store, GateConfig.from_env())
-        try:
-            decision = gate.check(allow_probe=False)
-        finally:
-            gate.close()
-    typer.echo(decision.describe())
-
-
-@app.command()
 def start(
     max_steps: int = typer.Option(None, "--max-steps", help="Stop after this many completed steps."),
-    quiet_readings: int = typer.Option(
-        None, "--quiet-readings", min=1, help="Override: quiet readings in a row needed to open the gate (default 3)."
-    ),
-    max_queued: int = typer.Option(
-        None, "--max-queued", min=0, help="Override: queue length still counted as quiet (default GTU_MAX_QUEUED or 5)."
-    ),
-    wait: bool = typer.Option(
-        False, "--wait-for-capacity",
-        help="Hold work until BharatCode's live stats show a free slot (also GTU_WAIT_FOR_CAPACITY=1). "
-             "Off by default: measured, waiting cost hours where sending cost seconds.",
-    ),
-    now: bool = typer.Option(False, "--now", hidden=True, help="No longer needed: sending right away is the default."),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show which jobs and steps would run and roughly what they'd cost; send nothing."
     ),
 ) -> None:
-    """Run queued jobs one step at a time, starting now (or once there's a free slot, with --wait-for-capacity)."""
+    """Run the queued jobs now, one step at a time, printing each step as it happens."""
 
     def log(message: str) -> None:
         typer.echo(f"[{datetime.now():%H:%M:%S}] {message}")
-
-    if now and wait:
-        _fail("--now and --wait-for-capacity contradict each other; pick one.")
-    wait = (wait or os.environ.get(WAIT_ENV, "").strip().lower() in ("1", "true", "yes")) and not now
 
     if dry_run:
         try:
@@ -604,15 +575,9 @@ def start(
         except ValueError as exc:
             _fail(str(exc))
         with Store.open_default() as store:
-            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc), not wait))
+            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc)))
         return
 
-    if wait:
-        typer.echo(
-            "--wait-for-capacity: jobs start only when BharatCode's live stats show a free slot.\n"
-            "On a busy day that can mean hours with nothing sent (see research/gate-vs-send-experiment.md);\n"
-            "without it, work starts now and BharatCode's busy answers are retried politely.\n"
-        )
     with Store.open_default() as store:
         folder = store.path.parent
         other = runstate.running_pid(folder)
@@ -633,19 +598,11 @@ def start(
             if os.environ.get(desktop.PASSWORD_ENV):  # started from Desktop, yet its server wasn't found
                 log(f"Not using BharatCode Desktop: {exc}.")
             try:
-                # Gated: no client-side retries; a busy answer closes the gate, which decides when to try
-                # again. Ungated (the default): no gate to do that, so the client's patient retry ladder takes over.
-                client = BharatCodeClient(store=store, retry=RetryPolicy(max_retries=0) if wait else RetryPolicy.from_env(),
+                client = BharatCodeClient(store=store, retry=RetryPolicy.from_env(),
                                           on_retry=lambda message: log(f"  {message}"))
             except ApiKeyMissing as exc:
                 _fail(_no_key(exc))
             desktop_missing = desktop.DESKTOP_NEEDED
-        config = GateConfig.from_env()
-        if quiet_readings is not None:
-            config.quiet_needed = quiet_readings
-        if max_queued is not None:
-            config.max_queued = max_queued
-        gate = Gate(store, config, client=client)
         runstate.clear(folder)  # a stop request left over from an earlier run doesn't apply to this one
         runstate.write_run(folder)
         def route(job):
@@ -656,8 +613,8 @@ def start(
 
         try:
             scheduler = Scheduler(
-                store, gate, client, agent=worker,
-                budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=not wait,
+                store, client, agent=worker,
+                budgets=Budgets.from_env(), config=job_config, log=log,
                 should_stop=lambda: runstate.stop_requested(folder), desktop_missing=desktop_missing, route=route,
             )
             steps = scheduler.run(max_steps=max_steps)
@@ -670,7 +627,6 @@ def start(
             raise typer.Exit(130)
         finally:
             runstate.clear(folder)
-            gate.close()
             if client is not None:
                 client.close()
     if scheduler.stopped:
@@ -697,23 +653,19 @@ def stop(
 
 @app.command()
 def report(
-    since: float = typer.Option(None, "--since", help="Hours to look back. Default: since tonight began (12:00 IST)."),
+    since: float = typer.Option(24.0, "--since", help="Hours to look back (default 24)."),
     job: str = typer.Option(None, "--job", help="Report on one job only."),
     all_jobs: bool = typer.Option(False, "--all", help="Every job ever run."),
 ) -> None:
-    """Morning summary: what ran, tokens, what it produced, and the capacity it was sent into."""
+    """Summary: what ran, tokens, what it produced, and the queue waits it met."""
     now = datetime.now(timezone.utc)
-    budgets = Budgets.from_env()
-    if all_jobs or job:
-        start_from = None
-    else:
-        start_from = now - timedelta(hours=since) if since else budgets.night_began(now)
+    start_from = None if all_jobs or job else now - timedelta(hours=since)
     with Store.open_default() as store:
         try:
             reports = [reporting.build_job(store, j) for j in reporting.select_jobs(store, start_from, job)]
         except StoreError as exc:
             _fail(str(exc))
-        text = reporting.summary_markdown(reports, store, budgets, now, start_from)
+        text = reporting.summary_markdown(reports, store, now, start_from)
         out = store.path.parent / "reports" / f"report-{now.astimezone(reporting.IST):%Y%m%d-%H%M}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
@@ -730,28 +682,6 @@ def waits_cmd() -> None:
 
 app.command("waits")(waits_cmd)
 app.command("advice", hidden=True)(waits_cmd)  # the older name
-
-
-@app.command("run-when-free")
-def run_when_free(command: str = typer.Argument(..., help="The command line, quoted.")) -> None:
-    """Run a test, build or lint command in this repo as soon as BharatCode has spare capacity, in the background."""
-    from . import freerun
-
-    try:
-        cmd = freerun.queue(lambda repo: Store.open_default(), Path.cwd(), command)
-    except freerun.FreeRunError as exc:
-        _fail(str(exc))
-    typer.echo(f"Waiting for spare capacity, then running `{cmd.command}` (command {cmd.id}).")
-    typer.echo(f"Output: {cmd.log_path}. Check with `gtu list`; cancel with `gtu cancel {cmd.id}`.")
-
-
-@app.command("_run-when-free", hidden=True)
-def _run_when_free(command_id: str) -> None:
-    """The background waiter started by run-when-free."""
-    from . import freerun
-
-    with Store.open_default() as store:
-        freerun.wait_and_run(store, command_id, say=lambda message: typer.echo(message))
 
 
 @app.command()
@@ -789,21 +719,8 @@ def pack_check(
 
 @app.command()
 def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) -> None:
-    """Cancel a job (or a run-when-free command) that has not finished."""
-    from . import freerun
-
+    """Cancel a job that has not finished."""
     with Store.open_default() as store:
-        try:
-            store.get_command(job_id)
-        except StoreError:
-            pass
-        else:
-            try:
-                cmd = freerun.cancel(store, job_id)
-            except StoreError as exc:
-                _fail(str(exc))
-            typer.echo(f"Cancelled command {cmd.id} (`{cmd.command}`).")
-            return
         try:
             outcome = actions.cancel_job(store, job_id)
         except actions.ActionError as exc:

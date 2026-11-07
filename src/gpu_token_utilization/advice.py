@@ -1,4 +1,4 @@
-"""Is now a fine time for heavy work on BharatCode? (`spare_capacity_advice`, `gtu advice`)
+"""Is now a fine time for heavy work on BharatCode? (measured waits, for `gtu advice`)
 
 Built on what we measured, not on forecasts. BharatCode reports how long it held each of our
 requests (x-bharatcode-queue-wait-ms); the answer is those waits:
@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .budget import IST
-from .gate import Decision
 from .store import Store
 
 RECENT = timedelta(minutes=30)  # older than this isn't "now"
@@ -75,7 +74,7 @@ def trend(waits: list[Wait], now: datetime) -> str | None:
     return "steady"
 
 
-def advise(waits: list[Wait], decision: Decision | None, now: datetime | None = None) -> str:
+def advise(waits: list[Wait], now: datetime | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     recent = [w for w in waits if now - w.sent_at <= RECENT][-RECENT_COUNT:]
     local_hour = now.astimezone(IST).hour
@@ -117,14 +116,5 @@ def advise(waits: list[Wait], decision: Decision | None, now: datetime | None = 
         lines.append("No measured waits at all yet, so we don't know what's usual. spare-gpu sends anyway and "
                      "retries busy answers, so it's safe to queue work now.")
 
-    if decision is not None:
-        r = decision.reading
-        if r.slots is not None:
-            lines.append(f"BharatCode's live stats (context, not a forecast): {r.active} of {r.slots} slots busy, "
-                         f"{r.queued} queued. In our measurements the queue count tracked waits only roughly "
-                         "with 4 slots, and not at all with 2.")
-        else:
-            lines.append(f"BharatCode's live stats aren't available ({r.reason}).")
-    lines.append("To run something: spare_delegate for tests, docs or a review; `gtu run-when-free` in a "
-                 "terminal for any other command.")
+    lines.append("To run something: spare_delegate for tests, docs, a review or a fix.")
     return "\n".join(lines)

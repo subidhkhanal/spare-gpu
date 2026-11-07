@@ -3,7 +3,7 @@
 Every request we send is logged, and so is every step a job's agent reports. Per-session detail
 (input, output, cached and reasoning tokens, and a breakdown by message type) is in BharatCode
 Desktop itself: each job is a Desktop session named "spare-gpu: ...". What spare-gpu adds is the
-total across jobs and nights, next to what each job produced, and the budgets that stop a job.
+total across jobs and days, next to what each job produced, and the budget that stops a job.
 (An earlier "overhead vs task" split rested on a fixed per-step estimate and was dropped:
 Desktop's own breakdown is measured.)
 """

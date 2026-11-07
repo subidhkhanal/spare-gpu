@@ -33,15 +33,15 @@ def make_repo(root, files: dict[str, bytes], autocrlf="false"):
 
 
 @pytest.fixture
-def run_job(store, client, make_gate, fake, scenario):
+def run_job(store, client, fake, scenario):
     def run(repo, kind, target, writes=None, review="## Likely bugs\nNothing found."):
         desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}])
         fake.queue(Reply(content=review))
         job = store.add_job(kind, target, str(repo))
         logs = []
-        Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=60),
+        Scheduler(store, client, agent=desktop.agent(timeout=60),
                   config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
-                  sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append, ignore_gate=True).run()
+                  sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
         return store.get_job(job.id), store.steps(job.id), logs
 
     return run

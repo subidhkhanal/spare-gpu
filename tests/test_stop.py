@@ -54,24 +54,28 @@ def test_checking_liveness_never_kills_the_process():
 
 # --- the scheduler -------------------------------------------------------------------------
 
-def test_stop_while_waiting_for_the_gate(fake, store, client, make_gate, job_repo):
+def test_stop_while_waiting_out_a_busy_answer(fake, store, client, job_repo):
     job = store.add_job("review", "a.py", job_repo)
-    fake.usage_busy(100)
+    fake.busy(100)  # BharatCode keeps answering busy
     checks = {"n": 0}
 
     def should_stop():
         checks["n"] += 1
         return checks["n"] > 5
 
-    s = Scheduler(store, make_gate(), client, plans={"review": [("x", lambda ctx: "x")]}, sleep=fake.clock.sleep,
+    def review(ctx):
+        ctx.chat([{"role": "user", "content": "review"}])
+        return "x"
+
+    s = Scheduler(store, client, plans={"review": [("x", review)]}, sleep=fake.clock.sleep,
                   isolate=False, should_stop=should_stop)
     assert s.run() == 0 and s.stopped
     assert sum(fake.clock.sleeps) < 10  # woke within seconds, not after the 60 s wait
-    assert store.get_job(job.id).status == "queued"  # never started, so nothing to pause
+    assert store.get_job(job.id).status == "paused"  # its step was put back and the job left resumable
 
 
 def test_stop_mid_session_step_aborts_it_and_leaves_the_job_paused_and_clean(
-        git_repo, store, client, make_gate, fake, scenario):
+        git_repo, store, client, fake, scenario):
     # a step that would take 60 s of polls (0.05 s each), writing half a file as it starts
     desktop = scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"}, "polls": 1200}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
@@ -79,7 +83,7 @@ def test_stop_mid_session_step_aborts_it_and_leaves_the_job_paused_and_clean(
     threading.Timer(3.0, flag.set).start()
 
     def make(should_stop):
-        return Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=120, poll=0.05, sleep=time.sleep),
+        return Scheduler(store, client, agent=desktop.agent(timeout=120, poll=0.05, sleep=time.sleep),
                          budgets=Budgets(), config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
                          sleep=fake.clock.sleep, now=fake.clock.utcnow, should_stop=should_stop)
 

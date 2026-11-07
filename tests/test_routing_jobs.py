@@ -46,55 +46,54 @@ def plans(used, verify_outputs, refuse=()):
     return {"tests": [("write", write), ("verify", verify)]}
 
 
-def run(store, make_gate, job_plans, route=None):
-    return Scheduler(store, make_gate(probe=False), None, plans=job_plans, agent=Worker(), isolate=False,
-                     ignore_gate=True, route=route).run()
+def run(store, job_plans, route=None):
+    return Scheduler(store, None, plans=job_plans, agent=Worker(), isolate=False, route=route).run()
 
 
-def test_the_chosen_model_is_stored_and_used_for_the_whole_job(store, make_gate, job_repo):
+def test_the_chosen_model_is_stored_and_used_for_the_whole_job(store, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     used = []
     route = lambda j: Choice(QWEN, DEEPSEEK, "saves about 2m 05s of waiting over DeepSeek V4.1 Flash")
-    run(store, make_gate, plans(used, ["Kept 3 passing test(s), dropped 0."]), route)
+    run(store, plans(used, ["Kept 3 passing test(s), dropped 0."]), route)
     job = store.get_job(job.id)
     assert used == [QWEN] and job.status == "done"
     assert (job.model, job.preferred_model, job.fallback) == (QWEN, DEEPSEEK, 0)
     assert "saves about" in job.route_reason
 
 
-def test_a_routed_job_whose_check_keeps_nothing_reruns_once_on_the_preferred_model(store, make_gate, job_repo):
+def test_a_routed_job_whose_check_keeps_nothing_reruns_once_on_the_preferred_model(store, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     used = []
     route = lambda j: Choice(QWEN, DEEPSEEK, "faster")
-    run(store, make_gate, plans(used, ["Kept 0 passing test(s), dropped 2.", "Kept 2 passing test(s), dropped 0."]),
+    run(store, plans(used, ["Kept 0 passing test(s), dropped 2.", "Kept 2 passing test(s), dropped 0."]),
         route)
     job = store.get_job(job.id)
     assert used == [QWEN, DEEPSEEK] and job.status == "done"
     assert job.model == DEEPSEEK and job.fallback == 1 and "fell back from Qwen 3.8 27B" in job.route_reason
 
 
-def test_a_job_on_its_preferred_model_never_falls_back(store, make_gate, job_repo):
+def test_a_job_on_its_preferred_model_never_falls_back(store, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     used = []
     route = lambda j: Choice(DEEPSEEK, DEEPSEEK, "not switch-safe")
-    run(store, make_gate, plans(used, ["No test files were generated; nothing to keep."]), route)
+    run(store, plans(used, ["No test files were generated; nothing to keep."]), route)
     assert used == [DEEPSEEK] and store.get_job(job.id).status == "done"
 
 
-def test_a_model_the_plan_refuses_is_swapped_for_the_one_it_includes(store, make_gate, job_repo):
+def test_a_model_the_plan_refuses_is_swapped_for_the_one_it_includes(store, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     used = []
-    run(store, make_gate, plans(used, ["Kept 1 passing test(s), dropped 0."], refuse={DEEPSEEK}))
+    run(store, plans(used, ["Kept 1 passing test(s), dropped 0."], refuse={DEEPSEEK}))
     job = store.get_job(job.id)
     assert used == [DEEPSEEK, QWEN] and job.status == "done" and job.model == QWEN
     assert "plan doesn't include DeepSeek V4.1 Flash" in job.route_reason
     assert router.State.load(store.path.parent.parent / "repo" / ".gtu").unavailable == [DEEPSEEK]
 
 
-def test_a_refusal_of_the_only_allowed_model_still_fails_the_job(store, make_gate, job_repo):
+def test_a_refusal_of_the_only_allowed_model_still_fails_the_job(store, job_repo):
     job = store.add_job("tests", "a.py", job_repo)
     used = []
-    run(store, make_gate, plans(used, [], refuse={DEEPSEEK, QWEN}), route=lambda j: Choice(QWEN, QWEN, "only one"))
+    run(store, plans(used, [], refuse={DEEPSEEK, QWEN}), route=lambda j: Choice(QWEN, QWEN, "only one"))
     assert used == [QWEN] and store.get_job(job.id).status == "failed"
 
 
