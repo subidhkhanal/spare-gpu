@@ -76,7 +76,7 @@ def test_the_config_file_splits_models_and_hides_helpers_and_pack_tools(pack_dir
     doc = pack.config(pack.select(None), models())
     assert doc["small_model"] == STANDARD and doc["agent"] == {"title": {"model": STANDARD}, "explore": {"model": STANDARD}}
     assert doc["permission"]["task"] == {"research-scout": "deny"}
-    for tool in ("scholar_search", "verify_refs", "security_filter", "pack_cost"):
+    for tool in ("scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"):
         assert doc["permission"][f"spare-gpu_{tool}"] == "deny"
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}
     assert doc["permission"]["exa_*"] == "deny"  # Exa's tools only for the scout, which allows exa_* itself
@@ -167,7 +167,7 @@ def test_integrate_pack_installs_everything_and_says_what_it_did(config_dir, pac
     assert result.exit_code == 0, out
     assert "Pack models: heavy DeepSeek V4.1 Flash (bharatcode/deepseek-v4.1-flash), standard Qwen 3.8 27B" in out
     assert f"Wrote the pack's settings in {config_dir / 'config.json'}: titles and explore on Qwen 3.8 27B; " in out
-    assert "1 helper agent(s) hidden" in out and "4 pack-only tool(s) hidden" in out and "MCP: exa" in out
+    assert "1 helper agent(s) hidden" in out and "5 pack-only tool(s) hidden" in out and "MCP: exa" in out
     assert "Added /deep-research" in out and "Added the research-lead agent" in out and "Added the research-scout agent" in out
     assert "To undo the pack: gtu integrate --pack --uninstall" in out
     lead = (config_dir / "agent" / "research-lead.md").read_text(encoding="utf-8")

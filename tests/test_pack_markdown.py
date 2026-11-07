@@ -82,7 +82,8 @@ def test_research_agents_write_only_their_own_files_and_use_only_their_own_tools
     assert scout["permission"]["spare-gpu_scholar_search"] == "allow" and scout["permission"]["exa_*"] == "allow"
     assert scout["permission"]["webfetch"] == "allow" and "spare-gpu_verify_refs" not in scout["permission"]
     writer, writer_body = parse(files["research-writer"])
-    assert all(p.endswith("report.md") for p in edit_patterns(writer)) and "webfetch" not in writer["permission"]
+    assert all(p.endswith("sections/*") for p in edit_patterns(writer)) and "webfetch" not in writer["permission"]
+    assert "glob" not in writer["permission"] and "grep" not in writer["permission"]  # reads the files it's given; no searching
     checker, checker_body = parse(files["research-checker"])
     assert all(p.endswith("review.md") for p in edit_patterns(checker))
     assert checker["permission"]["spare-gpu_verify_refs"] == "allow" and "spare-gpu_scholar_search" not in checker["permission"]
@@ -213,13 +214,18 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())
     for step in ("plan.md", "all in the same message", "outline.md", "sources.json", "one section", "verify_refs",
-                 "DROP", "spare_waits", "queue time saved", "Never claim a number you didn't measure", "two rounds"):
+                 "DROP", "spare_waits", "queue time saved", "Never claim a number you didn't measure", "two rounds",
+                 "build_report", "No polishing beyond the review"):
         assert step in body, step
+    assert body.count("all in the same message") == 2  # scouts and writers both run at once
+    quick = body.split("| quick")[1]  # the depth table's quick row onwards
+    assert [c.strip() for c in quick.split("|")[1:6]] == ["3", "1", "3 searches, 6 sources, 600 words", "250 words", "1"]
 
 
 def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else():
     doc = pack.config(pack.select("research"), FILLED)
     assert doc["permission"]["task"] == {"research-scout": "deny", "research-writer": "deny", "research-checker": "deny",
                                          "research-checker-standard": "deny"}
-    assert doc["permission"]["spare-gpu_scholar_search"] == doc["permission"]["spare-gpu_verify_refs"] == "deny"
+    assert (doc["permission"]["spare-gpu_scholar_search"] == doc["permission"]["spare-gpu_verify_refs"]
+            == doc["permission"]["spare-gpu_build_report"] == "deny")
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}

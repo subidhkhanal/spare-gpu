@@ -21,7 +21,7 @@ def test_the_installed_pack_adds_nothing_to_a_normal_request_by_construction():
     doc = pack.config(pack.select(None), MODELS)
     assert pack.pack_added_tokens(doc) == 0
     tools = {t for c in pack.COMPONENTS.values() for t in c.tools}
-    assert len(tools) == 4 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
+    assert len(tools) == 5 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
     assert set(doc["permission"]["task"]) == set(pack.helpers(pack.COMPONENTS.values()))
     assert doc["mcp"] and all(doc["permission"][f"{server}_*"] == "deny" for server in doc["mcp"])  # e.g. Exa's search
 

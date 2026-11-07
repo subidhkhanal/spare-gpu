@@ -127,3 +127,28 @@ def test_a_bare_list_is_accepted_and_junk_is_refused(tmp_path):
 def test_verdict_dicts_are_json_friendly():
     v = Verdict("k", True, "r")
     assert refs.to_dicts([v])[0]["ok"] is True and json.dumps(refs.to_dicts([v]))
+
+
+def test_the_report_is_built_from_its_sections_in_number_order_with_references_from_sources(tmp_path):
+    sections = tmp_path / "sections"
+    sections.mkdir()
+    (sections / "10-open-questions.md").write_text("## Open questions\n\nStill open [b2020; a2019].\n", encoding="utf-8")
+    (sections / "02-background.md").write_text("## Background\n\nIt began [a2019]. See [the docs](https://x.org) "
+                                               "and [ghost].\n", encoding="utf-8")
+    (tmp_path / "sources.json").write_text(json.dumps({"sources": [
+        {"key": "b2020", "title": "Second", "authors": ["B Bee"], "year": 2020, "doi": "10.1/b"},
+        {"key": "a2019", "title": "First", "authors": ["A Ay", "C Cee"], "year": 2019, "url": "https://a.org"},
+    ]}), encoding="utf-8")
+    report, summary = refs.build_report(tmp_path, "PSO")
+    text = report.read_text(encoding="utf-8")
+    assert text.index("## Background") < text.index("## Open questions")  # 02 before 10, not by string order
+    assert text.endswith("## References\n\n- [a2019] A Ay, C Cee (2019). *First*. URL https://a.org\n"
+                         "- [b2020] B Bee (2020). *Second*. DOI 10.1/b\n")
+    assert "Cited but not in sources.json: ghost" in summary and "the docs" not in summary  # a link isn't a citation
+    data = json.loads((tmp_path / "sources.json").read_text(encoding="utf-8"))
+    data["sources"][1]["verified"] = False  # verify_refs dropped a2019
+    (tmp_path / "sources.json").write_text(json.dumps(data), encoding="utf-8")
+    report, summary = refs.build_report(tmp_path, "PSO")
+    assert "[a2019] A Ay" not in report.read_text(encoding="utf-8") and "left out of References: a2019" in summary
+    with pytest.raises(FileNotFoundError):
+        refs.build_report(tmp_path / "empty")

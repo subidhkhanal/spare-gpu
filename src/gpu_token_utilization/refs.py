@@ -206,5 +206,72 @@ def describe(verdicts: list[Verdict], path: Path) -> str:
     return "\n".join(lines)
 
 
+# --- the report, put together from its section files ------------------------------------------------
+
+SECTIONS_DIR = "sections"
+REPORT_FILE = "report.md"
+# [key], [a, b] or [a; b]; not a Markdown link's text ([text](url)).
+_CITATION = re.compile(r"\[([A-Za-z][\w.:-]*(?:\s*[,;]\s*[A-Za-z][\w.:-]*)*)\](?!\()")
+
+
+def cited_keys(text: str) -> list[str]:
+    """The source keys a text cites, in order of first citation."""
+    keys: list[str] = []
+    for match in _CITATION.finditer(text):
+        for key in re.split(r"\s*[,;]\s*", match.group(1)):
+            if key not in keys:
+                keys.append(key)
+    return keys
+
+
+def _section_order(path: Path):
+    number = re.match(r"\d+", path.name)
+    return (int(number.group()) if number else 10**9, path.name)
+
+
+def _reference_line(item: dict) -> str:
+    authors = item.get("authors")
+    if isinstance(authors, list):
+        authors = ", ".join(str(a) for a in authors)
+    head = " ".join(p for p in (str(authors or "").strip(), f"({item['year']})." if item.get("year") else "") if p)
+    ids = "; ".join(f"{label} {item[name]}" for name, label in (("doi", "DOI"), ("arxiv", "arXiv"),
+                                                              ("openalex", "OpenAlex"), ("url", "URL")) if item.get(name))
+    parts = [f"[{item['key']}]", head, f"*{item.get('title') or 'untitled'}*." if item.get("title") else "", ids]
+    return "- " + " ".join(p for p in parts if p)
+
+
+def build_report(folder: Path, title: str = "") -> tuple[Path, str]:
+    """Join <folder>/sections/*.md (in number order) into <folder>/report.md under `title`, then add
+    the References section from sources.json: every cited key, in key order, except those
+    verify_refs marked to drop. Returns the report and a summary that names what is missing:
+    cited keys sources.json lacks or dropped, so their sentences can be fixed in the sections."""
+    folder = Path(folder)
+    sections = sorted((folder / SECTIONS_DIR).glob("*.md"), key=_section_order)
+    if not sections:
+        raise FileNotFoundError(folder / SECTIONS_DIR)
+    body = "\n\n".join(s.read_text(encoding="utf-8-sig").strip() for s in sections)
+    try:
+        items = {str(i.get("key")): i for i in load_sources(folder / SOURCES_FILE)}
+    except FileNotFoundError:
+        items = {}
+    cited = cited_keys(body)
+    unknown = [k for k in cited if k not in items]
+    dropped = [k for k in cited if k in items and items[k].get("verified") is False]
+    listed = sorted((k for k in cited if k in items and k not in dropped), key=str.lower)
+    lines = [f"# {title.strip() or 'Research report'}", "", body, "", "## References", ""]
+    lines += [_reference_line(items[k]) for k in listed] or ["(none cited)"]
+    report = folder / REPORT_FILE
+    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    summary = [f"Wrote {report} from {len(sections)} section file(s): {', '.join(s.name for s in sections)}; "
+               f"{len(listed)} reference(s) listed."]
+    if dropped:
+        summary.append(f"Cited but marked DROP by verify_refs, left out of References: {', '.join(dropped)}. "
+                       "Remove the sentences that rest on them from the section files, then build again.")
+    if unknown:
+        summary.append(f"Cited but not in {SOURCES_FILE}: {', '.join(unknown)}. Fix those citations in the "
+                       "section files, then build again.")
+    return report, "\n".join(summary)
+
+
 def to_dicts(verdicts: list[Verdict]) -> list[dict]:
     return [asdict(v) if v.found is None else v.to_dict() for v in verdicts]

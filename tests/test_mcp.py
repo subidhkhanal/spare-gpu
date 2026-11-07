@@ -22,7 +22,7 @@ from gpu_token_utilization.store import RequestLog, Store
 from conftest import STATS
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
 KEY = "bc_live_test_key_not_real"
 
@@ -343,6 +343,15 @@ def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
     assert json.loads((folder / "sources.json").read_text(encoding="utf-8"))["sources"][1]["verified"] is False
     assert tools.verify_refs("research/nothing").startswith("No sources.json in ")
     assert "outside this project" in tools.verify_refs("../elsewhere")
+    (folder / "sections").mkdir()
+    (folder / "sections" / "01-intro.md").write_text("## Intro\n\nDeep nets learn [lecun2015]; so it says [fake].\n",
+                                                    encoding="utf-8")
+    text = tools.build_report("research/transformers", "Transformers")
+    assert "1 reference(s) listed" in text and "marked DROP by verify_refs, left out of References: fake" in text
+    report = (folder / "report.md").read_text(encoding="utf-8")
+    assert report.startswith("# Transformers\n\n## Intro") and "- [lecun2015] Yann LeCun" in report and "[fake] " not in report
+    assert tools.build_report("research/nothing").startswith("No section files in ")
+    assert "outside this project" in tools.build_report("../elsewhere")
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):

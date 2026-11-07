@@ -27,7 +27,7 @@ research/<slug>/review.md.
 2. Read report.md and the notes. For every cited claim, find the quote in the notes that supports
    it. Mark a claim when the cited note has no such quote; when the quote says something weaker
    or different; when the citation is a DROP reference; or when the claim has no citation at all.
-3. Write review.md: a "References" section copying verify_refs's verdict list; a "Claims" section
+3. Write review.md in one go, once you have checked every claim: a "References" section copying verify_refs's verdict list; a "Claims" section
    with one line per marked claim (the sentence, its section, the problem, and what to do: remove,
    reword, or re-cite to a key that does support it); and one verdict line: how many claims were
    checked and how many marked.

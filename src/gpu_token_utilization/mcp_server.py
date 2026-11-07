@@ -375,6 +375,21 @@ class SpareTools:
             return f"Couldn't read {refs.SOURCES_FILE}: {exc}."
         return refs.describe(verdicts, file)
 
+    def build_report(self, folder: str, title: str = "") -> str:
+        root = self._root()
+        path = Path(folder.strip() or ".")
+        path = (path if path.is_absolute() else root / path).resolve()
+        if root not in path.parents and path != root:
+            return f"Didn't build it: {folder} is outside this project ({root})."
+        try:
+            _, summary = refs.build_report(path, title)
+        except FileNotFoundError:
+            return (f"No section files in {path / refs.SECTIONS_DIR}. Each writer saves its section there as "
+                    "<number>-<name>.md first.")
+        except (OSError, ValueError) as exc:
+            return f"Couldn't build the report: {exc}."
+        return summary
+
     def security_filter(self, findings: str) -> str:
         try:
             candidates = security.parse(findings)
@@ -482,6 +497,20 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
                     the project, or the file itself.
             """
             return tools.verify_refs(folder)
+
+        @server.tool(annotations=notes(False))
+        def build_report(folder: str, title: str = "") -> str:
+            """Put /deep-research's report together: joins <folder>/sections/*.md in number order into
+            <folder>/report.md under the title, then writes its References section from sources.json
+            (every cited key, leaving out what verify_refs marked DROP). Overwrites report.md, so
+            edits go into the section files and the report is built again. Names any cited key that
+            sources.json lacks or dropped.
+
+            Args:
+                folder: The research folder (e.g. research/transformers), relative to the project.
+                title: The report's title line.
+            """
+            return tools.build_report(folder, title)
 
         @server.tool(annotations=notes(True))
         def security_filter(findings: str) -> str:
