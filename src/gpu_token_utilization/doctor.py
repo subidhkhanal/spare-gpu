@@ -30,9 +30,10 @@ from .api import ApiKeyMissing, env_without_key, find_api_key
 from .jobs import JobConfig
 from .pack import check
 from .pack.check import FAIL, PASS, WARN, Finding
-from .store import FINAL_STATUSES, Store
+from .store import DB_ENV, DEFAULT_DB, FINAL_STATUSES, Store
 
 PROMPT = "Reply with the single word OK."
+MODEL = agent_cli.DEFAULT_MODEL  # the tiny request is pinned to one model: tokens differ per tokenizer
 BUDGET = 1_500  # tokens the pack may add to a normal session's step (plan §7)
 SPARE_TOOLS = ("spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask")
 RESEARCH = Path(__file__).resolve().parents[2] / "research"
@@ -100,7 +101,13 @@ def _registered_command(folder: Path) -> tuple[list[str] | None, Finding]:
     except ValueError as exc:
         return None, Finding(FAIL, f"BharatCode's config file {user} doesn't parse ({exc}); Desktop ignores a broken file. "
                                    f"Fix it by hand (a backup may be next to it as {user.name}{bc_config.BACKUP_SUFFIX})")
-    entry = (doc.get("mcp") or {}).get(bc_config.SERVER_NAME) or {}
+    mcp = doc.get("mcp")
+    if mcp is not None and not isinstance(mcp, dict):
+        return None, Finding(FAIL, f'"mcp" in {user.name} isn\'t an object, so Desktop ignores every MCP server; fix it by hand')
+    entry = (mcp or {}).get(bc_config.SERVER_NAME)
+    if entry is not None and not isinstance(entry, dict):
+        return None, Finding(FAIL, f"spare-gpu's MCP entry in {user.name} isn't an object; run `gtu integrate`")
+    entry = entry or {}
     command = entry.get("command") if isinstance(entry.get("command"), list) else None
     if not command:
         return None, Finding(FAIL, f"spare-gpu isn't registered as an MCP server in {user.name}; run `gtu integrate`")
@@ -200,10 +207,15 @@ def check_project(report: Report, cwd: Path) -> Path:
         kind = ("plain folder (a copy is made for each job; no git history needed)" if shutil.which("git")
                 else "folder; without git, whether it's a repo can't be told")
     report.add(PASS, f"project: {root} ({kind})")
-    folder = root / ".gtu"
-    db = folder / "gtu.db"
+    # The same store `gtu list`, `gtu start` and `gtu stop` open from this folder (GTU_DB, else
+    # ./.gtu/gtu.db); jobs handed over from a Desktop chat live at the repo root's .gtu.
+    db = Path(os.environ.get(DB_ENV) or DEFAULT_DB).resolve()
+    if not db.is_file() and (root / ".gtu" / "gtu.db").is_file():
+        db = root / ".gtu" / "gtu.db"
+        report.add(WARN, f"jobs live in {db.parent}, not under this folder; run the gtu commands from {root}")
+    folder = db.parent
     if not db.is_file():
-        report.add(PASS, "no jobs have run here yet (no .gtu folder)")
+        report.add(PASS, f"no jobs have run here yet (no {folder})")
         return root
     try:
         with Store(db) as store:
@@ -307,7 +319,11 @@ def live_config(report: Report, folder: Path, command: list[str], scratch: Path)
     if not pack_installed(folder):
         return
     report.filled[("pack-install", 1)] = f"PASS (gtu doctor --live {date.today()}): the CLI loaded the config with the pack's file and no error"
-    helpers, tools, doc = expected_pack(folder)
+    try:
+        helpers, tools, doc = expected_pack(folder)
+    except ValueError as exc:
+        report.add(FAIL, f"live: the pack's settings file doesn't parse ({exc}); run `gtu integrate --pack`")
+        return
     permission = merged.get("permission") or {}
     task = permission.get("task") if isinstance(permission.get("task"), dict) else {}
     loose_helpers = [h for h in helpers if task.get(h) != "deny"]
@@ -324,18 +340,24 @@ def live_config(report: Report, folder: Path, command: list[str], scratch: Path)
     if doc.get("small_model") and merged.get("small_model") != doc.get("small_model"):
         report.add(WARN, f"live: small_model is {merged.get('small_model')} in the merged config, not the pack's "
                          f"{doc.get('small_model')}; something later in the load order overrides it")
-    user_doc = {}
+    user_file = bc_config.config_file(folder)
     try:
-        user_doc = bc_config.parse_jsonc(bc_config.config_file(folder).read_text(encoding="utf-8-sig"))
+        user_doc = bc_config.parse_jsonc(user_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
-        pass
-    leaked = [k for k in ("small_model", "agent") if k in user_doc] + \
-             [f"permission.{k}" for k in (user_doc.get("permission") or {}) if k == "task" or k.startswith(f"{pack.SERVER}_")]
+        return  # the static check already named the missing or broken file; row 2 stays undecided
+    leaked = []
+    for keys, value in bc_config._leaves(doc):  # the pack's own settings, leaf by leaf
+        current = user_doc
+        for key in keys:
+            current = current.get(key) if isinstance(current, dict) else None
+        if current is not None and current == value and keys != ("mcp", bc_config.SERVER_NAME):
+            leaked.append(".".join(keys))
     if leaked:
-        report.add(WARN, f"live: your own config file carries pack settings ({', '.join(leaked)}); the pack keeps its own file")
-        report.filled[("pack-install", 2)] = f"FAIL (gtu doctor {date.today()}): opencode.jsonc holds {', '.join(leaked)}"
+        report.add(WARN, f"live: your own config file {user_file.name} carries the pack's settings ({', '.join(leaked)}); "
+                         "the pack keeps its own file, so these can go")
+        report.filled[("pack-install", 2)] = f"FAIL (gtu doctor {date.today()}): {user_file.name} holds the pack's {', '.join(leaked)}"
     else:
-        report.filled[("pack-install", 2)] = f"PASS (gtu doctor {date.today()}): your own file holds none of the pack's keys"
+        report.filled[("pack-install", 2)] = f"PASS (gtu doctor {date.today()}): {user_file.name} holds none of the pack's settings"
 
 
 def live_agent(report: Report, folder: Path, command: list[str], scratch: Path) -> None:
@@ -355,12 +377,18 @@ def live_agent(report: Report, folder: Path, command: list[str], scratch: Path) 
                          "connected (`bharatcode mcp list` shows why)")
     if not pack_installed(folder):
         return
-    _, pack_tools, _ = expected_pack(folder)
+    try:
+        _, pack_tools, _ = expected_pack(folder)
+    except ValueError:
+        return  # reported by live_config
     visible = [t for t in pack_tools if tools.get(t)]
     if visible:
         report.add(FAIL, f"live: a plain chat can see the pack-only tools {', '.join(visible)}; they cost tokens on every "
                          "step. Run `gtu integrate --pack`")
         report.filled[("pack-install", 7)] = f"FAIL (gtu doctor --live {date.today()}): visible: {', '.join(visible)}"
+    elif not seen:
+        report.add(WARN, "live: the tool list shows none of spare-gpu's tools, so it can't show whether the pack's are "
+                         "hidden; fix the MCP connection and run the doctor again")
     else:
         report.add(PASS, f"live: none of the pack's {len(pack_tools)} tools is in a plain chat's tool list")
         report.filled[("pack-install", 7)] = (f"PASS (gtu doctor --live {date.today()}): `debug agent build` lists none of "
@@ -395,45 +423,59 @@ def live_run(report: Report, folder: Path, command: list[str], scratch: Path, re
              version: str | None) -> None:
     """One tiny real request: proves a session runs end to end and measures its per-step context."""
     try:
-        proc = _cli(command, ["run", "--dir", str(scratch), "--format", "json", PROMPT], scratch)
+        proc = _cli(command, ["run", "--dir", str(scratch), "-m", MODEL, "--format", "json", PROMPT], scratch)
     except subprocess.TimeoutExpired:
         report.add(FAIL, "live: the tiny request didn't finish within 5 minutes; BharatCode may be down or queued")
         return
     tokens, reply = context_tokens(proc.stdout)
-    if tokens is None:
-        report.add(FAIL, "live: the tiny request produced no step (exit code {}): {}".format(
+    if not tokens:
+        report.add(FAIL, "live: the tiny request produced no step or reported no token usage (exit code {}): {}".format(
             proc.returncode, (proc.stderr.strip().splitlines() or proc.stdout.strip().splitlines() or ["no output"])[-1]))
         return
     with_pack = pack_installed(folder)
-    report.add(PASS, f"live: a one-step request ran end to end (reply {reply[:20]!r}); context sent before your words: "
-                     f"{tokens:,} tokens, {'with' if with_pack else 'without'} the pack")
+    state = "with" if with_pack else "without"
+    report.add(PASS, f"live: a one-step request ran end to end on {waits.name(MODEL)} (reply {reply[:20]!r}); context sent "
+                     f"before your words: {tokens:,} tokens, {state} the pack")
     if research is None:
         report.add(WARN, "live: this isn't a checkout, so the measurement isn't recorded (research/ is missing)")
         return
     runs = research / "pack-install" / "overhead-runs.jsonl"
     entry = {"date": date.today().isoformat(), "variant": "empty-mcp", "pack_installed": with_pack,
-             "context_tokens": tokens, "cli_version": version}
-    with open(runs, "a", encoding="utf-8") as fh:
+             "context_tokens": tokens, "model": MODEL, "cli_version": version}
+    with open(runs, "a", encoding="utf-8", newline="") as fh:
         fh.write(json.dumps(entry) + "\n")
-    recorded = [json.loads(l) for l in runs.read_text(encoding="utf-8").splitlines() if l.strip()]
-    latest = {}
-    for r in recorded:
-        latest[bool(r.get("pack_installed"))] = r
+    latest: dict[bool, dict] = {}
+    for n, line in enumerate(runs.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            report.add(WARN, f"live: {runs.name} line {n} isn't JSON and was skipped")
+            continue
+        # Only runs on the same model and CLI version are comparable: tokenizers and system prompts differ.
+        if isinstance(r, dict) and isinstance(r.get("context_tokens"), int) and r.get("model") == MODEL \
+                and r.get("cli_version") == version:
+            latest[bool(r.get("pack_installed"))] = r
     if True in latest and False in latest:
         a, b = latest[False]["context_tokens"], latest[True]["context_tokens"]
-        result = {"date": date.today().isoformat(), "variant": "empty-mcp", "without_pack": a, "with_pack": b,
-                  "added": b - a, "budget": BUDGET, "within_budget": b - a <= BUDGET}
-        (research / "pack-install" / "overhead.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        result = {"date": date.today().isoformat(), "variant": "empty-mcp", "model": MODEL, "cli_version": version,
+                  "without_pack": a, "with_pack": b, "added": b - a, "budget": BUDGET, "within_budget": b - a <= BUDGET,
+                  "measured": {"without_pack": latest[False]["date"], "with_pack": latest[True]["date"]}}
+        (research / "pack-install" / "overhead.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8",
+                                                                  newline="\n")
         status = PASS if result["within_budget"] else FAIL
-        report.add(status, f"live: the pack adds {b - a:,} tokens per step ({a:,} without, {b:,} with; budget {BUDGET:,}); "
+        report.add(status, f"live: the pack adds {b - a:,} tokens per step on {waits.name(MODEL)} ({a:,} without, measured "
+                           f"{latest[False]['date']}; {b:,} with, measured {latest[True]['date']}; budget {BUDGET:,}); "
                            "written to research/pack-install/overhead.json")
-        report.filled[("pack-install", 8)] = f"{status} (gtu doctor --live {date.today()}): added {b - a:,} tokens per step, budget {BUDGET:,}"
+        report.filled[("pack-install", 8)] = (f"{status} (gtu doctor --live {date.today()}): added {b - a:,} tokens per step "
+                                              f"on {waits.name(MODEL)}, budget {BUDGET:,}")
     else:
         other = "uninstalled (`gtu integrate --pack --uninstall`)" if with_pack else "installed (`gtu integrate --pack`)"
-        report.add(WARN, f"live: measured {tokens:,} tokens {'with' if with_pack else 'without'} the pack; run "
-                         f"`gtu doctor --live` once more with the pack {other} to measure the difference")
+        report.add(WARN, f"live: measured {tokens:,} tokens {state} the pack; run `gtu doctor --live` once more with the "
+                         f"pack {other}, on the same BharatCode CLI version, to measure the difference")
         report.filled[("pack-install", 8)] = (f"PARTIAL (gtu doctor --live {date.today()}): {tokens:,} tokens per step "
-                                              f"{'with' if with_pack else 'without'} the pack; the other state is still to measure")
+                                              f"{state} the pack on {waits.name(MODEL)}; the other state is still to measure")
 
 
 def live_copy(report: Report) -> None:
@@ -471,8 +513,8 @@ def live(report: Report, folder: Path, status: agent_cli.CliStatus, research: Pa
                 report.add(FAIL, f"live: {step.__name__.replace('live_', 'bharatcode debug ')} failed: {exc}")
         try:
             live_run(report, folder, command, root, research, status.version)
-        except OSError as exc:
-            report.add(FAIL, f"live: the tiny request couldn't start: {exc}")
+        except (OSError, ValueError, KeyError) as exc:
+            report.add(FAIL, f"live: the tiny request or its record failed: {type(exc).__name__}: {exc}")
 
 
 # --- writing results into the manual-check tables ------------------------------------------------
@@ -487,16 +529,20 @@ def fill_manual_checks(research: Path, filled: dict[tuple[str, int], str]) -> li
         path = research / name / "manual-check.md"
         if not path.is_file():
             continue
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        with open(path, encoding="utf-8", newline="") as fh:  # keep the file's own line endings
+            lines = fh.read().splitlines(keepends=True)
         for i, line in enumerate(lines):
             m = re.match(r"^\| (\d+) \|", line)
             if not m or int(m.group(1)) not in rows:
                 continue
-            cells = line.rstrip("\n").split(" | ")
+            body = line.rstrip("\r\n")
+            ending = line[len(body):]
+            cells = body.split(" | ")
             cells[-1] = rows[int(m.group(1))].replace("|", "/") + " |"
-            lines[i] = " | ".join(cells) + "\n"
+            lines[i] = " | ".join(cells) + ending
             written.append(f"{name} {m.group(1)}")
-        path.write_text("".join(lines), encoding="utf-8")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write("".join(lines))
     return written
 
 
@@ -520,7 +566,10 @@ def run(cwd: Path, channel: str = "stable", live_mode: bool = False, write: bool
         check_server(report, command)
     root = check_project(report, Path(cwd))
     check_settings(report, root)
-    if live_mode:
+    if live_mode and channel != "stable":
+        report.add(FAIL, "live checks go through BharatCode's CLI, which reads only the stable channel's config folder; "
+                         f"run `gtu doctor --live` without --channel (the {channel} build is checked at Desktop by hand)")
+    elif live_mode:
         live(report, folder, status, research)
         if write and research is not None and report.filled:
             written = fill_manual_checks(research, report.filled)

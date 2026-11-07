@@ -71,7 +71,8 @@ def run(folder: Path, how: str = "") -> list[Finding]:
     except ValueError as exc:
         user_config = {}
         found.append(Finding(FAIL, f"it doesn't parse ({exc}); BharatCode would ignore it"))
-    entry = (user_config.get("mcp") or {}).get(bc_config.SERVER_NAME) or {}
+    mcp = user_config.get("mcp") if isinstance(user_config.get("mcp"), dict) else {}
+    entry = mcp.get(bc_config.SERVER_NAME) if isinstance(mcp.get(bc_config.SERVER_NAME), dict) else {}
     if not entry:
         found.append(Finding(FAIL, "spare-gpu's MCP server isn't registered; run `gtu integrate --pack`"))
     elif bc_config.PACK_FLAG not in (entry.get("command") or []):
