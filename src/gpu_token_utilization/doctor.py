@@ -304,9 +304,9 @@ def live_config(report: Report, folder: Path, command: list[str], scratch: Path)
         report.add(FAIL, "live: Desktop's merged config has no spare-gpu MCP entry; run `gtu integrate`")
     else:
         report.add(PASS, "live: Desktop's merged config carries spare-gpu's MCP entry")
-    report.filled[("pack-install", 1)] = f"PASS (gtu doctor --live {date.today()}): the CLI loaded the config with no error"
     if not pack_installed(folder):
         return
+    report.filled[("pack-install", 1)] = f"PASS (gtu doctor --live {date.today()}): the CLI loaded the config with the pack's file and no error"
     helpers, tools, doc = expected_pack(folder)
     permission = merged.get("permission") or {}
     task = permission.get("task") if isinstance(permission.get("task"), dict) else {}
