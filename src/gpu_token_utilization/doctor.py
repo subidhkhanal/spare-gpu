@@ -27,13 +27,14 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from . import __version__, bc_config, desktop, pack, router, runstate, waits, worktree
+from . import __version__, bc_config, desktop, pack, router, runstate, settings, waits, worktree
 from .agent import DEFAULT_MODEL
 from .api import ApiKeyMissing, find_api_key
+from .budget import Budgets
 from .jobs import JobConfig
 from .pack import check
 from .pack.check import FAIL, PASS, WARN, Finding
-from .store import DB_ENV, DEFAULT_DB, FINAL_STATUSES, Store
+from .store import FINAL_STATUSES, Store
 
 PROMPT = "Reply with the single word OK."
 MODEL = DEFAULT_MODEL  # the tiny request is pinned to one model: tokens differ per tokenizer
@@ -199,12 +200,8 @@ def check_project(report: Report, cwd: Path) -> Path:
         kind = ("plain folder (a copy is made for each job; no git history needed)" if shutil.which("git")
                 else "folder; without git, whether it's a repo can't be told")
     report.add(PASS, f"project: {root} ({kind})")
-    # The same store `gtu list`, `gtu start` and `gtu stop` open from this folder (GTU_DB, else
-    # ./.gtu/gtu.db); jobs handed over from a Desktop chat live at the repo root's .gtu.
-    db = Path(os.environ.get(DB_ENV) or DEFAULT_DB).resolve()
-    if not db.is_file() and (root / ".gtu" / "gtu.db").is_file():
-        db = root / ".gtu" / "gtu.db"
-        report.add(WARN, f"jobs live in {db.parent}, not under this folder; run the gtu commands from {root}")
+    # The same store the gtu commands and the MCP server open from here: GTU_DB, else <project>/.gtu/gtu.db.
+    db = Store.default_path(Path(cwd)).resolve()
     folder = db.parent
     if not db.is_file():
         report.add(PASS, f"no jobs have run here yet (no {folder})")
@@ -248,10 +245,16 @@ def check_project(report: Report, cwd: Path) -> Path:
 
 def check_settings(report: Report, root: Path) -> None:
     try:
-        config = JobConfig.from_env()
-        report.add(PASS, f"test command for jobs: {' '.join(config.test_command)}")
+        found = settings.load(root)
+        config, budgets = JobConfig.load(root), Budgets.load(root)
     except ValueError as exc:
         report.add(FAIL, f"job settings: {exc}")
+    else:
+        overridden = [key for key, (env, _) in settings.KEYS.items() if os.environ.get(env)]
+        where = (f"settings file {found.path}" if found.present else "defaults (no settings file; `gtu init` writes one)")
+        report.add(PASS, f"job settings from {where}: test command {' '.join(config.test_command)!r}, "
+                         f"{budgets.per_job:,} tokens per job"
+                         + (f"; overridden by the environment: {', '.join(overridden)}" if overridden else ""))
     try:
         found = find_api_key()
     except ApiKeyMissing as exc:

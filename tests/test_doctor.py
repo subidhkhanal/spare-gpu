@@ -83,7 +83,7 @@ def test_a_plain_install_passes_and_the_server_is_really_started(config_dir, pro
     for line in ("PASS: spare-gpu ", "PASS: git: git version", "PASS: BharatCode's config folder:", "PASS: spare-gpu is registered in opencode.jsonc and its command exists",
                  "PASS: the /auto command is installed", "PASS: the command pack isn't installed (optional)",
                  "PASS: spare-gpu's MCP server starts and offers 5 tools", "PASS: project:",
-                 "PASS: no jobs have run here yet", "PASS: test command for jobs:",
+                 "PASS: no jobs have run here yet", "PASS: job settings from defaults",
                  "PASS: no API key set, which is fine inside Desktop", "PASS: job types that may move to the faster model: none"):
         assert line in text, line
     assert text.splitlines()[-2] == "Result: PASS" and "Add --live" in text.splitlines()[-1]
@@ -304,13 +304,11 @@ def test_the_project_checks_look_where_the_gtu_commands_look(config_dir, project
     result = cli.invoke(app, ["doctor"])
     assert "PASS: jobs here: 1 queued" in out(result)
     monkeypatch.delenv("GTU_DB")
-    sub = project / "src"
-    monkeypatch.chdir(sub)
+    monkeypatch.chdir(project / "src")  # from a subfolder the project's own store is found, like the MCP server does
     with Store(project / ".gtu" / "gtu.db") as store:
         store.add_job("docs", "src", str(project))
     result = cli.invoke(app, ["doctor"])
-    assert f"WARN: jobs live in {project / '.gtu'}, not under this folder; run the gtu commands from {project}" in out(result)
-    assert "PASS: jobs here: 1 queued" in out(result)
+    assert "PASS: jobs here: 1 queued" in out(result) and "WARN" not in out(result).split("PASS: jobs here")[0].split("PASS: project")[1]
 
 
 def test_live_outside_desktop_says_so_and_no_write_keeps_the_tables(config_dir, project, live_desktop, research, monkeypatch):

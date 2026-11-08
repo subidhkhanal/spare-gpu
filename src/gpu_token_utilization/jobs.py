@@ -59,8 +59,31 @@ class JobConfig:
     review_max_tokens: int = 4_000
 
     @classmethod
-    def from_env(cls) -> JobConfig:
+    def load(cls, root: Path | None) -> JobConfig:
+        """Defaults, then the project's .gtu/settings.json (`root` None: no file), then the
+        GTU_* environment variables, which win. Raises ValueError (settings.SettingsError for the
+        file) when the result can't be used."""
+        from . import settings
+
         cfg = cls()
+        found = settings.load(root)
+        if found.test_command:
+            cfg.test_command = found.test_command
+        if found.get("allowed_commands") is not None:
+            cfg.allowed_commands = tuple(found.get("allowed_commands"))
+        if found.get("test_timeout") is not None:
+            cfg.test_timeout = float(found.get("test_timeout"))
+        if found.get("agent_timeout") is not None:
+            cfg.agent_timeout = float(found.get("agent_timeout"))
+        return cls._from_env(cfg)
+
+    @classmethod
+    def from_env(cls) -> JobConfig:
+        """The environment's settings alone (no settings file)."""
+        return cls.load(None)
+
+    @classmethod
+    def _from_env(cls, cfg: JobConfig) -> JobConfig:
         if os.environ.get("GTU_TEST_COMMAND"):
             cfg.test_command = tuple(shlex.split(os.environ["GTU_TEST_COMMAND"]))
         if os.environ.get("GTU_ALLOWED_COMMANDS"):

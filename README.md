@@ -25,6 +25,7 @@ You need Windows and BharatCode Desktop, installed and signed in.
    irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
    ```
 2. Fully close BharatCode Desktop (also from the taskbar tray) and open it again.
+3. In each project you use it in, run `gtu init` once. It finds how your tests run and saves that (see [Settings](#settings)).
 
 That's it. No API key is needed. The installer adds Python and git if they're missing, installs spare-gpu in `%LOCALAPPDATA%\spare-gpu`, and connects it to Desktop. Run the same line again to update.
 
@@ -137,6 +138,22 @@ Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's 
 - It never pushes and never commits to your project.
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, and your other MCP servers are switched off inside a job.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
+
+## Settings
+
+`gtu init` saves your project's settings in `.gtu/settings.json`. It looks at `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` to find how your tests run. Commit this file; the rest of `.gtu` stays out of git. Without it, spare-gpu assumes `python -m pytest`.
+
+| Setting | What it sets | Override for one run |
+|---|---|---|
+| `test_command` | How your tests run. Tests and fixes are kept only if this passes. | `GTU_TEST_COMMAND` |
+| `allowed_commands` | Commands a job may run (must include the test command) | `GTU_ALLOWED_COMMANDS` |
+| `test_timeout` | Seconds one test run may take | `GTU_TEST_TIMEOUT` |
+| `agent_timeout` | Seconds one job's Desktop session may take | `GTU_AGENT_TIMEOUT` |
+| `job_token_budget` | Tokens one job may use before it pauses | `GTU_JOB_TOKEN_BUDGET` |
+| `preferred_model` | The model jobs start from | `GTU_PREFERRED_MODEL` |
+| `switch_safe` | Extra job types allowed to move to the faster model | `GTU_SWITCH_SAFE` |
+
+`gtu doctor` shows which settings are in use and where each one came from.
 
 ## Good to know
 

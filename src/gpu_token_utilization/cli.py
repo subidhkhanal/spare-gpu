@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -18,7 +19,7 @@ from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
-from . import actions, bc_config, dryrun, pack, router, runstate, waits, workers, worktree
+from . import actions, bc_config, dryrun, pack, router, runstate, settings, waits, workers, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -569,13 +570,14 @@ def start(
     def log(message: str) -> None:
         typer.echo(f"[{datetime.now():%H:%M:%S}] {message}")
 
+    root = settings.project_root(Path.cwd())
+    try:
+        job_config, budgets = JobConfig.load(root), Budgets.load(root)
+    except ValueError as exc:
+        _fail(str(exc))
     if dry_run:
-        try:
-            job_config = JobConfig.from_env()
-        except ValueError as exc:
-            _fail(str(exc))
         with Store.open_default() as store:
-            typer.echo(dryrun.describe(store, Budgets.from_env(), job_config, datetime.now(timezone.utc)))
+            typer.echo(dryrun.describe(store, budgets, job_config, datetime.now(timezone.utc)))
         return
 
     with Store.open_default() as store:
@@ -583,10 +585,6 @@ def start(
         other = runstate.running_pid(folder)
         if other:
             _fail(f"`gtu start` is already running (process {other}). Use `gtu stop` to stop it first.")
-        try:
-            job_config = JobConfig.from_env()
-        except ValueError as exc:
-            _fail(str(exc))
         try:
             worker = workers.build(store, log, job_config)
         except ApiKeyMissing as exc:
@@ -596,14 +594,14 @@ def start(
         runstate.write_run(folder)
         def route(job):
             # A job delegated from a chat already has its model; a queued one is routed here, just
-            # before it starts, from the worker's own model (or GTU_PREFERRED_MODEL).
-            preferred = job.preferred_model or router.preferred_model(agent.model)
+            # before it starts, from the worker's own model (or the settings file / GTU_PREFERRED_MODEL).
+            preferred = job.preferred_model or router.preferred_model(agent.model, folder)
             return router.decide(store, folder, job.kind, preferred, lambda: httpx.Client(timeout=10.0))
 
         try:
             scheduler = Scheduler(
                 store, client, agent=agent,
-                budgets=Budgets.from_env(), config=job_config, log=log,
+                budgets=budgets, config=job_config, log=log,
                 should_stop=lambda: runstate.stop_requested(folder), desktop_missing=desktop_missing, route=route,
             )
             steps = scheduler.run(max_steps=max_steps)
@@ -683,6 +681,30 @@ def mcp(
     from .mcp_server import serve
 
     serve(folder or Path.cwd(), pack=with_pack)
+
+
+@app.command()
+def init(
+    force: bool = typer.Option(False, "--force", help="Rewrite an existing settings file from what is detected now."),
+) -> None:
+    """Write this project's settings file, .gtu/settings.json: the test command (detected from
+    pyproject.toml, package.json, go.mod, Cargo.toml or a Makefile), the commands a job may run,
+    the timeouts, the token budget per job, the preferred model and the switch-safe job kinds.
+    Every job reads it; a GTU_* environment variable still overrides its key for one run."""
+    root = settings.project_root(Path.cwd())
+    try:
+        path, outcome, values, why = settings.init(root, force=force)
+    except (settings.SettingsError, OSError) as exc:
+        _fail(str(exc))
+    if outcome == "kept":
+        typer.echo(f"{path} already exists; left as it is (--force rewrites it). It holds:")
+    else:
+        typer.echo(f"{'Wrote' if outcome == 'written' else 'Rewrote'} {path} for {root}:")
+    for key, value in values.items():
+        typer.echo(f"  {key}: {json.dumps(value) if not isinstance(value, str) else value}")
+    if outcome != "kept":
+        typer.echo(f"Test command: {why}. Edit the file to change anything; `gtu doctor` checks it. "
+                   "The file is meant to be committed (the rest of .gtu is ignored by git).")
 
 
 @app.command()

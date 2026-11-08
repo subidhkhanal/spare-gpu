@@ -81,6 +81,14 @@ def repo_root(path: Path) -> Path:
     return Path(proc.stdout.strip()) if proc.returncode == 0 and proc.stdout.strip() else path
 
 
+def project_root(path: Path) -> Path:
+    """repo_root, but never raises: a folder outside any repo (or without git) is its own project."""
+    try:
+        return repo_root(path).resolve()
+    except GitError:
+        return Path(path).resolve()
+
+
 def ensure_clean(repo: Path) -> None:
     """Check the project can be worked on. Any folder can: uncommitted changes are fine, since
     each job copies the files as they are."""

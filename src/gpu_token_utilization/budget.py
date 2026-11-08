@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import timedelta, timezone
+from pathlib import Path
 
 from .store import Store
 
@@ -24,11 +25,21 @@ class Budgets:
     per_job: int = 200_000
 
     @classmethod
-    def from_env(cls) -> Budgets:
+    def load(cls, root: Path | None) -> Budgets:
+        """The default, then the project's settings file (`root` None: no file), then GTU_JOB_TOKEN_BUDGET."""
+        from . import settings
+
         b = cls()
+        budget = settings.load(root).get("job_token_budget")
+        if budget is not None:
+            b.per_job = int(budget)
         if os.environ.get(BUDGET_ENV):
             b.per_job = int(os.environ[BUDGET_ENV])
         return b
+
+    @classmethod
+    def from_env(cls) -> Budgets:
+        return cls.load(None)
 
     def used(self, store: Store, job_id: str) -> int:
         """Tokens this job has used so far, across every step and attempt."""

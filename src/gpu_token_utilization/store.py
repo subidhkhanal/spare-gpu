@@ -154,7 +154,7 @@ class Store:
             # a GTU_DB pointing elsewhere must not git-ignore someone's whole directory.
             marker = self.path.parent / ".gitignore"
             if self.path.parent.name == ".gtu" and not marker.exists():
-                marker.write_text("*\n", encoding="utf-8")
+                marker.write_text("*\n", encoding="utf-8")  # `gtu init` opens it up for settings.json
         # Several processes share this file: `gtu start`, other gtu commands, and the MCP server.
         # Wait up to 30 s for another writer instead of failing at once, and use WAL so readers
         # never block the writer (or the other way round).
@@ -197,8 +197,19 @@ class Store:
             self.conn.execute("PRAGMA foreign_keys = ON")
 
     @classmethod
+    def default_path(cls, cwd: Path | None = None) -> Path:
+        """GTU_DB, else <project>/.gtu/gtu.db where the project is the git repo containing `cwd`
+        (the current folder by default), or `cwd` itself: the same store the MCP server opens."""
+        override = os.environ.get(DB_ENV)
+        if override:
+            return Path(override)
+        from . import worktree  # here, not at the top: worktree is imported by modules that import the store
+
+        return worktree.project_root(cwd or Path.cwd()) / DEFAULT_DB
+
+    @classmethod
     def open_default(cls) -> Store:
-        return cls(os.environ.get(DB_ENV) or DEFAULT_DB)
+        return cls(cls.default_path())
 
     def close(self) -> None:
         self.conn.close()

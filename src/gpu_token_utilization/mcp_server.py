@@ -50,10 +50,7 @@ class NoStore(Exception):
 
 def project_root(base: Path) -> Path:
     """The git repo containing `base`, or `base` itself outside a repo."""
-    try:
-        return worktree.repo_root(base).resolve()
-    except worktree.GitError:
-        return Path(base).resolve()
+    return worktree.project_root(base)
 
 
 def db_path(root: Path) -> Path:
@@ -271,13 +268,14 @@ class SpareTools:
     def _preferred(self, your_model: str | None) -> str:
         """The model the task would otherwise run on: the calling chat's own model if it said;
         else Desktop's default model; else DeepSeek. GTU_PREFERRED_MODEL overrides all of these."""
+        folder = self._root() / ".gtu"
         if your_model:
-            return router.preferred_model(your_model)
+            return router.preferred_model(your_model, folder)
         try:
             default = desktop.default_model(desktop.discover())
         except desktop.DesktopNotFound:
             default = None
-        return router.preferred_model(default or router.DELEGATE_PREFERRED)
+        return router.preferred_model(default or router.DELEGATE_PREFERRED, folder)
 
     def delegate(self, kind: str, path: str, note: str | None = None, your_model: str | None = None,
                  progress: Callable[[str], None] = lambda line: None) -> str:
@@ -312,7 +310,8 @@ class SpareTools:
                 return (f"Queued: {what} waits behind the run already going in this project (process {other}), "
                         "which picks it up next. spare_work_status shows it.")
             try:
-                job_config = JobConfig.from_env()
+                job_config = JobConfig.load(Path(job.repo))
+                budgets = Budgets.load(Path(job.repo))
             except ValueError as exc:
                 return f"Queued, not started: {exc}"
             try:
@@ -324,7 +323,7 @@ class SpareTools:
             runstate.write_run(folder)
             try:
                 scheduler = Scheduler(
-                    store, worker.client, agent=worker.agent, plans=self._plans, budgets=Budgets.from_env(),
+                    store, worker.client, agent=worker.agent, plans=self._plans, budgets=budgets,
                     config=job_config, log=progress, sleep=self._sleep, desktop_missing=worker.desktop_missing,
                     should_stop=lambda: runstate.stop_requested(folder) or store.get_job(job_id).status == "cancelled",
                 )
@@ -352,7 +351,10 @@ class SpareTools:
             return f"Cancelled: {what} was stopped; nothing was copied to {worktree.OUTPUT_DIR}/.{spent}"
         if status == "waiting":
             return (f"Queued, not started: {what} needs BharatCode Desktop. {desktop.DESKTOP_NEEDED}")
-        used = Budgets.from_env().per_job
+        try:
+            used = Budgets.load(Path(job.repo)).per_job
+        except ValueError:
+            used = Budgets().per_job
         return (f"Paused: {what} stopped before it finished"
                 + (f" (its token budget of {used:,} is used up; raise GTU_JOB_TOKEN_BUDGET)" if tokens >= used else
                    " (a stop was asked for)")

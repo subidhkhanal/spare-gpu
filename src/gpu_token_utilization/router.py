@@ -59,6 +59,7 @@ def load_policy(folder: Path | None = None) -> dict:
             chosen += [line.strip() for line in (folder / SWITCH_SAFE_FILE).read_text(encoding="utf-8").splitlines()]
         except OSError:
             pass
+        chosen += _settings(folder).get("switch_safe") or []
     for kind in filter(None, chosen):
         types[kind] = "switch-safe"
     return {**policy, "types": types}
@@ -79,9 +80,21 @@ def plan_refusal(error: str | None) -> str | None:
     return waits.model_id(m.group("allowed")) if m else None
 
 
-def preferred_model(default: str) -> str:
-    """The model the user would use without routing: GTU_PREFERRED_MODEL, else `default`."""
-    return waits.model_id(os.environ.get(PREFERRED_ENV) or default)
+def preferred_model(default: str, folder: Path | None = None) -> str:
+    """The model the user would use without routing: GTU_PREFERRED_MODEL, else the project's
+    settings file (`folder` is its .gtu), else `default`."""
+    return waits.model_id(os.environ.get(PREFERRED_ENV) or (_settings(folder).get("preferred_model") if folder else None)
+                          or default)
+
+
+def _settings(folder: Path):
+    """The project's settings, read leniently: a broken file is reported where jobs start, not here."""
+    from . import settings
+
+    try:
+        return settings.load(Path(folder).parent)
+    except ValueError:
+        return settings.Settings(Path(folder) / settings.FILE)
 
 
 def min_saving() -> float:
