@@ -93,7 +93,9 @@ def result_files(store, job_id):
     if not job.output_dir:
         return set()
     root = Path(job.repo) / job.output_dir
-    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+    from gpu_token_utilization import landing
+
+    return set(landing.exported_files(root))  # the job's files, not RUN.md and manifest.json
 
 
 def result(store, job_id, path):
