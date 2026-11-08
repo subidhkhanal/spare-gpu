@@ -40,8 +40,11 @@ def test_every_file_parses_carries_the_marker_and_only_the_two_placeholders(kind
         # a step limit Desktop enforces, so a confused agent stops instead of looping
         assert data["steps"] == (pack.LEAD_STEPS if name.endswith("-lead") else pack.HELPER_STEPS), name
         assert data["permission"]["*"] == "deny"  # everything denied first, then what the agent needs
-        bash = data["permission"].get("bash", "deny")  # no shell, or git's read-only commands only
-        assert bash == "deny" or (bash["*"] == "deny" and all(p.startswith("git ") for p, a in bash.items() if a == "allow"))
+        # no shell, or git's commands only, plus reading a pull request; commenting on one is the review lead's alone
+        read_pr = ("gh pr view*", "gh pr diff*") + (("gh pr comment*",) if name == "review-lead" else ())
+        bash = data["permission"].get("bash", "deny")
+        assert bash == "deny" or (bash["*"] == "deny" and all(p.startswith("git ") or p in read_pr
+                                                                for p, a in bash.items() if a == "allow")), name
         assert data.get("hidden") is True
         if data["mode"] == "subagent":  # only a lead may hand work to /auto's tools (--fix)
             assert not any(data["permission"].get(t) == "allow" for t in AUTO_TOOLS)
@@ -113,9 +116,28 @@ def test_review_agents_read_only_and_the_lead_hands_fixes_to_a_job():
     verifier, verifier_body = parse(files["review-verifier"])
     for data in (finder, verifier):
         assert "edit" not in data["permission"] and not any(k.startswith("spare-gpu_") for k in data["permission"])
+        # a pull request's diff and details may be read; only the lead may comment on it
+        assert data["permission"]["bash"]["gh pr diff*"] == data["permission"]["bash"]["gh pr view*"] == "allow"
+        assert "gh pr comment*" not in data["permission"]["bash"]
     assert finder["model"] == FILLED.standard and verifier["model"] == FILLED.heavy
     assert "JSON list of candidates" in finder_body and "failure scenario" in finder_body
     assert "concrete input" in verifier_body and "critical" in verifier_body and "refute" in verifier_body
+
+
+def test_code_review_takes_a_pull_request_without_touching_the_checkout_and_posts_only_when_asked():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["review"]])}
+    lead, body = parse(files[("agent", "review-lead")])
+    bash = lead["permission"]["bash"]
+    for rule in ("gh pr view*", "gh pr diff*", "gh pr comment*", "git fetch origin pull/*"):
+        assert bash[rule] == "allow", rule
+    assert not any(r.startswith(("git checkout", "git switch", "gh pr checkout", "gh pr merge", "gh pr review", "git push"))
+                   for r in bash)  # nothing that changes the user's files, merges or approves
+    flat = " ".join(body.split())
+    assert "never check anything out" in flat and "refs/spare-gpu/pr-N" in flat and "gh pr diff N" in flat
+    assert "Only when the request asked for `--post`" in flat and "Without `--post`, never comment" in flat
+    assert "`--fix` doesn't apply to a pull request" in flat
+    command_text = files[("command", "code-review")].read_text(encoding="utf-8")
+    assert "pull request" in command_text and "--post" in command_text
 
 
 def test_security_agents_never_run_exploit_code_and_the_lead_filters_by_rule():

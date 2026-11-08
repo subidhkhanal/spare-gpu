@@ -214,7 +214,7 @@ Adds bigger commands to Desktop. In each one, DeepSeek plans and checks, and sev
 
 | Command | What it does |
 |---|---|
-| `/code-review [low\|medium\|high\|deep] [commit or branch] [--fix]` | Reviews your uncommitted changes (or a commit or branch). Several helpers each look for one kind of bug; DeepSeek keeps only the findings with real evidence. With `--fix`, the fixes run as a `fix` job. |
+| `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post]` | Reviews your uncommitted changes (or a commit, a branch or a GitHub pull request such as `/code-review 42`). Several helpers each look for one kind of bug; DeepSeek keeps only the findings with real evidence. With `--fix`, the fixes run as a `fix` job. |
 | `/security-review [commit or branch] [deep]` | A read-only security review. Five helpers each look for one kind of problem (injection, login and access, secrets, code execution, data leaks). Known false alarms are dropped by fixed rules; only high-confidence findings are reported. |
 | `/deep-research <question> [--depth quick\|standard\|deep]` | Writes a report with sources into `research/<topic>/`. Helpers search research papers (OpenAlex, Crossref, arXiv) and the web (through Exa, no key needed; your searches go to Exa). Every source is checked, and fake or wrong ones are removed. |
 | `/simplify [file or folder]` | Suggests safe cleanups that don't change behaviour, kept only if your tests still pass. |
@@ -223,6 +223,7 @@ Adds bigger commands to Desktop. In each one, DeepSeek plans and checks, and sev
 Every command ends with a **cost summary**: which model did what, and the exact tokens used in this project.
 
 - **Preview first:** add `--plan` (for example `/code-review --plan`). It shows its plan, how many helpers it would start and on which model, then stops.
+- **Pull requests:** `/code-review 42` reviews pull request 42 through the GitHub CLI (`gh`, signed in with `gh auth login`). Your files and branch stay as they are: nothing is checked out. The review judges the code against what the PR says it does. It never comments unless you add `--post`; then it posts the findings as one PR comment and never approves or blocks.
 - **No runaway helpers:** every helper has a step limit (30 for a helper, 60 for a lead).
 - **Fewer false findings:** in `/code-review` and `/security-review`, findings are checked before DeepSeek reads them. Entries that try to give instructions instead of describing code are dropped, and duplicates are merged, noting how many helpers agreed.
 - **Free when unused:** the pack's helpers and tools are hidden from your normal chats, so a normal chat pays nothing for them (budget: at most 1,500 extra tokens per step).
