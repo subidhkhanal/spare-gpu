@@ -229,6 +229,23 @@ def _section_order(path: Path):
     return (int(number.group()) if number else 10**9, path.name)
 
 
+def _as_section(text: str) -> str:
+    """A section file's text with its headings below the report's title: a writer that starts with
+    `# Abstract` instead of `## Abstract` gets every heading moved down one level (code blocks
+    untouched), so report.md keeps one top-level title."""
+    lines = text.strip().splitlines()
+    first = next((line for line in lines if line.strip()), "")
+    if not re.match(r"#\s", first):
+        return text.strip()
+    fenced = False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(r"#{1,5}\s", line):
+            lines[i] = "#" + line
+    return "\n".join(lines)
+
+
 def _reference_line(item: dict) -> str:
     authors = item.get("authors")
     if isinstance(authors, list):
@@ -249,7 +266,7 @@ def build_report(folder: Path, title: str = "") -> tuple[Path, str]:
     sections = sorted((folder / SECTIONS_DIR).glob("*.md"), key=_section_order)
     if not sections:
         raise FileNotFoundError(folder / SECTIONS_DIR)
-    body = "\n\n".join(s.read_text(encoding="utf-8-sig").strip() for s in sections)
+    body = "\n\n".join(_as_section(s.read_text(encoding="utf-8-sig")) for s in sections)
     try:
         items = {str(i.get("key")): i for i in load_sources(folder / SOURCES_FILE)}
     except FileNotFoundError:

@@ -28,8 +28,9 @@ research/<slug>/review.md.
    it. Mark a claim when the cited note has no such quote; when the quote says something weaker
    or different; when the citation is a DROP reference; or when the claim has no citation at all.
 3. Write review.md in one go, once you have checked every claim: a "References" section copying verify_refs's verdict list; a "Claims" section
-   with one line per marked claim (the sentence, its section, the problem, and what to do: remove,
-   reword, or re-cite to a key that does support it); and one verdict line: how many claims were
+   with one line per marked claim (the sentence; the section file it is in, as
+   `sections/<nn>-<name>.md`, never a notes file; the problem; and what to do: remove, reword, or
+   re-cite to a key that does support it); and one verdict line: how many claims were
    checked and how many marked.
 4. End your reply with the verdict line and the review file's path.
 

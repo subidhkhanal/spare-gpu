@@ -86,6 +86,7 @@ def test_research_agents_write_only_their_own_files_and_use_only_their_own_tools
     assert "glob" not in writer["permission"] and "grep" not in writer["permission"]  # reads the files it's given; no searching
     checker, checker_body = parse(files["research-checker"])
     assert all(p.endswith("review.md") for p in edit_patterns(checker))
+    assert "the section file it is in" in " ".join(checker_body.split())  # so the lead edits the right file
     assert checker["permission"]["spare-gpu_verify_refs"] == "allow" and "spare-gpu_scholar_search" not in checker["permission"]
     assert scout["model"] == writer["model"] == FILLED.standard and lead["model"] == checker["model"] == FILLED.heavy
     for body in (scout_body, writer_body, checker_body):

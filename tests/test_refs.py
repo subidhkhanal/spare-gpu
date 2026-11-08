@@ -152,3 +152,13 @@ def test_the_report_is_built_from_its_sections_in_number_order_with_references_f
     assert "[a2019] A Ay" not in report.read_text(encoding="utf-8") and "left out of References: a2019" in summary
     with pytest.raises(FileNotFoundError):
         refs.build_report(tmp_path / "empty")
+
+
+def test_a_section_written_with_a_top_level_heading_is_moved_under_the_title(tmp_path):
+    (tmp_path / "sections").mkdir()
+    (tmp_path / "sections" / "01-abstract.md").write_text("# Abstract\n\nText.\n\n## Detail\n\n```\n# a comment\n```\n",
+                                                          encoding="utf-8")
+    (tmp_path / "sections" / "02-background.md").write_text("## Background\n\nMore.\n", encoding="utf-8")
+    text = refs.build_report(tmp_path, "PSO")[0].read_text(encoding="utf-8")
+    assert [line for line in text.splitlines() if line.startswith("#")] == [
+        "# PSO", "## Abstract", "### Detail", "# a comment", "## Background", "## References"]  # code left alone
