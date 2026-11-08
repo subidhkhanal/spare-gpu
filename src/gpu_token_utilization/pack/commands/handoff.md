@@ -6,13 +6,9 @@ description: Write where this chat stopped into the hand-off file, so a fresh ch
 Extra note from the user, between the markers (may be empty):
 <<<$ARGUMENTS>>>
 
-Working tree right now (`git status --porcelain`; empty means clean or not a repo):
-!`git status --porcelain`
-
-Recent commits:
-!`git log --oneline -5`
-
-Write `.gtu/handoff.md` (replace it if it exists) from this conversation, with these sections:
+First run `git status --porcelain` and `git log --oneline -5` in this project with your shell
+tool, to see the working tree and the recent commits (empty status means clean; an error means
+the folder isn't a git repo, so say so). Then write `.gtu/handoff.md` (replace it if it exists) from this conversation, with these sections:
 
 ## Goal
 What this chat was trying to achieve, in one or two sentences.
@@ -23,7 +19,7 @@ The concrete next steps, in order, each one line.
 ## Open questions
 Decisions still to be made, and what each one depends on.
 ## Files
-From the status above: which changed files belong to this work, and which were already there.
+From that status: which changed files belong to this work, and which were already there.
 ## Pointers
 Commands that matter (how to run the tests, how to start the app), decisions made and why.
 

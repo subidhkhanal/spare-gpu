@@ -54,11 +54,15 @@ def test_the_commands_run_in_the_users_agent_and_say_what_they_may_not_do():
     assert "4,000 characters" in body and "60 lines" in body
     handoff, body = command("handoff")
     assert "agent" not in handoff and "model" not in handoff  # the current chat's agent and model: it needs the history
-    assert "!`git status --porcelain`" in body and ".gtu/handoff.md" in body and "/pickup" in body
+    # Desktop runs !`...` lines outside the project folder, so the chat runs git itself, in the project
+    assert "!`" not in body and "`git status --porcelain`" in body and ".gtu/handoff.md" in body and "/pickup" in body
     for section in ("## Goal", "## Done", "## Next", "## Open questions", "## Files", "## Pointers"):
         assert section in body
     pickup, body = command("pickup")
     assert "agent" not in pickup and ".gtu/handoff.md" in body and "Otherwise stop and wait" in body
+    assert "!`" not in body and "`git status --porcelain`" in body
+    _, body = command("cost")
+    assert "!`" not in body and "`gtu cost --short`" in body and "in this project" in body
     assert all(("command", name) in pack.all_markdown_names() for name in ("remember", "handoff", "pickup"))
 
 
