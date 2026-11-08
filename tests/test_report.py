@@ -46,7 +46,7 @@ def test_job_report_counts_what_ran(ran, store):
     assert t.tokens == 12000 and t.agent_steps == 2 and t.api_requests == 0
     assert (t.tests_kept, t.tests_dropped) == (2, 1)
     assert t.files == [("A", "tests/test_gtu_calc.py")]
-    assert t.queue_waits_ms == []  # the CLI doesn't expose it
+    assert t.queue_waits_ms == []  # a Desktop session doesn't expose it
 
     r = reporting.build_job(store, review_job)
     assert r.api_requests == 1 and r.tokens == 340 and r.queue_waits_ms == [4200]

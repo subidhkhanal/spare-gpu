@@ -1,5 +1,7 @@
-"""Token totals for `gtu report` (per-session detail is in BharatCode Desktop itself)."""
+"""Token totals for `gtu report` (per-session detail is in BharatCode Desktop itself), and
+`gtu cost`: BharatCode's per-model figures next to spare-gpu's jobs."""
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -50,3 +52,116 @@ def test_an_all_digit_job_id_is_the_job_not_a_number_of_hours(store, job_repo, m
 def test_an_unknown_job_id_is_an_error(store):
     with pytest.raises(StoreError):
         costs.collect(store, "nope1234")
+
+
+# --- `gtu cost`: BharatCode's per-model figures next to spare-gpu's jobs -----------------------------
+
+from typer.testing import CliRunner  # noqa: E402
+
+from gpu_token_utilization import stats  # noqa: E402
+from gpu_token_utilization.cli import app  # noqa: E402
+
+runner = CliRunner()
+# What Desktop's own record gives per model (stats.tokens_since), for a day's chats.
+USAGE = {"bharatcode/deepseek-v4.1-flash": {"messages": 12, "input": 120_500, "output": 8_200, "reasoning": 0,
+                                            "cache_read": 40_000, "cache_write": 0, "tokens": 168_700},
+         "bharatcode/qwen-3.8-27b": {"messages": 30, "input": 300_000, "output": 20_000, "reasoning": 0,
+                                     "cache_read": 0, "cache_write": 0, "tokens": 320_000}}
+
+
+def finished(store, repo, kind, target, status, tokens, verify=None, when=None):
+    """A job that ended with `status`, having used `tokens`, its verify step saying `verify`;
+    `when` (ISO) backdates it."""
+    job = store.add_job(kind, target, repo)
+    if verify is not None:
+        step_id = store.add_step(job.id, "verify")
+        store.set_step(step_id, "done", verify)
+    step(store, job, tokens, 0, sent_at=when)
+    store.set_status(job.id, status)
+    if when:
+        with store.conn:
+            store.conn.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (when, job.id))
+    return job
+
+
+def test_period_combines_the_model_figures_with_the_jobs(store, job_repo):
+    now = datetime.now(timezone.utc)
+    a = finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 3 passing test(s), dropped 1.")
+    b = finished(store, job_repo, "docs", "README.md", "done", 15_000, verify="Kept documentation changes in 0 file(s).")
+    c = finished(store, job_repo, "review", "src/r.py", "failed", 10_000)
+    d = finished(store, job_repo, "fix", "src/f.py", "cancelled", 500)
+    old = finished(store, job_repo, "tests", "old.py", "done", 99_000, verify="Kept 1 passing test(s), dropped 0.",
+                   when=(now - timedelta(days=3)).isoformat(timespec="seconds"))
+    period = costs.period(store, days=1, now=now, usage=USAGE)
+    assert period.ran == 4 and period.count("done") == 2 and period.count("failed") == 1 and period.count("cancelled") == 1
+    assert period.tokens == 45_500 and period.kept_nothing == 1
+    assert [j.job.id for j in period.top] == [a.id, b.id, c.id]  # three most expensive; d and the old job aren't there
+    assert {j.job.id for j in period.jobs} == {a.id, b.id, c.id, d.id}
+
+    text = costs.render(period)
+    assert text.startswith("Cost for the last 24 hours\n")
+    assert "Tokens per model (exact, from BharatCode Desktop's own record" in text
+    rows = re.findall(r"^  (Qwen 3\.8 27B|DeepSeek V4\.1 Flash)\s+(\d+)\s+([\d,]+)$", text, re.M)
+    assert rows == [("Qwen 3.8 27B", "30", "320,000"),  # the larger first
+                    ("DeepSeek V4.1 Flash", "12", "168,700")]
+    assert "spare-gpu jobs: 4 job(s) ran (2 done, 1 failed, 1 cancelled), 45,500 tokens; 1 kept nothing after its check." in text
+    assert f"{b.id}  done, kept nothing" in text and f"{c.id}  failed" in text
+    assert f"1. tests src/pay.py ({a.id}): 20,000 tokens, done" in text
+    assert f"2. docs README.md ({b.id}): 15,000 tokens, done, kept nothing" in text
+    assert old.id not in text and "\u2014" not in text
+
+    short = costs.render_short(period)
+    assert "\n" not in short and short.startswith("In the last 24 hours: By model (")
+    assert "Qwen 3.8 27B 320,000 tokens in 30 message(s); DeepSeek V4.1 Flash 168,700 tokens in 12 message(s)." in short
+    assert "spare-gpu: 4 job(s) ran (2 done, 1 failed, 1 cancelled) for 45,500 tokens, and 1 kept nothing after its check." in short
+    assert f"Most expensive: tests src/pay.py ({a.id}) 20,000 tokens, done; docs README.md ({b.id}) 15,000 tokens, done, kept nothing; " in short
+
+
+def test_period_without_desktop_data_says_so_and_without_jobs_too(store):
+    period = costs.period(store, days=1, usage=None)
+    assert period.models is None and period.jobs == [] and period.top == []
+    text = costs.render(period)
+    no_data = "BharatCode Desktop's session data wasn't found on this machine, so no per-model figures"
+    assert no_data in text and "spare-gpu jobs: none ran in the last 24 hours." in text
+    short = costs.render_short(period)
+    assert short == f"In the last 24 hours: {no_data}. spare-gpu ran no jobs in the last 24 hours."
+    assert costs.render_short(costs.period(store, days=7, usage={})).startswith(
+        "In the last 7 days: BharatCode Desktop recorded no replies in this period.")
+
+
+def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkeypatch):
+    asked = []
+
+    def fake_tokens_since(since, directory=None, db=None):
+        asked.append((since, directory))
+        return USAGE
+
+    monkeypatch.setattr(stats, "tokens_since", fake_tokens_since)
+    now = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    assert costs.period(store, days=3, now=now).models["bharatcode/qwen-3.8-27b"]["tokens"] == 320_000
+    assert costs.period(store, days=0.5, now=now).models is not None
+    # exactly the period asked for, every project (no folder)
+    assert asked == [(now - timedelta(days=3), None), (now - timedelta(hours=12), None)]
+
+
+def test_a_running_job_with_requests_in_the_period_counts_as_ran(store, job_repo):
+    job = store.add_job("tests", "a.py", job_repo)
+    store.set_status(job.id, "running")
+    step(store, job, 2_000, 0)
+    period = costs.period(store, usage=None)
+    assert [j.job.id for j in period.jobs] == [job.id] and period.count("done") == 0 and not period.jobs[0].kept_nothing
+    assert "1 job(s) ran, 2,000 tokens" in costs.render(period)
+
+
+def test_the_cost_command(store, job_repo, monkeypatch):
+    monkeypatch.setenv("GTU_DB", str(store.path))
+    monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: USAGE)
+    finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 0 passing test(s), dropped 2.")
+    result = runner.invoke(app, ["cost"])
+    assert result.exit_code == 0, result.output
+    assert "Tokens per model" in result.output and "1 job(s) ran (1 done), 20,000 tokens; 1 kept nothing" in result.output
+    result = runner.invoke(app, ["cost", "--short", "--days", "2"])
+    assert result.exit_code == 0 and result.output.count("\n") == 1 and result.output.startswith("In the last 2 days: By model")
+    monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: None)
+    assert "BharatCode Desktop's session data wasn't found" in runner.invoke(app, ["cost"]).output
+    assert runner.invoke(app, ["cost", "--days", "0"]).exit_code == 1

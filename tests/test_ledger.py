@@ -72,7 +72,7 @@ def test_a_tests_job_leaves_one_ledger_entry_per_step_with_the_tools_it_used(git
     assert (doc["job"], doc["kind"], doc["target"]) == (job.id, "tests", "src/calc.py")
     write, verify = doc["steps"]
     assert (write["step"], write["status"], write["tokens"]) == ("write", "done", 11900)
-    assert write["model"] == "qwen-3.8-27b"  # the fake CLI's default model, as the requests logged it
+    assert write["model"] == "qwen-3.8-27b"  # the fake Desktop's default model, as the requests logged it
     # the tools as the agent reported them, targets inside the job's copy shown relative to it
     assert write["tools"] == ["edit tests/test_gtu_calc.py", "edit src/calc.py"]
     assert write["outcome"] == store.steps(job.id)[0]["output"]
@@ -168,7 +168,7 @@ def test_run_md_summarises_the_job_its_steps_its_files_and_what_was_reverted(git
     assert text.startswith(f"# spare-gpu job {job.id}: tests `src/calc.py`\n")
     assert "- Kind: tests\n- Target: `src/calc.py`\n" in text and "- Tokens: 11,900\n" in text
     assert "- Files: 1 added, 0 changed, 0 deleted" in text
-    # both of the fake CLI's steps happen inside the job's one write step, hence 11,900 there
+    # both of the fake Desktop session's steps happen inside the job's one write step, hence 11,900 there
     assert "| write | done | qwen-3.8-27b |" in text and "| 11,900 | edit tests/test_gtu_calc.py; edit src/calc.py |" in text
     assert "| verify | done | qwen-3.8-27b |" in text and "| 0 | none |" in text
     assert "- `tests/test_gtu_calc.py` (added): 2 passing test(s), dropped 1 failing" in text

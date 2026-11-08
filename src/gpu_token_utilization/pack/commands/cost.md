@@ -1,7 +1,7 @@
 ---
 # Installed by spare-gpu (`gtu integrate --pack`); `gtu integrate --pack --uninstall` removes it. Edit freely:
 # once this line is gone, spare-gpu leaves the file alone.
-description: What today cost, tokens per model from BharatCode's own stats and what spare-gpu's jobs used and kept
+description: What today cost, tokens per model from Desktop's own record and what spare-gpu's jobs used and kept
 ---
 Period asked for, between the markers (empty means today):
 <<<$ARGUMENTS>>>

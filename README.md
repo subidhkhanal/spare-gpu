@@ -151,30 +151,38 @@ Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's 
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, and your other MCP servers are switched off inside a job.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
 
-## Results: apply and undo
+## Apply a result, or take it back
 
-Every job leaves two kinds of record, and two commands move its result into your project and back out.
+Each result folder also has a `RUN.md` (what the job did, step by step) and a `manifest.json` (every file it changed, with checksums). Two commands use them:
 
-**While it runs**, a job writes `.gtu/jobs/<job id>/ledger.json`: one entry per step with the step's name, the model it ran on, when it started and finished (UTC), the tokens it used, the tools the agent reported using (name and target; empty for a review answered by the API) and the step's outcome text. It is rewritten after every step, so a crash still leaves a usable record of what ran.
-
-**When it finishes**, next to its files in `spare-gpu/<date>_<time>/` you find:
-
-- `RUN.md`: a short summary: job id, kind, target, model, each step with its tokens and tools, which files came out and why, and what the checks reverted.
-- `manifest.json`: every file the job changed, with its path (relative to the project, with `/` separators), its change (`A` added, `M` changed, `D` deleted), `base_sha256` (the file as it was when the job started; null for a new file) and `new_sha256` (the file as the job left it; null for a deletion).
-
-```
-spare-gpu/2026-11-05_12-38-50/
-├── RUN.md
-├── manifest.json
-├── README.md             ← the job's files, as before
-└── src/mathx.py
+```powershell
+gtu apply          # copy the newest result into your project
+gtu undo           # take it back
 ```
 
-**`gtu apply [<stamp>|latest] [--dry-run] [--force]`** copies a job's files into your project. `latest` (the default) is the newest folder with a manifest; a stamp is a folder's name, like `2026-11-05_12-38-50`. For every file in the manifest, if your copy is exactly as it was when the job started (or absent, for a new file), the job's version goes in: folders are made as needed, and a file the job deleted is deleted. Your previous version is saved first under `spare-gpu/<stamp>/.undo/<path>`, and what was done is recorded in `.undo/manifest.json`. A file that changed since the job started is skipped, and the command says so; `--force` applies it anyway, still saving your version for undo. One line per file, then a summary. `--dry-run` prints what would happen and writes nothing. A result that was already applied is refused until you run `gtu undo`, so nothing is applied twice.
+- `gtu apply` only replaces a file if you haven't changed it since the job started. Otherwise it skips the file and tells you (`--force` replaces it anyway).
+- Your old version is saved first, so `gtu undo` can restore everything exactly.
+- `--dry-run` shows what would happen without writing anything. To pick an older result, name its folder: `gtu apply 2026-11-05_12-38-50`.
+- While a job runs, `.gtu/jobs/<job id>/ledger.json` records each step: model, time, tokens and tools used.
 
-**`gtu undo [<stamp>|latest]`** takes it back: every file apply replaced is restored from `.undo`, every file apply added is removed, and `.undo` is deleted, so the result can be applied again. `latest` is the newest result that was applied.
+## Fewer permission prompts
 
-Both commands work from any folder of the project, copy bytes exactly (no line-ending changes), and refuse a manifest whose paths point outside the project (an absolute path, a drive letter, or `..`). Nothing else ever writes to your files: a job works in its copy, and the result waits in `spare-gpu/` until you apply it or copy what you want by hand.
+Desktop asks before running a shell command, and "always allow" only remembers that exact text, so `git status` and `git status --short` each ask again.
+
+```powershell
+gtu prompts
+```
+
+This reads a private copy of Desktop's own history and finds the read-only commands you keep approving, like `git status`, `ls` or `pytest`, used in at least 3 chats in the last 30 days. It prints a snippet to paste into your `opencode.jsonc`. It never edits your files, and it never suggests anything that writes, deletes, installs or pushes. Options: `--days`, `--min` (chats needed), `--channel beta|dev|local`.
+
+## Cost
+
+```powershell
+gtu cost            # the last 24 hours
+gtu cost --days 7   # the last week
+```
+
+Shows the exact tokens per model from Desktop's own record (every chat on this machine), then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three. `--short` gives one paragraph; `/cost` in a chat shows the same.
 
 ## Settings
 

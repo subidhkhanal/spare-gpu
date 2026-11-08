@@ -11,15 +11,15 @@ docs:   write   - the session adds docstrings and README text (no commands allow
                   was removed; everything else is reverted. Then commit.
 review: review  - our own client sends the code (with line numbers) and writes the answer to
                   gtu-review-<job-id>.md. No source file is changed.
-fix:    write   - the CLI applies the review findings in the job's note; saved as a patch.
+fix:    write   - a Desktop session applies the review findings in the job's note; saved as a patch.
         verify  - changes to existing test files are reverted, the test command runs, and the fix
                   is kept only if it passes.
-green:  write   - the test command runs in the copy first; if it fails, the CLI gets its output and
-                  fixes the code (never the tests); saved as a patch. If it passes, nothing to do.
+green:  write   - the test command runs in the copy first; if it fails, a Desktop session gets its output
+                  and fixes the code (never the tests); saved as a patch. If it passes, nothing to do.
         verify  - changes to existing tests reverted, the test command run again. Passing: done.
                   Failing: another write and verify step are added, up to green_rounds rounds in
                   all; after the last, the copy goes back to its starting files, so nothing is kept.
-implement: write - the CLI carries out a Markdown plan file (the target); saved as a patch.
+implement: write - a Desktop session carries out a Markdown plan file (the target); saved as a patch.
         verify  - like fix: kept only if the test command passes.
 
 Saving the session's work as a patch before checking it means a crash during the check never loses
@@ -767,7 +767,7 @@ def _green_round(ctx: StepContext) -> int:
 
 
 def write_green(ctx: StepContext) -> str:
-    """Run the test command in the copy; if it fails, have the CLI fix the code. The copy holds
+    """Run the test command in the copy; if it fails, have a Desktop session fix the code. The copy holds
     what earlier rounds kept, so each round starts from the last one's result."""
     job = ctx.job
     patch = ctx.state_dir / "green.patch"
@@ -787,7 +787,7 @@ def write_green(ctx: StepContext) -> str:
 
 
 def verify_green(ctx: StepContext) -> str:
-    """Round N of M. Apply what the CLI wrote, undo changes to existing tests, run the test
+    """Round N of M. Apply what the session wrote, undo changes to existing tests, run the test
     command. Passing: done, and the changes of every round are kept. Failing with rounds left: a
     write and a verify step are added, so the scheduler runs another round from this state.
     Failing on the last round: the copy goes back to its starting files, so nothing is exported."""

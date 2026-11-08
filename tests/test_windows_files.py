@@ -1,4 +1,4 @@
-"""Real jobs (fake CLI, real git and pytest) under the conditions Windows users actually have:
+"""Real jobs (fake Desktop, real git and pytest) under the conditions Windows users actually have:
 spaces and non-ASCII in paths, long paths, CRLF line endings, byte-order marks, locked files."""
 
 import difflib
@@ -107,7 +107,7 @@ def test_docs_job_on_a_file_with_a_byte_order_mark(tmp_path, run_job):
 
 
 def test_docs_job_keeps_the_files_crlf_and_bom_when_the_cli_drops_them(tmp_path, run_job):
-    # a CRLF file stored as CRLF (autocrlf off), rewritten by the CLI with LF and no BOM: the
+    # a CRLF file stored as CRLF (autocrlf off), rewritten by the session with LF and no BOM: the
     # result must show only the added docstring, not every line changed
     original = (BOM + SOURCE).replace("\n", "\r\n").encode()
     repo = make_repo(tmp_path / "repo", {"src/calc.py": original})

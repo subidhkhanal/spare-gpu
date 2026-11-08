@@ -808,3 +808,45 @@ def undo(
         _fail(f"{exc}. The remaining files are still in spare-gpu/<stamp>/.undo; run `gtu undo {stamp}` again.")
     for line in outcome.lines:
         typer.echo(line)
+
+
+@app.command()
+def prompts(
+    days: int = typer.Option(30, "--days", help="How many days of Desktop sessions to look at (default 30)."),
+    min_sessions: int = typer.Option(3, "--min",
+                                     help="Propose a command only if it was approved in at least this many sessions (default 3)."),
+    channel: str = typer.Option("stable", "--channel", help="Which Desktop's database to read: stable, beta, dev or local."),
+) -> None:
+    """Propose allow rules for the read-only commands you keep approving in BharatCode Desktop.
+    Reads a private copy of Desktop's own database, counts the sessions each command was approved
+    in, keeps those on a short list of commands that only read (git status, ls, pytest, ...), and
+    prints the "permission" snippet to paste into your opencode.jsonc. Nothing is written."""
+    from . import prompts as prompting
+
+    if channel not in bc_config.CHANNELS:
+        _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)}.")
+    if days < 1 or min_sessions < 1:
+        _fail("--days and --min must be at least 1.")
+    folder = bc_config.config_dir() if channel == "stable" else bc_config.channel_config_dir(channel)
+    try:
+        review = prompting.collect(prompting.database_path(channel), days=days, min_sessions=min_sessions)
+    except prompting.PromptsError as exc:
+        _fail(str(exc))
+    typer.echo(prompting.render(review, bc_config.config_file(folder)))
+
+
+@app.command()
+def cost(
+    days: float = typer.Option(1.0, "--days", help="How many days back to look (default 1)."),
+    short: bool = typer.Option(False, "--short", help="One paragraph, no tables (for a chat command to relay)."),
+) -> None:
+    """What the period cost: tokens per model from BharatCode Desktop's own record (every
+    session on this machine), then spare-gpu's jobs: how many ran and how they ended, their
+    tokens, how many kept nothing after their check, and the three most expensive."""
+    from . import costs
+
+    if days <= 0:
+        _fail("--days must be more than 0.")
+    with Store.open_default() as store:
+        summary = costs.period(store, days=days)
+    typer.echo(costs.render_short(summary) if short else costs.render(summary))

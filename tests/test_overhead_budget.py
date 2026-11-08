@@ -3,7 +3,7 @@
 Two proofs: the static one, from the pack's own config (every tool and helper it adds is denied
 for every agent but its own, so nothing is added to a normal request); and the measured one,
 from research/pack-install/overhead.json once scripts/check_overhead_budget.py has been run on a
-Windows machine with BharatCode's CLI. CI fails when the recorded measurement is over budget."""
+Windows machine with BharatCode Desktop. CI fails when the recorded measurement is over budget."""
 
 import json
 from pathlib import Path
