@@ -32,14 +32,15 @@ def channel(env: dict[str, str] | None = None) -> str:
     return "stable"
 
 
-def session_db(env: dict[str, str] | None = None) -> Path | None:
-    """That channel's session database, if it exists (GTU_DESKTOP_DB names another file)."""
+def session_db(env: dict[str, str] | None = None, which: str | None = None) -> Path | None:
+    """A channel's session database, if it exists: `which` (stable, beta, dev or local), else the
+    channel that started us (GTU_DESKTOP_DB names another file instead)."""
     env = os.environ if env is None else env
     if env.get(DB_ENV):
         path = Path(env[DB_ENV])
     else:
         base = env.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        path = Path(base) / CHANNELS[channel(env)] / "Data" / "bharatcode.db"
+        path = Path(base) / CHANNELS[which or channel(env)] / "Data" / "bharatcode.db"
     return path if path.is_file() else None
 
 

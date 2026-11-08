@@ -54,6 +54,8 @@ def test_the_channel_that_started_us_names_the_database(tmp_path):
     assert stats.channel(env) == "stable" and stats.session_db(env) == local / "BharatCode" / "Data" / "bharatcode.db"
     dev = {**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop.dev")}
     assert stats.channel(dev) == "dev" and stats.session_db(dev) is None  # no Dev data on this machine
+    assert stats.session_db(env, which="beta") == local / "BharatCode Beta" / "Data" / "bharatcode.db"  # asked for by name
+    assert stats.session_db(env, which="dev") is None
     chosen = desktop_db(tmp_path / "copy.db", [])
     assert stats.session_db({**beta, stats.DB_ENV: str(chosen)}) == chosen
 

@@ -184,7 +184,7 @@ gtu cost            # the last 24 hours
 gtu cost --days 7   # the last week
 ```
 
-Shows the exact tokens per model from Desktop's own record (every chat on this machine), then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three. `--short` gives one paragraph; `/cost` in a chat shows the same.
+Shows the exact tokens per model from Desktop's own record (every chat on this machine), then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three. `--short` gives one paragraph; `/cost` in a chat shows the same. In an ordinary terminal it reads the regular Desktop's record; add `--channel beta` (or `dev`, `local`) for another build.
 
 ## Git hooks (optional)
 

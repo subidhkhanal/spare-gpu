@@ -876,6 +876,8 @@ def prompts(
 def cost(
     days: float = typer.Option(1.0, "--days", help="How many days back to look (default 1)."),
     short: bool = typer.Option(False, "--short", help="One paragraph, no tables (for a chat command to relay)."),
+    channel: str = typer.Option(None, "--channel", help="Which Desktop's record to read: stable, beta, dev or local "
+                                                        "(default: the Desktop running this, else stable)."),
 ) -> None:
     """What the period cost: tokens per model from BharatCode Desktop's own record (every
     session on this machine), then spare-gpu's jobs: how many ran and how they ended, their
@@ -884,8 +886,10 @@ def cost(
 
     if days <= 0:
         _fail("--days must be more than 0.")
+    if channel is not None and channel not in bc_config.CHANNELS:
+        _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)}.")
     with Store.open_default() as store:
-        summary = costs.period(store, days=days)
+        summary = costs.period(store, days=days, channel=channel)
     typer.echo(costs.render_short(summary) if short else costs.render(summary))
 
 

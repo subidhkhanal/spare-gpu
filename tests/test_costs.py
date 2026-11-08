@@ -125,11 +125,12 @@ def test_period_without_desktop_data_says_so_and_without_jobs_too(store):
     assert no_data in text and "spare-gpu jobs: none ran in the last 24 hours." in text
     short = costs.render_short(period)
     assert short == f"In the last 24 hours: {no_data}. spare-gpu ran no jobs in the last 24 hours."
-    assert costs.render_short(costs.period(store, days=7, usage={})).startswith(
-        "In the last 7 days: BharatCode Desktop recorded no replies in this period.")
+    assert costs.render_short(costs.period(store, days=7, usage={}, channel="stable")).startswith(
+        "In the last 7 days: BharatCode Desktop (stable) recorded no replies in this period; "
+        "`--channel` reads another Desktop build (stable, beta, dev or local).")
 
 
-def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkeypatch):
+def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkeypatch, tmp_path):
     asked = []
 
     def fake_tokens_since(since, directory=None, db=None):
@@ -137,6 +138,7 @@ def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkey
         return USAGE
 
     monkeypatch.setattr(stats, "tokens_since", fake_tokens_since)
+    monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: tmp_path / "bharatcode.db")
     now = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
     assert costs.period(store, days=3, now=now).models["bharatcode/qwen-3.8-27b"]["tokens"] == 320_000
     assert costs.period(store, days=0.5, now=now).models is not None
@@ -156,12 +158,30 @@ def test_a_running_job_with_requests_in_the_period_counts_as_ran(store, job_repo
 def test_the_cost_command(store, job_repo, monkeypatch):
     monkeypatch.setenv("GTU_DB", str(store.path))
     monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: USAGE)
+    monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: store.path)  # any file: the figures are faked
     finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 0 passing test(s), dropped 2.")
     result = runner.invoke(app, ["cost"])
     assert result.exit_code == 0, result.output
     assert "Tokens per model" in result.output and "1 job(s) ran (1 done), 20,000 tokens; 1 kept nothing" in result.output
     result = runner.invoke(app, ["cost", "--short", "--days", "2"])
     assert result.exit_code == 0 and result.output.count("\n") == 1 and result.output.startswith("In the last 2 days: By model")
-    monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: None)
+    monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: None)
     assert "BharatCode Desktop's session data wasn't found" in runner.invoke(app, ["cost"]).output
     assert runner.invoke(app, ["cost", "--days", "0"]).exit_code == 1
+
+
+def test_the_channel_option_reads_that_desktops_record(store, job_repo, monkeypatch, tmp_path):
+    from conftest import desktop_db
+
+    monkeypatch.setenv("GTU_DB", str(store.path))
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    reply = {"input": 900, "output": 100, "reasoning": 0, "cache": {"read": 0, "write": 0}, "total": 1000}
+    local = tmp_path / "local"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    desktop_db(local / "BharatCode Beta" / "Data" / "bharatcode.db", [("C:/x", now_ms - 1000, "bharatcode/qwen-3.8-27b", reply)])
+    beta = runner.invoke(app, ["cost", "--short", "--channel", "beta"])
+    assert beta.exit_code == 0 and "Qwen 3.8 27B 1,000 tokens in 1 message(s)" in beta.output
+    stable = runner.invoke(app, ["cost", "--short"]).output  # not started by Desktop: the released app's, which has no data here
+    assert "session data wasn't found" in stable
+    bad = runner.invoke(app, ["cost", "--channel", "nightly"])
+    assert bad.exit_code == 1 and "unknown channel 'nightly'" in bad.output

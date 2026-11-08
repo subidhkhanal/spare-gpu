@@ -109,6 +109,7 @@ class Period:
     days: float
     models: dict[str, dict[str, float]] | None  # None: no BharatCode Desktop data on this machine
     jobs: list[JobCost] = field(default_factory=list)
+    channel: str = "stable"  # whose record the model figures come from
 
     @property
     def ran(self) -> int:
@@ -138,14 +139,21 @@ def _kept_nothing(store: Store, job: Job) -> bool:
 
 
 def period(store: Store, days: float = DEFAULT_DAYS, now: datetime | None = None,
-           usage: dict[str, dict[str, float]] | None | str = "ask") -> Period:
+           usage: dict[str, dict[str, float]] | None | str = "ask", channel: str | None = None) -> Period:
     """The last `days` days: tokens per model from Desktop's own record of every reply, across all
     projects (None when there's no Desktop data), and spare-gpu's jobs that finished or sent a
     request in the period, each with the tokens of all its requests (what the job cost) and whether
-    its check kept anything. `usage` is read from Desktop unless given (tests pass figures or None)."""
+    its check kept anything. `usage` is read from Desktop unless given (tests pass figures or None):
+    from `channel`'s record (stable, beta, dev or local), else the Desktop that started us, else
+    the released app's."""
     now = now or datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).isoformat(timespec="seconds")
-    models = stats.tokens_since(now - timedelta(days=days)) if usage == "ask" else usage
+    channel = channel or stats.channel()
+    if usage == "ask":
+        db = stats.session_db(which=channel)
+        models = stats.tokens_since(now - timedelta(days=days), db=db) if db else None
+    else:
+        models = usage
     active = {r["job_id"] for r in store.conn.execute(
         "SELECT DISTINCT job_id FROM requests WHERE job_id IS NOT NULL AND sent_at >= ?", (since,))}
     jobs: list[JobCost] = []
@@ -154,10 +162,15 @@ def period(store: Store, days: float = DEFAULT_DAYS, now: datetime | None = None
             continue
         tokens = sum(r["total_tokens"] or 0 for r in store.requests(job.id))
         jobs.append(JobCost(job, tokens, _kept_nothing(store, job)))
-    return Period(days=days, models=models, jobs=jobs)
+    return Period(days=days, models=models, jobs=jobs, channel=channel)
 
 
 NO_DATA = "BharatCode Desktop's session data wasn't found on this machine, so no per-model figures"
+
+
+def _no_replies(p: Period) -> str:
+    return (f"BharatCode Desktop ({p.channel}) recorded no replies in this period; "
+            "`--channel` reads another Desktop build (stable, beta, dev or local).")
 STATS_NOTE = "exact, from BharatCode Desktop's own record: every session on this machine"
 
 
@@ -185,7 +198,7 @@ def render(p: Period) -> str:
     if p.models is None:
         lines.append(f"{NO_DATA}.")
     elif not p.models:
-        lines.append("BharatCode Desktop recorded no replies in this period.")
+        lines.append(_no_replies(p))
     else:
         lines.append(f"Tokens per model ({STATS_NOTE}):")
         rows = _model_rows(p)
@@ -216,7 +229,7 @@ def render_short(p: Period) -> str:
     if p.models is None:
         models = f"{NO_DATA}."
     elif not p.models:
-        models = "BharatCode Desktop recorded no replies in this period."
+        models = _no_replies(p)
     else:
         used = "; ".join(f"{name} {tokens:,} tokens in {messages} message(s)" for name, messages, tokens in _model_rows(p))
         models = f"By model ({STATS_NOTE}): {used}."
