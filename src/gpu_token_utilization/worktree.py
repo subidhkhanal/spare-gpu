@@ -13,6 +13,7 @@ the project. Both spare-gpu folders ignore themselves in git, in case the projec
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 import stat
@@ -32,6 +33,26 @@ GENERATED = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
 SKIP_DIRS = {".git", ".gtu", "spare-gpu", ".hg", ".svn",
              "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
              "dist", "build", "target", ".next", ".gradle", "out", "coverage"}
+# Folders a job's copy never gets, even when git tracks them. BharatCode Desktop loads a project's
+# .opencode folder: every tool/*.ts|js and plugin in it runs as code in the session, and its agents
+# and commands steer it; .claude, .agents and .cursor hold instructions other assistants read. So
+# a repo you did not write could run code inside the job's Desktop session, or change the job's
+# permissions, through them. Matched at any depth, ignoring case (Windows does). .github/workflows
+# is kept: GitHub reads it, nothing a job runs does.
+EXCLUDE_DIRS = {".opencode", ".claude", ".agents", ".cursor"}
+# Files a job's copy never gets, even when tracked. Desktop reads opencode.json, opencode.jsonc
+# and config.json at the project root, where one line can turn a permission on (the job writes
+# its own deny-first opencode.json there). The rest are credentials a job has no business reading
+# or sending: .env files, private keys and certificates (.pem, .key, .p12, .pfx, id_rsa*) and
+# password databases (.kdbx). A pattern starting with "/" matches at the project root only; the
+# others match the file's name at any depth.
+EXCLUDE_FILES = ("/opencode.json", "/opencode.jsonc", "/config.json", ".env", ".env.*",
+                 "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "*.kdbx")
+# What .gtu/copy-include can never bring back: Desktop runs these as code.
+NEVER_COPIED = (".opencode/tool", ".opencode/plugin")
+# The project's own say, one glob per line (fnmatch on the posix path relative to the project):
+# copy-exclude leaves more out; copy-include overrides the exclusions above and copy-exclude.
+COPY_EXCLUDE, COPY_INCLUDE = ".gtu/copy-exclude", ".gtu/copy-include"
 # A project that isn't a git repo has no .gitignore to keep data and build output out of each
 # job's copy, so one whose copy would be this big gets a note (the copy still goes ahead).
 WARN_COPY_BYTES = 200 * 1024 * 1024
@@ -108,22 +129,90 @@ def _is_repo_top(repo: Path) -> bool:
     return proc.returncode == 0 and Path(proc.stdout.strip()).resolve() == Path(repo).resolve()
 
 
+def _globs(path: Path) -> list[str]:
+    """The globs in a .gtu/copy-* file: one per line, blank lines and # comments skipped, written
+    with either slash, lower-cased (matching ignores case, as Windows does)."""
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise GitError(f"couldn't read {path}: {exc}") from None
+    globs = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            globs.append(line.replace("\\", "/").removeprefix("./").lstrip("/").lower())
+    return globs
+
+
+def _excluded_by_default(low: str) -> bool:
+    parts = low.split("/")
+    if any(part in EXCLUDE_DIRS for part in parts[:-1]):
+        return True
+    for pattern in EXCLUDE_FILES:
+        if pattern.startswith("/"):
+            if low == pattern[1:]:
+                return True
+        elif fnmatch.fnmatchcase(parts[-1], pattern):
+            return True
+    return False
+
+
+def never_copied(rel: str) -> bool:
+    """Whether `rel` (a project-relative posix path) is something no setting can put in a copy."""
+    low = rel.replace("\\", "/").lower()
+    return any(low.startswith(f"{folder}/") or f"/{folder}/" in low for folder in NEVER_COPIED)
+
+
+def copy_filter(repo: Path) -> Callable[[str], bool]:
+    """A test of a project-relative posix path: True when a job's copy (and a review listing) may
+    have the file. EXCLUDE_DIRS and EXCLUDE_FILES apply, then the project's .gtu/copy-exclude;
+    .gtu/copy-include globs override both, except for Desktop's tool and plugin folders."""
+    repo = Path(repo)
+    excludes, includes = _globs(repo / COPY_EXCLUDE), _globs(repo / COPY_INCLUDE)
+
+    def keep(rel: str) -> bool:
+        low = rel.replace("\\", "/").lower()
+        if never_copied(low):
+            return False
+        if any(fnmatch.fnmatchcase(low, glob) for glob in includes):
+            return True
+        return not _excluded_by_default(low) and not any(fnmatch.fnmatchcase(low, glob) for glob in excludes)
+
+    return keep
+
+
 def project_files(repo: Path) -> list[str]:
     """The project's files as the user sees them, relative, with "/" separators. In a git repo,
     what git shows (tracked files, plus new ones minus what .gitignore hides and minus
-    SKIP_DIRS); elsewhere every file, minus SKIP_DIRS at any depth."""
+    SKIP_DIRS); elsewhere every file, minus SKIP_DIRS at any depth. Minus, either way, what
+    copy_filter leaves out: Desktop's config, tool and agent folders and credential files."""
     repo = Path(repo)
+    keep = copy_filter(repo)
     if _is_repo_top(repo):
         tracked = _git(repo, "ls-files", "-c", "-z").stdout.split("\0")
         untracked = _git(repo, "ls-files", "-o", "--exclude-standard", "-z").stdout.split("\0")
         names = {n for n in tracked if n} | {n for n in untracked if n and n.split("/")[0] not in SKIP_DIRS}
-        return sorted(n for n in names if (repo / n).is_file())
+        return sorted(n for n in names if keep(n) and (repo / n).is_file())
     found = []
     for root, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         rel = Path(root).relative_to(repo)
-        found += [(rel / f).as_posix() for f in files]
+        found += [name for name in ((rel / f).as_posix() for f in files) if keep(name)]
     return sorted(found)
+
+
+def resolve_commit(repo: Path, ref: str) -> str | None:
+    """The full id of commit `ref` (HEAD, a branch, a tag, a short id) in the repo at `repo`, or
+    None when there is no such commit or `repo` isn't a git repo."""
+    ref = ref.strip()
+    if not ref or ref.startswith("-"):
+        return None
+    proc = _git(Path(repo), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
 
 def copy_size(repo: Path, files: list[str]) -> int:

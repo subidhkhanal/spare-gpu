@@ -17,9 +17,9 @@ from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .budget import Budgets
-from .jobs import JobConfig
+from .jobs import JobConfig, commit_sha
 from .scheduler import Scheduler
-from . import actions, bc_config, dryrun, pack, router, runstate, settings, waits, workers, worktree
+from . import actions, bc_config, dryrun, hooks, pack, router, runstate, settings, waits, workers, worktree
 from . import report as reporting
 from .store import Store, StoreError
 
@@ -445,15 +445,29 @@ def _fail(message: str) -> None:
 def add(
     kind: JobKind = typer.Argument(..., help="What to do: tests, docs, review, fix (apply findings given with --note), "
                                               "green (make the tests pass) or implement (carry out a Markdown plan file)."),
-    target: Path = typer.Argument(..., help="File or folder in this repo to work on ('.' for the whole project); "
-                                             "for implement, the plan file (.md)."),
+    target: Path = typer.Argument(None, help="File or folder in this repo to work on ('.' for the whole project; "
+                                             "not needed with --commit); for implement, the plan file (.md)."),
     note: str = typer.Option(None, "--note", help="Extra instructions for the job."),
+    commit: str = typer.Option(None, "--commit", help="For review: the commit to review (HEAD, a branch or a commit id) "
+                                                      "instead of a file or folder; the review reads `git show` of it."),
+    quiet: bool = typer.Option(False, "--quiet", help="Print one line only (what the post-commit hook does)."),
 ) -> None:
-    """Queue a job. It runs later with `gtu start`; its edited files are copied to spare-gpu/<date>_<time>/."""
+    """Queue a job. It runs later with `gtu start`; its edited files are copied to spare-gpu/<date>_<time>/.
+    `gtu add review --commit HEAD` queues a review of your latest commit."""
+    if target is None and commit is None:
+        _fail("say what to work on: a file or folder, or --commit <id> for a review of a commit.")
+    if target is not None and commit is not None:
+        _fail("give a file or folder, or --commit, not both.")
     try:
-        outcome = actions.queue_job(lambda repo: Store.open_default(), Path.cwd(), kind.value, str(target), note)
+        outcome = actions.queue_job(lambda repo: Store.open_default(), Path.cwd(), kind.value, str(target or "."), note,
+                                    commit=commit)
     except actions.ActionError as exc:
         _fail(str(exc))
+    if quiet:
+        sha = commit_sha(outcome.job.target)
+        what = f"a review of commit {sha[:7]}" if sha else f"{outcome.job.kind} for {outcome.job.target}"
+        typer.echo(f"spare-gpu: queued {what} (job {outcome.job.id}). Run gtu start to see it.")
+        return
     typer.echo(f"Queued job {outcome.job.id}: {outcome.job.kind} {outcome.job.target}")
     if outcome.note:
         typer.echo(f"Note: {outcome.note}")
@@ -792,6 +806,29 @@ def apply(
         typer.echo(line)
 
 
+hooks_app = typer.Typer(
+    help="Git hooks for this repo: pre-commit runs `gtu guard`, post-commit queues a review of each commit for `gtu start`.",
+    no_args_is_help=True,
+)
+app.add_typer(hooks_app, name="hooks")
+
+
+@hooks_app.command("install")
+def hooks_install(
+    uninstall: bool = typer.Option(False, "--uninstall", help="Remove spare-gpu's two hooks. Hooks that aren't "
+                                                              "spare-gpu's are never touched."),
+) -> None:
+    """Write spare-gpu's pre-commit and post-commit hooks into this repo's .git/hooks: plain sh
+    scripts that call this Python by its full path. A hook of your own that is already there is
+    left as it is, and the one line to add to it is printed instead."""
+    try:
+        lines = hooks.uninstall(Path.cwd()) if uninstall else hooks.install(Path.cwd())
+    except hooks.HookError as exc:
+        _fail(str(exc))
+    for line in lines:
+        typer.echo(line)
+
+
 @app.command()
 def undo(
     stamp: str = typer.Argument("latest", help="The result folder `gtu apply` used, or latest: the newest one applied."),
@@ -850,3 +887,20 @@ def cost(
     with Store.open_default() as store:
         summary = costs.period(store, days=days)
     typer.echo(costs.render_short(summary) if short else costs.render(summary))
+
+
+@app.command()
+def guard() -> None:
+    """Check what `git commit` is about to save. Exit code 1, naming the file and line, when the
+    staged changes add a key-shaped string (an AWS key, an API token, a JWT, a private key, a
+    password= value) or add or change a file under .opencode/tool, .opencode/plugin, .claude or
+    .agents; silent when all is well. The pre-commit hook from `gtu hooks install` runs it;
+    `git commit --no-verify` skips it once."""
+    try:
+        findings = hooks.guard(Path.cwd())
+    except hooks.HookError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2)
+    if findings:
+        typer.echo(hooks.explain(findings), err=True)
+        raise typer.Exit(1)

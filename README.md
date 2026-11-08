@@ -150,6 +150,8 @@ Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's 
 - It never pushes and never commits to your project.
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, and your other MCP servers are switched off inside a job.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
+- Some files are never copied into a job, even if git tracks them: tool and instruction folders that Desktop would run or obey (`.opencode`, `.claude`, `.agents`, `.cursor`), Desktop's own config files, and credential files (`.env`, `*.pem`, `*.key`, `id_rsa*` and similar). To leave out more, list patterns in `.gtu/copy-exclude`, one per line.
+- Before code is sent for review, anything that looks like a key or password is replaced with `[redacted]`.
 
 ## Apply a result, or take it back
 
@@ -183,6 +185,18 @@ gtu cost --days 7   # the last week
 ```
 
 Shows the exact tokens per model from Desktop's own record (every chat on this machine), then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three. `--short` gives one paragraph; `/cost` in a chat shows the same.
+
+## Git hooks (optional)
+
+```powershell
+gtu hooks install
+```
+
+Adds two helpers to this project's git:
+- **Before each commit:** stops the commit if it adds something that looks like a key or password, or changes a tool or instruction folder (`.opencode/tool`, `.opencode/plugin`, `.claude`, `.agents`). It names the file and line. `git commit --no-verify` skips the check once.
+- **After each commit:** queues a code review of that commit. Run it with `gtu start`; the report lands in `spare-gpu/` like any job's. To review any commit by hand: `gtu add review --commit <id>`.
+
+Hooks you already have are never overwritten: it prints the one line to add instead. `gtu hooks install --uninstall` removes only spare-gpu's hooks.
 
 ## Settings
 

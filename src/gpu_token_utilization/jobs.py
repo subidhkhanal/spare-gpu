@@ -10,7 +10,10 @@ docs:   write   - the session adds docstrings and README text (no commands allow
                   existing docstring was removed or shortened, and a Markdown file only if no line
                   was removed; everything else is reverted. Then commit.
 review: review  - our own client sends the code (with line numbers) and writes the answer to
-                  gtu-review-<job-id>.md. No source file is changed.
+                  gtu-review-<job-id>.md. No source file is changed. A review of a commit (target
+                  commit:<id>, from `gtu add review --commit` or the post-commit hook) sends
+                  `git show --stat --patch` of it instead. Key-shaped strings are redacted from
+                  either listing before it is sent (redact.py).
 fix:    write   - a Desktop session applies the review findings in the job's note; saved as a patch.
         verify  - changes to existing test files are reverted, the test command runs, and the fix
                   is kept only if it passes.
@@ -41,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import worktree
+from . import redact, worktree
 from .agent import CONFIG_FILE, AgentResult
 from .api import env_without_key
 from .budget import BudgetExceeded
@@ -537,37 +540,97 @@ If a section has nothing worth reporting, write "Nothing found." under it.{note}
 {listing}"""
 
 
-def review_messages(listing: str, note: str | None = None) -> list[dict]:
+REVIEW_COMMIT_ASK = """Review the commit below, shown as `git show --stat --patch` prints it: its message, the files it touched, and the diff (lines starting with + were added, lines starting with - removed).
+Write a Markdown report with these sections:
+## Likely bugs
+## Risky code
+## Suggestions
+For every point give the file as `path`, quote the added line it concerns in a few words, explain the problem in one or two sentences, and suggest a fix.
+If a section has nothing worth reporting, write "Nothing found." under it.{note}
+
+{listing}"""
+
+
+def review_messages(listing: str, note: str | None = None, commit: bool = False) -> list[dict]:
+    ask = REVIEW_COMMIT_ASK if commit else REVIEW_ASK
     return [
         {"role": "system", "content": REVIEW_SYSTEM},
-        {"role": "user", "content": REVIEW_ASK.format(listing=listing, note=f"\nThe developer adds: {note}" if note else "")},
+        {"role": "user", "content": ask.format(listing=listing, note=f"\nThe developer adds: {note}" if note else "")},
     ]
 
 
 def _source_files(root: Path, target: Path) -> list[Path]:
+    keep = worktree.copy_filter(root)  # what a job's copy leaves out (Desktop's config, credentials) isn't reviewed either
     if target.is_file():
-        return [target]
+        return [target] if keep(target.relative_to(root).as_posix()) else []
     return sorted(
         p for p in target.rglob("*")
         if p.is_file() and p.stat().st_size <= MAX_FILE_BYTES
         and not any(part in SKIP_DIRS or part.startswith(".") for part in p.relative_to(target).parts)
+        and keep(p.relative_to(root).as_posix())
     )
 
 
 MIN_CUT_CHARS = 2_000  # a file is cut to the room left only when that room is worth reviewing
+COMMIT_TARGET = "commit:"  # a review job's target for one commit: commit:<full id>
+
+
+def commit_sha(target: str) -> str | None:
+    """The commit id in a target of the form commit:<id>, else None."""
+    if not target.startswith(COMMIT_TARGET):
+        return None
+    return target[len(COMMIT_TARGET):].strip() or None
+
+
+def fetch_commit(workdir: Path, repo: Path, sha: str) -> None:
+    """Bring one commit of the project's history into the job's copy, which `git init` made without
+    any: a `git fetch` from the project, which only reads it (like every git command a job runs
+    there). A copy that already has the commit, a resumed job's, is left as it is."""
+    have = subprocess.run([*worktree.GIT, "cat-file", "-e", f"{sha}^{{commit}}"], cwd=workdir, capture_output=True,
+                          stdin=subprocess.DEVNULL)
+    if have.returncode == 0:
+        return
+    proc = subprocess.run([*worktree.GIT, "fetch", "--quiet", "--no-tags", str(repo), sha], cwd=workdir,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        raise BharatCodeError(f"couldn't read commit {sha[:12]} from {repo}: {proc.stderr.strip()[:300]}. If it was "
+                              "amended or rebased away, queue a review of the new commit.")
+
+
+def commit_listing(root: Path, sha: str, max_chars: int) -> tuple[str, list[str]]:
+    """`git show --stat --patch` of one commit, from the history in `root`, capped like
+    numbered_listing: cut at the last whole line that fits, and the cut noted."""
+    proc = subprocess.run([*worktree.GIT, "show", "--no-color", "--no-ext-diff", "--no-textconv", "--stat", "--patch", sha],
+                          cwd=root, capture_output=True, stdin=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        raise BharatCodeError(f"git show {sha[:12]} failed in {root}: {proc.stderr.decode('utf-8', 'replace').strip()[:300]}")
+    text = source_text(proc.stdout)
+    if len(text) <= max_chars:
+        return text, []
+    cut = text[:max_chars]
+    cut = cut[: cut.rfind("\n") + 1]
+    return cut, [f"commit {sha[:12]} (cut after line {cut.count(chr(10))})"]
 
 
 def numbered_listing(root: Path, target: str, max_chars: int) -> tuple[str, list[str]]:
     """The target's text files with `path:line|` prefixes, capped; also returns what was left out.
     A file that doesn't fit is cut at the last whole line that does (noted as "cut after line
     N") when that is worth reviewing, or when it is the first file, so one big file is reviewed
-    in part rather than not at all; the rest are left out whole."""
+    in part rather than not at all; the rest are left out whole. A target of commit:<id> gives
+    `git show` of that commit from the history in `root` instead (commit_listing)."""
+    sha = commit_sha(target)
+    if sha:
+        return commit_listing(root, sha, max_chars)
     parts, omitted, used = [], [], 0
     for file in _source_files(root, root / target):
-        data = file.read_bytes()
+        rel = file.relative_to(root).as_posix()
+        try:
+            data = file.read_bytes()
+        except OSError:
+            omitted.append(f"{rel} (couldn't be read)")  # another program has it locked, say
+            continue
         if b"\0" in data:
             continue
-        rel = file.relative_to(root).as_posix()
         block = "".join(f"{rel}:{n}| {line}\n" for n, line in enumerate(source_text(data).splitlines(), 1))
         if used + len(block) > max_chars:
             room = max_chars - used
@@ -588,16 +651,21 @@ def numbered_listing(root: Path, target: str, max_chars: int) -> tuple[str, list
 
 def review(ctx: StepContext) -> str:
     job, cfg = ctx.job, ctx.config
+    sha = commit_sha(job.target)
+    if sha:
+        fetch_commit(ctx.workdir, Path(job.repo), sha)
+    shown = f"commit {sha[:12]}" if sha else job.target
     listing, omitted = numbered_listing(ctx.workdir, job.target, cfg.review_max_chars)
     if not listing:
-        raise BharatCodeError(f"nothing readable to review in {job.target}")
+        raise BharatCodeError(f"nothing readable to review in {shown}")
+    listing, redacted = redact.redact(listing)  # key-shaped strings never reach the model
     estimated_prompt = len(listing) // 3 + 500
     max_tokens = min(cfg.review_max_tokens, ctx.budget_remaining() - estimated_prompt)
     if max_tokens < 500:
         raise BudgetExceeded("not enough token budget left for the review")
-    result = ctx.chat(review_messages(listing, job.note), max_tokens=max_tokens, reasoning_effort="none")
+    result = ctx.chat(review_messages(listing, job.note, commit=bool(sha)), max_tokens=max_tokens, reasoning_effort="none")
     report = [
-        f"# Code review: `{job.target}`",
+        f"# Code review: `{shown}`",
         "",
         f"_Written by spare-gpu job `{job.id}` with BharatCode on "
         f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC. It can be wrong: check each point before acting on it._",
@@ -610,7 +678,8 @@ def review(ctx: StepContext) -> str:
         report += ["", "> **Not reviewed** (over the size limit): " + ", ".join(f"`{p}`" for p in omitted)]
     name = f"gtu-review-{job.id}.md"
     (ctx.workdir / name).write_text("\n".join(report) + "\n", encoding="utf-8")
-    return f"Wrote {name} ({result.usage.total_tokens} tokens" + (", cut off" if result.truncated else "") + ")."
+    return (f"Wrote {name} ({result.usage.total_tokens} tokens" + (", cut off" if result.truncated else "") + "). "
+            f"Redacted {redacted} key-shaped string(s) from the listing before it was sent.")
 
 
 # --- the project's test command, run whole (fix, green and implement) ----------------------

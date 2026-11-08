@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import runstate, worktree
-from .jobs import plan_file_problem
+from .jobs import COMMIT_TARGET, commit_sha, plan_file_problem
 from .store import Job, Store, StoreError
 
 
@@ -23,8 +23,10 @@ class Outcome:
 
 
 def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target: str,
-              note: str | None = None) -> Outcome:
+              note: str | None = None, commit: str | None = None) -> Outcome:
     """Queue a job on `target` (relative to `base`, or absolute) in the project containing it (its git repo, if it's in one, else `base`).
+    With `commit` (HEAD, a branch, a short id; a target of commit:<id> means the same), a review of
+    that commit instead, stored with the target commit:<full id>; `target` is then ignored.
     The store is only opened (and so only created) once the request has passed every check;
     `open_store` gets the repo root."""
     try:
@@ -32,20 +34,26 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
         worktree.ensure_clean(repo)
     except worktree.GitError as exc:
         raise ActionError(str(exc)) from None
-    path = (Path(base) / target).resolve()
-    if not path.exists():
-        raise ActionError(f"{target} does not exist (looked in {base})")
-    try:
-        relative = path.relative_to(repo)
-    except ValueError:
-        raise ActionError(f"{target} is outside this repo ({repo})") from None
-    if kind == "implement":  # its target is the plan to carry out, not code to work on
-        problem = plan_file_problem(path, target)
-        if problem:
-            raise ActionError(problem)
+    if commit is None:
+        commit = commit_sha(target)
+    if commit is not None:
+        stored = COMMIT_TARGET + _commit_to_review(repo, kind, commit)
+    else:
+        path = (Path(base) / target).resolve()
+        if not path.exists():
+            raise ActionError(f"{target} does not exist (looked in {base})")
+        try:
+            relative = path.relative_to(repo)
+        except ValueError:
+            raise ActionError(f"{target} is outside this repo ({repo})") from None
+        if kind == "implement":  # its target is the plan to carry out, not code to work on
+            problem = plan_file_problem(path, target)
+            if problem:
+                raise ActionError(problem)
+        stored = relative.as_posix() or "."
     try:
         with open_store(repo) as store:
-            job = store.add_job(kind, relative.as_posix() or ".", str(repo), note)
+            job = store.add_job(kind, stored, str(repo), note)
     except StoreError as exc:
         raise ActionError(str(exc)) from None
     notes = []
@@ -53,6 +61,19 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
     if size:
         notes.append(size)
     return Outcome(job, "\n".join(notes) or None)
+
+
+def _commit_to_review(repo: Path, kind: str, ref: str) -> str:
+    """The full id of the commit a review job will target, or why it can't."""
+    if kind != "review":
+        raise ActionError(f"only a review job can target a commit; a {kind} job needs a file or folder")
+    try:
+        sha = worktree.resolve_commit(repo, ref)
+    except worktree.GitError as exc:
+        raise ActionError(str(exc)) from None
+    if sha is None:
+        raise ActionError(f"no commit {ref!r} in {repo}. Give HEAD, a branch or a commit id, in a folder that is a git repo.")
+    return sha
 
 
 def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
