@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="spare-gpu: less waiting in BharatCode Desktop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c1410"/>
+      <stop offset="1" stop-color="#2a1d16"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a35"/>
+      <stop offset="1" stop-color="#e1ba00"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="360" rx="18" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="18" fill="url(#grid)"/>
+  <rect x="0" y="352" width="1280" height="8" fill="url(#accent)"/>
+
+  <!-- title -->
+  <text x="72" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="78" font-weight="700" fill="#fff4ec">spare<tspan fill="#ff6a35">-</tspan>gpu</text>
+  <text x="76" y="200" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="27" fill="#d8c8bc">Less waiting, more done in BharatCode Desktop</text>
+  <text x="76" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#a8968a">faster model · safe coding jobs · review &amp; research commands · memory · cost</text>
+
+  <!-- two lanes -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <!-- DeepSeek lane: queued -->
+    <text x="760" y="104" font-size="16" fill="#a8968a">DeepSeek <tspan fill="#c9774f">· queue 2m 43s</tspan></text>
+    <rect x="760" y="114" width="440" height="52" rx="10" fill="#120c09" stroke="#3a2c24"/>
+    <rect x="776" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
+    <rect x="842" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
+    <rect x="908" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
+    <rect x="974" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
+
+    <!-- Qwen lane: free -->
+    <text x="760" y="214" font-size="16" fill="#a8968a">Qwen <tspan fill="#6fd3e6">· free slot</tspan></text>
+    <rect x="760" y="224" width="440" height="52" rx="10" fill="#120c09" stroke="#3a2c24"/>
+    <rect x="776" y="238" width="58" height="24" rx="6" fill="#038fac"/>
+
+    <!-- your task moves to the free lane -->
+    <rect x="1048" y="128" width="58" height="24" rx="6" fill="none" stroke="#ff6a35" stroke-width="2" stroke-dasharray="5 4"/>
+    <path d="M1077 156 C 1077 200, 870 205, 870 232" fill="none" stroke="#ff6a35" stroke-width="2.5"/>
+    <path d="M862 226 L870 238 L878 226" fill="none" stroke="#ff6a35" stroke-width="2.5" stroke-linejoin="round"/>
+    <rect x="842" y="238" width="58" height="24" rx="6" fill="#ff6a35"/>
+    <text x="871" y="255" font-size="13" font-weight="700" fill="#1c1410" text-anchor="middle">you</text>
+  </g>
+</svg>

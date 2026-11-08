@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="How a job travels: you ask in a Desktop chat, spare-gpu picks the model that starts sooner, the job runs as a Desktop session on a private copy, the result is checked, and kept files land in spare-gpu/ for gtu apply">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#ff6a35"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="400" rx="18" fill="#1c1410"/>
+
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <!-- row 1 -->
+    <g>
+      <rect x="40" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
+      <text x="165" y="96" font-size="15" fill="#a8968a" text-anchor="middle">1 · You ask</text>
+      <text x="165" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">/auto write tests</text>
+      <text x="165" y="150" font-size="14" fill="#a8968a" text-anchor="middle">in any Desktop chat</text>
+    </g>
+    <g>
+      <rect x="355" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
+      <text x="480" y="96" font-size="15" fill="#a8968a" text-anchor="middle">2 · Pick the model</text>
+      <text x="480" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">live queue check</text>
+      <text x="480" y="150" font-size="14" fill="#a8968a" text-anchor="middle">DeepSeek or Qwen, sooner wins</text>
+    </g>
+    <g>
+      <rect x="670" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#038fac"/>
+      <text x="795" y="96" font-size="15" fill="#6fd3e6" text-anchor="middle">3 · Run safely</text>
+      <text x="795" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">private copy</text>
+      <text x="795" y="150" font-size="14" fill="#a8968a" text-anchor="middle">a Desktop session you can watch</text>
+    </g>
+    <g>
+      <rect x="985" y="56" width="255" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
+      <text x="1112" y="96" font-size="15" fill="#a8968a" text-anchor="middle">4 · Check the result</text>
+      <text x="1112" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">tests must pass</text>
+      <text x="1112" y="150" font-size="14" fill="#a8968a" text-anchor="middle">anything else is dropped</text>
+    </g>
+
+    <path d="M292 111 H350" stroke="#ff6a35" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M607 111 H665" stroke="#ff6a35" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M922 111 H980" stroke="#ff6a35" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M1112 168 V214 H795 V238" fill="none" stroke="#ff6a35" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+    <!-- row 2 -->
+    <g>
+      <rect x="670" y="244" width="250" height="110" rx="14" fill="#2a1d16" stroke="#e1ba00"/>
+      <text x="795" y="284" font-size="15" fill="#e1ba00" text-anchor="middle">5 · Result waits for you</text>
+      <text x="795" y="314" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">spare-gpu/&lt;date&gt;/</text>
+      <text x="795" y="338" font-size="14" fill="#a8968a" text-anchor="middle">files + RUN.md + manifest</text>
+    </g>
+    <g>
+      <rect x="985" y="244" width="255" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
+      <text x="1112" y="284" font-size="15" fill="#a8968a" text-anchor="middle">6 · You decide</text>
+      <text x="1112" y="314" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">gtu apply</text>
+      <text x="1112" y="338" font-size="14" fill="#a8968a" text-anchor="middle">and gtu undo to take it back</text>
+    </g>
+    <path d="M922 299 H980" stroke="#ff6a35" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+    <!-- note -->
+    <text x="40" y="282" font-size="16" fill="#fff4ec">Your own files are never touched.</text>
+    <text x="40" y="310" font-size="14" fill="#a8968a">Jobs may only read, edit their copy and run your test</text>
+    <text x="40" y="332" font-size="14" fill="#a8968a">command. Keys are redacted; secrets are never copied.</text>
+  </g>
+</svg>
