@@ -769,3 +769,42 @@ def cancel(job_id: str = typer.Argument(..., help="Job id from `gtu list`.")) ->
         typer.echo(f"warning: {outcome.note}", err=True)
     job = outcome.job
     typer.echo(f"Cancelled job {job.id}. Nothing was copied to {worktree.OUTPUT_DIR}/.")
+
+
+@app.command()
+def apply(
+    stamp: str = typer.Argument("latest", help="A result folder under spare-gpu/, e.g. 2026-11-05_12-38-50, or latest."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Say what would happen; write nothing."),
+    force: bool = typer.Option(False, "--force", help="Also replace files that changed since the job started."),
+) -> None:
+    """Copy a finished job's files from spare-gpu/<stamp>/ into your project. A file that changed since
+    the job started is skipped and said so (--force replaces it anyway). What was there before is saved
+    under spare-gpu/<stamp>/.undo/, so `gtu undo` can take it all back. Works from any folder of the project."""
+    from . import landing
+
+    try:
+        outcome = landing.apply(landing.find_root(Path.cwd()), stamp, dry_run=dry_run, force=force)
+    except landing.LandingError as exc:
+        _fail(str(exc))
+    except OSError as exc:
+        _fail(f"{exc}. What was applied before this is recorded, so `gtu undo {stamp}` still works.")
+    for line in outcome.lines:
+        typer.echo(line)
+
+
+@app.command()
+def undo(
+    stamp: str = typer.Argument("latest", help="The result folder `gtu apply` used, or latest: the newest one applied."),
+) -> None:
+    """Take back `gtu apply`: restore every file it replaced from spare-gpu/<stamp>/.undo/, remove the
+    files it added, and remove .undo, so the result can be applied again."""
+    from . import landing
+
+    try:
+        outcome = landing.undo(landing.find_root(Path.cwd()), stamp)
+    except landing.LandingError as exc:
+        _fail(str(exc))
+    except OSError as exc:
+        _fail(f"{exc}. The remaining files are still in spare-gpu/<stamp>/.undo; run `gtu undo {stamp}` again.")
+    for line in outcome.lines:
+        typer.echo(line)

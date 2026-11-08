@@ -830,6 +830,7 @@ MAX_PLAN_CHARS = 40_000
 
 def plan_file_problem(path: Path, target: str) -> str | None:
     """Why `target` can't be an implement job's plan, or None: it must be a Markdown file."""
+    target = Path(target).as_posix()  # as the user typed it, with forward slashes, on Windows too
     if not path.is_file():
         return f"{target} is not a file; an implement job needs a Markdown plan file (.md) in the project"
     if path.suffix.lower() not in PLAN_SUFFIXES:

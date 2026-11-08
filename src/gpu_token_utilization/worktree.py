@@ -244,14 +244,45 @@ def changed_files(worktree: Path, base: str | None) -> list[str]:
     return [name for name in out.split("\0") if name]
 
 
+def _first_commit(worktree: Path) -> str:
+    return _git(worktree, "rev-list", "--max-parents=0", "HEAD").stdout.split()[0]
+
+
+def changes(worktree: Path, base: str | None) -> list[tuple[str, str]]:
+    """("A" | "M" | "D", path) for every file the job added, changed or deleted in its copy since
+    it started, in git's order. Empty if the copy is gone or nothing changed. Renames aren't
+    detected: a moved file is a deletion and an addition, which is what applying it needs."""
+    worktree = Path(worktree)
+    if not (worktree / ".git").exists():
+        return []
+    base = base or _first_commit(worktree)
+    fields = _git(worktree, "diff", "--name-status", "--no-renames", "-z", base, "HEAD").stdout.split("\0")
+    out = []
+    for status, name in zip(fields[::2], fields[1::2]):
+        if status and name:
+            code = status[0]
+            out.append((code if code in ("A", "D") else "M", name))  # a type change counts as a change
+    return out
+
+
+def base_bytes(worktree: Path, base: str | None, name: str) -> bytes | None:
+    """The file exactly as it was when the job started (the copy's first commit), or None if the
+    job added it."""
+    worktree = Path(worktree)
+    base = base or _first_commit(worktree)
+    blob = subprocess.run([*GIT, "show", f"{base}:{name}"], cwd=worktree, capture_output=True)
+    return blob.stdout if blob.returncode == 0 else None
+
+
 def export(repo: Path, job_id: str, base: str | None, when: datetime) -> Path | None:
     """Copy the files the job changed, as it saved them, into <project>/spare-gpu/<date>_<time>/
     with their paths. Returns that folder, or None if the job changed nothing. Call it before
-    remove(): it reads the job's copy."""
+    remove(): it reads the job's copy. A file the job deleted has nothing to copy; the folder is
+    still made for it, and the manifest written next to the files (landing.py) records it."""
     repo = Path(repo)
     copy = worktree_path(repo, job_id)
-    files = changed_files(copy, base)
-    if not files:
+    changed = changes(copy, base)
+    if not changed:
         return None
     root = repo / OUTPUT_DIR
     _ignore_own_folder(root)  # never part of the user's repo, if it is one
@@ -261,7 +292,9 @@ def export(repo: Path, job_id: str, base: str | None, when: datetime) -> Path | 
         n += 1
         folder = root / f"{stamp}-{n}"
     folder.mkdir()
-    for name in files:
+    for code, name in changed:
+        if code == "D":
+            continue
         target = folder / name
         target.parent.mkdir(parents=True, exist_ok=True)
         blob = subprocess.run([*GIT, "show", f"HEAD:{name}"], cwd=copy, capture_output=True)

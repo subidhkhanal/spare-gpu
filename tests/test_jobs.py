@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gpu_token_utilization import jobs, worktree
+from gpu_token_utilization import jobs, landing, worktree
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.fakeapi import Reply
 from gpu_token_utilization.jobs import JobConfig
@@ -66,8 +66,7 @@ def result_files(store, job_id):
     job = store.get_job(job_id)
     if not job.output_dir:
         return set()
-    root = Path(job.repo) / job.output_dir
-    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+    return set(landing.exported_files(Path(job.repo) / job.output_dir))  # RUN.md and manifest.json sit next to them
 
 
 def result(store, job_id, path):
@@ -197,7 +196,7 @@ def test_docs_job_keeps_docstring_only_changes_and_reverts_the_rest(git_repo, st
     # what the user gets: the kept files only, in spare-gpu/<date>_<time>/, with their paths
     folder = store.get_job(job.id).output_dir
     assert folder and folder.startswith("spare-gpu/")
-    copied = sorted(p.relative_to(git_repo / folder).as_posix() for p in (git_repo / folder).rglob("*") if p.is_file())
+    copied = landing.exported_files(git_repo / folder)
     assert copied == ["README.md", "docs/calc.md", "src/calc.py"]  # other.py was reverted, so it isn't there
     assert '"""Return the sum of a and b."""' in (git_repo / folder / "src" / "calc.py").read_text()
 

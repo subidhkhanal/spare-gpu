@@ -70,6 +70,8 @@ You can also just ask in plain words, without `/auto`:
 | "how long is DeepSeek's queue?" | Shows each model's current wait |
 | "is my tests job done?" | Shows queued, running and finished jobs |
 | "what did spare-gpu do today?" | Lists finished jobs, their files and tokens |
+| "fix the failing tests" | Runs a `green` job: changes the code until the tests pass |
+| "implement docs/plan.md" | Runs an `implement` job on that plan file |
 | "cancel the docs job" | Cancels it within a few seconds |
 
 ## Where results go
@@ -149,20 +151,45 @@ Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's 
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, and your other MCP servers are switched off inside a job.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
 
+## Results: apply and undo
+
+Every job leaves two kinds of record, and two commands move its result into your project and back out.
+
+**While it runs**, a job writes `.gtu/jobs/<job id>/ledger.json`: one entry per step with the step's name, the model it ran on, when it started and finished (UTC), the tokens it used, the tools the agent reported using (name and target; empty for a review answered by the API) and the step's outcome text. It is rewritten after every step, so a crash still leaves a usable record of what ran.
+
+**When it finishes**, next to its files in `spare-gpu/<date>_<time>/` you find:
+
+- `RUN.md`: a short summary: job id, kind, target, model, each step with its tokens and tools, which files came out and why, and what the checks reverted.
+- `manifest.json`: every file the job changed, with its path (relative to the project, with `/` separators), its change (`A` added, `M` changed, `D` deleted), `base_sha256` (the file as it was when the job started; null for a new file) and `new_sha256` (the file as the job left it; null for a deletion).
+
+```
+spare-gpu/2026-11-05_12-38-50/
+├── RUN.md
+├── manifest.json
+├── README.md             ← the job's files, as before
+└── src/mathx.py
+```
+
+**`gtu apply [<stamp>|latest] [--dry-run] [--force]`** copies a job's files into your project. `latest` (the default) is the newest folder with a manifest; a stamp is a folder's name, like `2026-11-05_12-38-50`. For every file in the manifest, if your copy is exactly as it was when the job started (or absent, for a new file), the job's version goes in: folders are made as needed, and a file the job deleted is deleted. Your previous version is saved first under `spare-gpu/<stamp>/.undo/<path>`, and what was done is recorded in `.undo/manifest.json`. A file that changed since the job started is skipped, and the command says so; `--force` applies it anyway, still saving your version for undo. One line per file, then a summary. `--dry-run` prints what would happen and writes nothing. A result that was already applied is refused until you run `gtu undo`, so nothing is applied twice.
+
+**`gtu undo [<stamp>|latest]`** takes it back: every file apply replaced is restored from `.undo`, every file apply added is removed, and `.undo` is deleted, so the result can be applied again. `latest` is the newest result that was applied.
+
+Both commands work from any folder of the project, copy bytes exactly (no line-ending changes), and refuse a manifest whose paths point outside the project (an absolute path, a drive letter, or `..`). Nothing else ever writes to your files: a job works in its copy, and the result waits in `spare-gpu/` until you apply it or copy what you want by hand.
+
 ## Settings
 
 `gtu init` saves your project's settings in `.gtu/settings.json`. It looks at `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` to find how your tests run. Commit this file; the rest of `.gtu` stays out of git. Without it, spare-gpu assumes `python -m pytest`.
 
-| Setting | What it sets | Override for one run |
+| Setting | Override for one run | What it sets |
 |---|---|---|
-| `test_command` | How your tests run. Tests and fixes are kept only if this passes. | `GTU_TEST_COMMAND` |
-| `allowed_commands` | Commands a job may run (must include the test command) | `GTU_ALLOWED_COMMANDS` |
-| `test_timeout` | Seconds one test run may take | `GTU_TEST_TIMEOUT` |
-| `agent_timeout` | Seconds one job's Desktop session may take | `GTU_AGENT_TIMEOUT` |
-| `job_token_budget` | Tokens one job may use before it pauses | `GTU_JOB_TOKEN_BUDGET` |
-| `preferred_model` | The model jobs start from | `GTU_PREFERRED_MODEL` |
-| `switch_safe` | Extra job types allowed to move to the faster model | `GTU_SWITCH_SAFE` |
-| `green_rounds` | Tries a "make the tests pass" job gets, 1 to 10 (default 3) | `GTU_GREEN_ROUNDS` |
+| `test_command` | `GTU_TEST_COMMAND` | How your tests run. Tests and fixes are kept only if this passes. |
+| `allowed_commands` | `GTU_ALLOWED_COMMANDS` | Commands a job may run (must include the test command) |
+| `test_timeout` | `GTU_TEST_TIMEOUT` | Seconds one test run may take |
+| `agent_timeout` | `GTU_AGENT_TIMEOUT` | Seconds one job's Desktop session may take |
+| `job_token_budget` | `GTU_JOB_TOKEN_BUDGET` | Tokens one job may use before it pauses |
+| `preferred_model` | `GTU_PREFERRED_MODEL` | The model jobs start from |
+| `switch_safe` | `GTU_SWITCH_SAFE` | Extra job types allowed to move to the faster model |
+| `green_rounds` | `GTU_GREEN_ROUNDS` | Tries a "make the tests pass" job gets, 1 to 10 (default 3) |
 
 `gtu doctor` shows which settings are in use and where each one came from.
 

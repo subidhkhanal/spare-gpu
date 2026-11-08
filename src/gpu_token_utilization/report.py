@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import landing
 from .budget import IST
 from .store import FINAL_STATUSES, Job, Store
 
@@ -51,15 +52,21 @@ def _ts(text: str | None) -> datetime | None:
 
 
 def _output_files(job: Job) -> list[tuple[str, str]]:
-    """(A/M, path) for each file in the job's spare-gpu/<date>_<time>/ folder: M if the project
-    has a file at that path (the job changed it), A if not (the job added it)."""
+    """(A/M/D, path) for each file in the job's spare-gpu/<date>_<time>/ folder, from its
+    manifest. A folder from an older spare-gpu has none: then its files are listed, M if the
+    project has a file at that path (the job changed it), A if not (the job added it)."""
     if not job.output_dir:
         return []
     repo = Path(job.repo)
     folder = repo / job.output_dir
     if not folder.is_dir():
         return []
-    names = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+    if (folder / landing.MANIFEST).is_file():
+        try:
+            return [(f["change"], f["path"]) for f in landing.read_manifest(folder)["files"]]
+        except (landing.LandingError, KeyError, TypeError):
+            pass
+    names = landing.exported_files(folder)
     return [("M" if (repo / name).is_file() else "A", name) for name in names]
 
 

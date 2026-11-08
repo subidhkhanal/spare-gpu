@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from gpu_token_utilization import landing
 from gpu_token_utilization.scheduler import DEFAULT_PLANS, Scheduler
 
 
@@ -142,8 +143,7 @@ def result_files(store, job_id):
     job = store.get_job(job_id)
     if not job.output_dir:
         return set()
-    root = Path(job.repo) / job.output_dir
-    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+    return set(landing.exported_files(Path(job.repo) / job.output_dir))  # RUN.md and manifest.json sit next to them
 
 
 def test_job_works_on_its_own_copy_and_never_touches_main(fake, store, client, git_repo):

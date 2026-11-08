@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import router, waits, worktree
+from . import landing, ledger, router, waits, worktree
 from .agent import AGENT_KINDS, AgentStep
 from .desktop import DesktopAgent, DesktopNotFound
 from .router import Choice
@@ -93,6 +93,28 @@ class StepContext:
                 total_tokens=step.total_tokens, job_id=self.job.id, step_id=self.step_id,
             )
         )
+
+
+class _ToolRecorder:
+    """The job's worker, with the tools each run reports kept for the job's ledger. Everything
+    else (model, label, timeout, with_model) is the worker's own."""
+
+    def __init__(self, worker):
+        self._worker = worker
+        self.tools: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self._worker, name)
+
+    def run(self, *args, **kwargs):
+        result = self._worker.run(*args, **kwargs)
+        self.tools += result.tools
+        return result
+
+    def ask(self, *args, **kwargs):
+        result = self._worker.ask(*args, **kwargs)
+        self.tools += result.tools
+        return result
 
 
 def _label(worker) -> str:
@@ -327,14 +349,18 @@ class Scheduler:
             self._finish(job, "failed")
             return "failed"
         self.store.set_step(step["id"], "running")
+        recorder = _ToolRecorder(worker) if worker is not None else None
         ctx = StepContext(
             job, step["id"], step["name"], self.store, self.client, workdir, state_dir,
-            self.config, worker, lambda: self.budgets.remaining(self.store, job.id),
+            self.config, recorder, lambda: self.budgets.remaining(self.store, job.id),
             self.should_stop, self._log,
         )
         doing = f"{_label(worker)} is working on it ({_model_name(worker)}); this can take several minutes" \
             if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one request"
         self._log(f"Job {job.id}: step {step['seq']} of {len(steps)} ({step['name']}) started: {doing}.")
+        # For the ledger: when the step began, and which requests were logged before it (so a step
+        # run again after a fallback counts only its own).
+        started, requests_before = self._now(), max((r["id"] for r in self.store.requests(job.id)), default=0)
         try:
             output = fn(ctx)
         except StopRequested:
@@ -373,6 +399,7 @@ class Scheduler:
                           f"running it on {waits.name(allowed)} instead.")
                 return "retry"
             self.store.set_step(step["id"], "failed", str(exc))
+            self._record(job, step, state_dir, workdir, recorder, started, requests_before, "failed", str(exc))
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
             return "failed"
@@ -385,6 +412,7 @@ class Scheduler:
                 return "stopped"
             what = f"{type(exc).__name__}: {exc}"
             self.store.set_step(step["id"], "failed", what)
+            self._record(job, step, state_dir, workdir, recorder, started, requests_before, "failed", what)
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed unexpectedly ({what}); the other jobs carry on.")
             return "failed"
@@ -394,6 +422,7 @@ class Scheduler:
             worktree.commit(workdir, f"gtu {job.kind} {job.target}: {step['name']} (job {job.id})",
                             exclude=NEVER_COMMIT)
         self.store.set_step(step["id"], "done", output)
+        self._record(job, step, state_dir, workdir, recorder, started, requests_before, "done", output)
         self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) done.")
         if step["name"] == "verify" and kept_nothing(output) and self._fall_back(job):
             return "done"
@@ -443,6 +472,24 @@ class Scheduler:
         if self.isolate:
             worktree.discard_uncommitted(workdir)
 
+    def _record(self, job: Job, step, state_dir: Path, workdir: Path, worker, started: datetime,
+                requests_before: int, status: str, outcome: str | None) -> None:
+        """One ledger entry for a step that finished or failed, written now: a crash later still
+        leaves the record. Tokens and the model come from the requests the step logged; the tools
+        from what the worker reported (none for a review answered by the API)."""
+        rows = [r for r in self.store.requests(job.id) if r["id"] > requests_before]
+        model = next((r["model"] for r in reversed(rows) if r["model"]), None) \
+            or getattr(worker, "model", None) or self.store.get_job(job.id).model
+        try:
+            ledger.record(
+                state_dir, job, step=step["name"], status=status, model=waits.model_id(model) if model else None,
+                started=started, finished=self._now(), tokens=sum(r["total_tokens"] or 0 for r in rows),
+                tools=ledger.relative_tools(getattr(worker, "tools", []), workdir if self.isolate else None),
+                outcome=outcome,
+            )
+        except OSError as exc:
+            self._log(f"Job {job.id}: couldn't write its ledger ({exc}); the job carries on.")
+
     def _complete(self, job: Job) -> None:
         """A finished job: its edited files go to spare-gpu/<date>_<time>/, then its copy is deleted.
         If copying fails, the copy is kept so nothing is lost."""
@@ -458,14 +505,24 @@ class Scheduler:
                                                  else "it changed no files."))
 
     def _export(self, job: Job) -> str | None:
-        """Copy the finished job's edited files to <repo>/spare-gpu/<date>_<time>/ and record the
-        folder. The path is given relative to the repo, as the user sees it there."""
+        """Copy the finished job's edited files to <repo>/spare-gpu/<date>_<time>/, write RUN.md and
+        manifest.json next to them (from the job's ledger and steps, and the base versions still in
+        its copy), and record the folder. The path is given relative to the repo, as the user sees
+        it there."""
         if not self.isolate:
             return None
-        folder = worktree.export(Path(job.repo), job.id, job.base_commit, self._now().astimezone())
+        repo = Path(job.repo)
+        when = self._now()
+        folder = worktree.export(repo, job.id, job.base_commit, when.astimezone())
         if folder is None:
             return None
-        shown = folder.relative_to(Path(job.repo)).as_posix()
+        job = self.store.get_job(job.id)  # with the model the router gave it
+        landing.write_records(
+            folder, worktree.worktree_path(repo, job.id), job, base=job.base_commit,
+            ledger_doc=ledger.read(repo / ".gtu" / "jobs" / job.id), steps=[dict(s) for s in self.store.steps(job.id)],
+            tokens=self.store.request_summary(job.id)["total_tokens"], exported_at=when,
+        )
+        shown = folder.relative_to(repo).as_posix()
         self.store.set_output_dir(job.id, shown)
         return shown
 
