@@ -130,7 +130,8 @@ def test_without_a_file_the_defaults_apply(project):
     ({"test_timeout": "fast"}, "test_timeout must be a number of seconds above 0"),
     ({"job_token_budget": 0}, "job_token_budget must be a whole number of tokens above 0"),
     ({"job_token_budget": True}, "job_token_budget must be a whole number"),
-    ({"switch_safe": ["tests", "nope"]}, "switch_safe names unknown job kind(s) nope; the kinds are tests, docs, review, fix"),
+    ({"switch_safe": ["tests", "nope"]}, "switch_safe names unknown job kind(s) nope; the kinds are tests, docs, review, fix, green, implement"),
+    ({"green_rounds": 11}, "green_rounds must be a whole number of rounds from 1 to 10"),
     ({"test_command": "rm -rf /"}, "test command 'rm -rf /' is not in the allowlist"),
 ])
 def test_a_broken_file_is_refused_with_the_fix(project, doc, message):

@@ -569,29 +569,36 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             return tools.pack_cost()
 
     @server.tool(annotations=notes(False, world=True))
-    async def spare_delegate(type: Literal["tests", "docs", "review", "fix"], path: str, note: str | None = None,
-                             your_model: str | None = None, ctx: Context | None = None) -> str:
-        """Run a self-contained task (write tests, write docs, review code, or apply a fix for a file
-        or folder in this repo) now, as a BharatCode Desktop session the user can watch, on
-        whichever model will start it sooner, so the user doesn't wait in DeepSeek's queue. Only task
-        types measured as switch-safe ever move to the other model; the result is checked before
-        it's kept, and if the check keeps nothing it reruns once on the preferred model. The call
-        returns when the job is done (minutes for tests and docs), with the result and where its
-        edited files are: spare-gpu/<date>_<time>/ in the project. The user's own files are never
-        touched, and the work itself never comes back into this chat.
+    async def spare_delegate(type: Literal["tests", "docs", "review", "fix", "green", "implement"], path: str,
+                             note: str | None = None, your_model: str | None = None, ctx: Context | None = None) -> str:
+        """Run a self-contained task (write tests, write docs, review code, apply a fix, make the
+        tests pass, or implement a plan file, for a file or folder in this repo) now, as a BharatCode
+        Desktop session the user can watch, on whichever model will start it sooner, so the user
+        doesn't wait in DeepSeek's queue. Only task types measured as switch-safe ever move to the
+        other model; the result is checked before it's kept, and if the check keeps nothing it reruns
+        once on the preferred model. The call returns when the job is done (minutes for tests and
+        docs), with the result and where its edited files are: spare-gpu/<date>_<time>/ in the
+        project. The user's own files are never touched, and the work itself never comes back into
+        this chat.
 
         Use it when the user wants the task done now: "write tests for src/pay.py on whichever
         model is free", "get this reviewed now, don't wait in the queue", "delegate the docs for
-        utils", "run tests for the payments module". For a plain question (not a coding chore) use
-        spare_ask. Work for later is queued from a terminal with `gtu add` and run by `gtu start`.
+        utils", "run tests for the payments module", "make the tests pass", "fix the failing
+        tests", "implement docs/plan.md". For a plain question (not a coding chore) use spare_ask.
+        Work for later is queued from a terminal with `gtu add` and run by `gtu start`.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without
                 changing code; "review" writes a code review; "fix" applies the review findings given
                 in `note` (from /code-review --fix) and keeps the result only if the project's test
-                command passes with it.
-            path: File or folder relative to the repo root, e.g. "src/pay.py" ("." for a fix). Pass the
-                user's path exactly as given; spare-gpu says if it doesn't exist.
+                command passes with it; "green" makes the project's failing tests pass by changing
+                the code, never the tests, in up to green_rounds rounds, and keeps the result only
+                once the test command passes; "implement" carries out the Markdown plan file named
+                by `path` and keeps the result only if the test command passes.
+            path: File or folder relative to the repo root, e.g. "src/pay.py" ("." for a fix, or for
+                green when no file or folder is named; for implement, the plan file, e.g.
+                "docs/plan.md"). Pass the user's path exactly as given; spare-gpu says if it doesn't
+                exist.
             note: Optional extra instructions in the user's words; for "fix", the findings, one per
                 line with file:line and the change wanted.
             your_model: The model you are running on, as your system prompt names it (e.g.

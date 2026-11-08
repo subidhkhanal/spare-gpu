@@ -29,6 +29,7 @@ KEYS: dict[str, tuple[str, str]] = {
     "allowed_commands": ("GTU_ALLOWED_COMMANDS", "command prefixes a job may run; the test command must be one of them"),
     "test_timeout": ("GTU_TEST_TIMEOUT", "seconds one test run may take"),
     "agent_timeout": ("GTU_AGENT_TIMEOUT", "seconds one Desktop session of a job may take"),
+    "green_rounds": ("GTU_GREEN_ROUNDS", "rounds a green job gets to make the tests pass, 1 to 10"),
     "job_token_budget": ("GTU_JOB_TOKEN_BUDGET", "tokens one job may use before it pauses"),
     "preferred_model": ("GTU_PREFERRED_MODEL", "the model a queued job runs on unless the other starts it sooner"),
     "switch_safe": ("GTU_SWITCH_SAFE", "job kinds that may move to the faster model, on top of routing_policy.json"),
@@ -113,6 +114,9 @@ def _problem(key: str, value) -> str | None:
         return None if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else "must be a number of seconds above 0"
     if key == "job_token_budget":
         return None if isinstance(value, int) and not isinstance(value, bool) and value > 0 else "must be a whole number of tokens above 0"
+    if key == "green_rounds":
+        return None if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 10 \
+            else "must be a whole number of rounds from 1 to 10"
     if key == "preferred_model":
         return None if isinstance(value, str) and value.strip() else "must be a model id such as deepseek-v4.1-flash"
     if key == "switch_safe":
@@ -177,6 +181,7 @@ def defaults(root: Path) -> tuple[dict, str]:
         "allowed_commands": allowed,
         "test_timeout": config.test_timeout,
         "agent_timeout": config.agent_timeout,
+        "green_rounds": config.green_rounds,
         "job_token_budget": Budgets().per_job,
         "preferred_model": DELEGATE_PREFERRED,
         "switch_safe": [],

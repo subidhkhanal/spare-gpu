@@ -159,14 +159,22 @@ def quick_tools(base, http, **kwargs):
 @pytest.fixture
 def scenario(desktop_fake):
     """Script the fake Desktop's sessions: each step's tokens, the files it writes and how many
-    polls it takes, then an error or the closing text. Returns the fake, whose .sessions record
-    each session's folder, prompt and permission file."""
-    def script(steps=None, error=None, text="done"):
-        given = steps or [{"tokens": 1000}]
-        desktop_fake.steps = [Step(tokens=s.get("tokens", 1000), writes=s.get("writes") or {}, polls=s.get("polls", 1))
-                              for s in given]
-        if not error:
-            desktop_fake.steps[-1].text = text
+    polls it takes, then an error or the closing text. `calls` gives each session in turn its own
+    list of steps (the last list repeats). Returns the fake, whose .sessions record each session's
+    folder, prompt and permission file."""
+    def steps_of(given):
+        made = [Step(tokens=s.get("tokens", 1000), writes=s.get("writes") or {}, polls=s.get("polls", 1))
+                for s in given or [{"tokens": 1000}]]
+        if not error_now[0]:
+            made[-1].text = text_now[0]
+        return made
+
+    error_now, text_now = [None], ["done"]
+
+    def script(steps=None, error=None, text="done", calls=None):
+        error_now[0], text_now[0] = error, text
+        desktop_fake.steps = steps_of(steps)
+        desktop_fake.calls = [steps_of(c) for c in calls] if calls else None
         desktop_fake.error = error
         return desktop_fake
 

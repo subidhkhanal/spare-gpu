@@ -34,7 +34,7 @@ def test_an_older_store_learns_the_fix_kind_and_keeps_its_rows(tmp_path, job_rep
     path = tmp_path / ".gtu" / "gtu.db"
     path.parent.mkdir()
     old = sqlite3.connect(path)
-    old.executescript(SCHEMA.replace("'tests', 'docs', 'review', 'fix'", "'tests', 'docs', 'review'"))
+    old.executescript(SCHEMA.replace("'tests', 'docs', 'review', 'fix', 'green', 'implement'", "'tests', 'docs', 'review'"))
     old.execute("INSERT INTO jobs (id, kind, target, repo, note, created_at, updated_at) VALUES "
                 "('old00001', 'tests', 'src', ?, 'keep me', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')", (job_repo,))
     old.execute("INSERT INTO job_steps (job_id, seq, name, status) VALUES ('old00001', 1, 'write', 'done')")

@@ -5,7 +5,9 @@ Speaks the few routes spare-gpu uses: /global/health, POST /session, POST
 /session/{id}/abort. A session plays its scripted steps as its messages are polled, each step an
 assistant message with a step-finish part (and a tool part per tool or file written), like the
 real server. A step can write files into the session's folder, as the model's edit tool would,
-and take several polls to finish. The job's opencode.json, if one is in the folder when the
+and take several polls to finish. With `calls`, each new session plays its own list of steps (the
+first session the first list, and so on; the last list repeats), so a job whose rounds must differ,
+like green, can be scripted. The job's opencode.json, if one is in the folder when the
 prompt arrives, is recorded with the session.
 """
 
@@ -34,6 +36,7 @@ class Step:
 @dataclass
 class FakeDesktop:
     steps: list[Step] = field(default_factory=lambda: [Step(text="done")])
+    calls: list[list[Step]] | None = None  # one list of steps per session, in order; the last repeats
     error: str | None = None  # set on the last assistant message
     stalled: bool = False  # the last reply never completes while the session goes idle (seen 5 Nov)
     password: str = PASSWORD
@@ -61,12 +64,14 @@ class FakeDesktop:
         if path == "/session" and method == "POST":
             sid = f"ses_{len(self.sessions) + 1}"
             body = json.loads(request.content or b"{}")
+            steps = self.calls[min(len(self.sessions), len(self.calls) - 1)] if self.calls else self.steps
             self.sessions[sid] = {"directory": directory, "title": body.get("title"), "prompt": None, "config": None,
-                                  "revealed": 0, "ticks": 0, "aborted": False, "permission": body.get("permission")}
+                                  "revealed": 0, "ticks": 0, "aborted": False, "permission": body.get("permission"),
+                                  "steps": steps}
             return httpx.Response(200, json={"id": sid, "directory": directory, "title": body.get("title")})
         if path == "/session/status":
             return httpx.Response(200, json={sid: {"type": "busy"} for sid, s in self.sessions.items()
-                                             if s["prompt"] and not s["aborted"] and s["revealed"] < len(self.steps)})
+                                             if s["prompt"] and not s["aborted"] and s["revealed"] < len(s["steps"])})
         parts = path.strip("/").split("/")
         if len(parts) >= 3 and parts[0] == "session" and parts[1] in self.sessions:
             s = self.sessions[parts[1]]
@@ -84,9 +89,9 @@ class FakeDesktop:
         return httpx.Response(404)
 
     def _advance(self, s: dict) -> None:
-        if not s["prompt"] or s["aborted"] or s["revealed"] >= len(self.steps):
+        if not s["prompt"] or s["aborted"] or s["revealed"] >= len(s["steps"]):
             return
-        step = self.steps[s["revealed"]]
+        step = s["steps"][s["revealed"]]
         if s["ticks"] == 0:
             for name, content in step.writes.items():
                 target = Path(s["directory"]) / name
@@ -99,8 +104,8 @@ class FakeDesktop:
 
     def _messages(self, sid: str, s: dict) -> list[dict]:
         out = [{"info": {"id": "msg_0", "role": "user"}, "parts": []}] if s["prompt"] else []
-        for i, step in enumerate(self.steps[: s["revealed"]], 1):
-            last = i == len(self.steps)
+        for i, step in enumerate(s["steps"][: s["revealed"]], 1):
+            last = i == len(s["steps"])
             parts = [{"id": f"prt_{i}_a", "type": "step-start"}]
             tools = ([step.tool] if step.tool else []) + [("edit", name) for name in step.writes]
             for j, (tool, file) in enumerate(tools):

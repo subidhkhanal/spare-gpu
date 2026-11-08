@@ -1,4 +1,4 @@
-"""The three job types and the steps they are made of.
+"""The job types and the steps they are made of.
 
 tests:  write   - a BharatCode Desktop session writes new test files (it may run allowlisted test commands);
                   the result is saved as a patch outside the worktree, nothing is committed yet.
@@ -11,6 +11,16 @@ docs:   write   - the session adds docstrings and README text (no commands allow
                   was removed; everything else is reverted. Then commit.
 review: review  - our own client sends the code (with line numbers) and writes the answer to
                   gtu-review-<job-id>.md. No source file is changed.
+fix:    write   - the CLI applies the review findings in the job's note; saved as a patch.
+        verify  - changes to existing test files are reverted, the test command runs, and the fix
+                  is kept only if it passes.
+green:  write   - the test command runs in the copy first; if it fails, the CLI gets its output and
+                  fixes the code (never the tests); saved as a patch. If it passes, nothing to do.
+        verify  - changes to existing tests reverted, the test command run again. Passing: done.
+                  Failing: another write and verify step are added, up to green_rounds rounds in
+                  all; after the last, the copy goes back to its starting files, so nothing is kept.
+implement: write - the CLI carries out a Markdown plan file (the target); saved as a patch.
+        verify  - like fix: kept only if the test command passes.
 
 Saving the session's work as a patch before checking it means a crash during the check never loses
 it and never leaves unchecked work committed.
@@ -20,6 +30,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import json
 import os
 import re
 import shlex
@@ -47,6 +58,8 @@ def _test_env() -> dict:
     return env_without_key(PYTHONDONTWRITEBYTECODE="1")
 SKIP_DIRS = worktree.SKIP_DIRS  # the review listing skips what the job's copy skips
 MAX_FILE_BYTES = 200_000
+MAX_GREEN_ROUNDS = 10  # the most write-and-check rounds a green job may be given (settings: green_rounds)
+GREEN_ROUNDS_ENV = "GTU_GREEN_ROUNDS"
 
 
 @dataclass
@@ -57,6 +70,7 @@ class JobConfig:
     agent_timeout: float = 900.0  # one job step, as one Desktop session
     review_max_chars: int = 40_000
     review_max_tokens: int = 4_000
+    green_rounds: int = 3  # write-and-check rounds a green job gets to make the tests pass
 
     @classmethod
     def load(cls, root: Path | None) -> JobConfig:
@@ -75,6 +89,8 @@ class JobConfig:
             cfg.test_timeout = float(found.get("test_timeout"))
         if found.get("agent_timeout") is not None:
             cfg.agent_timeout = float(found.get("agent_timeout"))
+        if found.get("green_rounds") is not None:
+            cfg.green_rounds = int(found.get("green_rounds"))
         return cls._from_env(cfg)
 
     @classmethod
@@ -92,12 +108,21 @@ class JobConfig:
             cfg.test_timeout = float(os.environ["GTU_TEST_TIMEOUT"])
         if os.environ.get("GTU_AGENT_TIMEOUT"):
             cfg.agent_timeout = float(os.environ["GTU_AGENT_TIMEOUT"])
+        if os.environ.get(GREEN_ROUNDS_ENV):
+            try:
+                cfg.green_rounds = int(os.environ[GREEN_ROUNDS_ENV])
+            except ValueError:
+                raise ValueError(f"{GREEN_ROUNDS_ENV} must be a whole number from 1 to {MAX_GREEN_ROUNDS}, "
+                                 f"not {os.environ[GREEN_ROUNDS_ENV]!r}") from None
         cfg.check()
         return cfg
 
     def check(self) -> None:
         if not command_allowed(self.test_command, self.allowed_commands):
             raise ValueError(f"test command {' '.join(self.test_command)!r} is not in the allowlist {self.allowed_commands}")
+        rounds = self.green_rounds
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= MAX_GREEN_ROUNDS:
+            raise ValueError(f"green_rounds must be a whole number from 1 to {MAX_GREEN_ROUNDS}, not {rounds!r}")
 
 
 PYTHON_LAUNCHER = re.compile(r"^(python|pythonw|py)(\d+(\.\d+)?)?$")
@@ -588,6 +613,49 @@ def review(ctx: StepContext) -> str:
     return f"Wrote {name} ({result.usage.total_tokens} tokens" + (", cut off" if result.truncated else "") + ")."
 
 
+# --- the project's test command, run whole (fix, green and implement) ----------------------
+
+@dataclass
+class TestRun:
+    ok: bool
+    why: str  # "exit code 1", or "it timed out after 300 s"
+    output: str  # what the command printed, stdout then stderr, for the model and the user
+
+
+def _as_text(data) -> str:
+    return data.decode("utf-8", "replace") if isinstance(data, bytes) else (data or "")
+
+
+def run_test_command(ctx: StepContext) -> TestRun:
+    """Run the project's test command once in the job's copy, with the test environment (no API
+    key, no bytecode caches). The command must be in the allowlist."""
+    if not command_allowed(ctx.config.test_command, ctx.config.allowed_commands):
+        raise BharatCodeError("the test command is not in the allowlist")
+    try:
+        proc = subprocess.run(list(ctx.config.test_command), cwd=ctx.workdir, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=ctx.config.test_timeout,
+                              stdin=subprocess.DEVNULL, env=_test_env())
+    except subprocess.TimeoutExpired as exc:
+        output = "\n".join(part for part in (_as_text(exc.stdout), _as_text(exc.stderr)) if part.strip())
+        return TestRun(False, f"it timed out after {ctx.config.test_timeout:.0f} s", output.strip())
+    output = "\n".join(part for part in (proc.stdout, proc.stderr) if part and part.strip())
+    return TestRun(proc.returncode == 0, f"exit code {proc.returncode}", output.strip())
+
+
+MAX_TEST_OUTPUT_CHARS = 12_000  # of failing test output in a prompt: the end, where pytest's summary is
+TAIL_CHARS = 800  # of it in a verify step's summary, for the user
+
+
+def _tail(text: str, limit: int) -> str:
+    """The last `limit` characters of `text`, whole lines only, saying how much was cut."""
+    text = text.strip() or "(the test command printed nothing)"
+    if len(text) <= limit:
+        return text
+    kept = text[-limit:]
+    kept = kept[kept.find("\n") + 1:] if "\n" in kept else kept
+    return f"[... {len(text) - len(kept):,} characters cut; the end of the output follows]\n{kept}"
+
+
 # --- fix (the findings of /code-review --fix) ----------------------------------------------
 
 FIX_PROMPT = """Apply the review findings below to the code in this repository.
@@ -626,19 +694,187 @@ def verify_fix(ctx: StepContext) -> str:
     changed = [p for _, p in changed_files(ctx.workdir)]
     if not changed:
         return "Kept the fix in 0 file(s): nothing was left to keep.\n" + "\n".join(f"- {n}" for n in notes)
-    try:
-        proc = subprocess.run(list(ctx.config.test_command), cwd=ctx.workdir, capture_output=True,
-                              timeout=ctx.config.test_timeout, stdin=subprocess.DEVNULL, env=_test_env())
-        ok, why = proc.returncode == 0, f"exit code {proc.returncode}"
-    except subprocess.TimeoutExpired:
-        ok, why = False, f"it timed out after {ctx.config.test_timeout:.0f} s"
-    if not ok:
+    run = run_test_command(ctx)
+    if not run.ok:
         for code, path in changed_files(ctx.workdir):
             revert(ctx.workdir, code, path)
-        notes.append(f"discarded the fix: the test command failed with it ({why})")
+        notes.append(f"discarded the fix: the test command failed with it ({run.why})")
         return "Kept the fix in 0 file(s): the test command failed with it.\n" + "\n".join(f"- {n}" for n in notes)
     notes = [f"kept {p}" for p in changed] + notes
     return f"Kept the fix in {len(changed)} file(s): the test command passed.\n" + "\n".join(f"- {n}" for n in notes)
+
+
+# --- green (make the tests pass) -----------------------------------------------------------
+
+GREEN_PROMPT = """Make the tests pass in this repository. Running `{test_command}` fails right now; its output is at the end of this message.
+- The code to fix is in {where}. The tests say what the code should do: fix the code, not the tests.
+- Do not modify or delete any existing test file. You may add new tests.
+- Keep every change small and local; do not change behaviour beyond what the failing tests need.
+- You may run `{test_command}` to check your work. Do not run any other commands.{note}
+When you are finished, reply with one line saying what you changed and whether the tests pass now.
+
+Test output:
+{output}"""
+
+GREEN_STATE = "green.json"  # in the job's state folder: the verify steps counted as rounds so far
+
+
+def _revert_existing_tests(ctx: StepContext, kind: str) -> list[str]:
+    """Undo every change to an existing test file (a job may not pass by weakening the tests);
+    new test files stay. Returns a note per reverted file."""
+    notes = []
+    for code, path in changed_files(ctx.workdir):
+        if TEST_FILE.search(path) and code.strip() != "??":
+            revert(ctx.workdir, code, path)
+            notes.append(f"reverted {path}: {kind} job may not change existing tests")
+    return notes
+
+
+def _base_commit(ctx: StepContext) -> str:
+    """The commit the job's copy started from (its first, when the job doesn't record one)."""
+    return ctx.job.base_commit or _git(ctx.workdir, "rev-list", "--max-parents=0", "HEAD").split()[0]
+
+
+def _changed_since_start(ctx: StepContext) -> list[str]:
+    """Files the job has changed in its copy since it started: saved in earlier steps or still
+    uncommitted now (deleted files left out)."""
+    saved = _git(ctx.workdir, "diff", "--name-only", "--diff-filter=d", "-z", _base_commit(ctx), "HEAD").split("\0")
+    now = [p for code, p in changed_files(ctx.workdir) if code.strip() != "D"]
+    return sorted({*filter(None, saved), *now})
+
+
+def restore_start(ctx: StepContext) -> None:
+    """Put the job's copy back to the files it started from, without touching its history: the
+    index and working tree are read from the starting commit, then what is left untracked goes.
+    The step's commit then records the undoing, and the copy's diff since the start is empty."""
+    _git(ctx.workdir, "read-tree", "-u", "--reset", _base_commit(ctx))
+    _git(ctx.workdir, "clean", "-fdq")
+
+
+def _green_round(ctx: StepContext) -> int:
+    """This verify step's round number (1-based). The counted steps are kept in a small file in
+    the job's state folder, so a step run again (after a crash, or the router's one fallback
+    rerun, which makes every step pending again) keeps the number it had."""
+    path = ctx.state_dir / GREEN_STATE
+    try:
+        counted = [int(x) for x in json.loads(path.read_text(encoding="utf-8")).get("rounds") or []]
+    except (OSError, ValueError, TypeError, AttributeError):
+        counted = []
+    if ctx.step_id not in counted:
+        counted.append(ctx.step_id)
+        path.write_text(json.dumps({"rounds": counted}), encoding="utf-8")
+    return counted.index(ctx.step_id) + 1
+
+
+def write_green(ctx: StepContext) -> str:
+    """Run the test command in the copy; if it fails, have the CLI fix the code. The copy holds
+    what earlier rounds kept, so each round starts from the last one's result."""
+    job = ctx.job
+    patch = ctx.state_dir / "green.patch"
+    run = run_test_command(ctx)
+    if run.ok:
+        patch.parent.mkdir(parents=True, exist_ok=True)
+        patch.write_bytes(b"")  # nothing for verify to apply (an older round's patch must not be)
+        return "Tests already pass; nothing to do."
+    where = "this repository" if job.target in (".", "") else f"`{job.target}`"
+    prompt = GREEN_PROMPT.format(
+        where=where, test_command=" ".join(ctx.config.test_command), output=_tail(run.output, MAX_TEST_OUTPUT_CHARS),
+        note=f"\n- The developer adds: {job.note}" if job.note else "",
+    )
+    result = run_agent(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
+    saved = save_candidate(ctx.workdir, patch)
+    return _agent_summary(result, saved)
+
+
+def verify_green(ctx: StepContext) -> str:
+    """Round N of M. Apply what the CLI wrote, undo changes to existing tests, run the test
+    command. Passing: done, and the changes of every round are kept. Failing with rounds left: a
+    write and a verify step are added, so the scheduler runs another round from this state.
+    Failing on the last round: the copy goes back to its starting files, so nothing is exported."""
+    n, total = _green_round(ctx), ctx.config.green_rounds
+    apply_candidate(ctx.workdir, ctx.state_dir / "green.patch")
+    notes = _revert_existing_tests(ctx, "a green")
+    run = run_test_command(ctx)
+    shown = "".join(f"\n- {note}" for note in notes)
+    if run.ok:
+        changed = _changed_since_start(ctx)
+        if not changed:
+            return "Tests already pass; nothing to do." + shown
+        return f"Tests pass after {n} round(s). Changed {len(changed)} file(s): {', '.join(changed)}." + shown
+    if n < total:
+        if not any(s["status"] == "pending" for s in ctx.store.steps(ctx.job.id)):
+            ctx.store.add_step(ctx.job.id, "write")
+            ctx.store.add_step(ctx.job.id, "verify")
+        return (f"Round {n} of {total}: tests still fail; trying again." + shown
+                + f"\nTest output ({run.why}):\n{_tail(run.output, TAIL_CHARS)}")
+    restore_start(ctx)
+    return (f"Tests still fail after {n} round(s); nothing kept." + shown
+            + f"\n- discarded every change: the test command still fails ({run.why})"
+            + f"\nTest output:\n{_tail(run.output, TAIL_CHARS)}")
+
+
+# --- implement (a Markdown plan file) ------------------------------------------------------
+
+IMPLEMENT_PROMPT = """Implement the plan below in this repository. The plan is the file `{target}`.
+- Do what the plan asks, and nothing more: keep every change small and local.
+- Do not modify or delete existing test files. Add tests for new behaviour where the plan asks for them.
+- You may run `{test_command}` to check your work. Do not run any other commands.{note}
+When you are finished, reply with one line per item of the plan: done, or why not.
+
+The plan:
+{plan}"""
+
+PLAN_SUFFIXES = (".md", ".markdown")
+MAX_PLAN_CHARS = 40_000
+
+
+def plan_file_problem(path: Path, target: str) -> str | None:
+    """Why `target` can't be an implement job's plan, or None: it must be a Markdown file."""
+    if not path.is_file():
+        return f"{target} is not a file; an implement job needs a Markdown plan file (.md) in the project"
+    if path.suffix.lower() not in PLAN_SUFFIXES:
+        return f"{target} is not a Markdown file; an implement job needs a plan file ending in .md"
+    return None
+
+
+def write_implement(ctx: StepContext) -> str:
+    job = ctx.job
+    file = ctx.workdir / job.target
+    problem = plan_file_problem(file, job.target)
+    if problem:
+        raise BharatCodeError(problem)
+    plan = source_text(file.read_bytes()).strip()
+    if not plan:
+        raise BharatCodeError(f"{job.target} is empty; an implement job needs the plan's text")
+    if len(plan) > MAX_PLAN_CHARS:
+        plan = plan[:MAX_PLAN_CHARS] + f"\n[... cut here; the rest is in `{job.target}`]"
+    prompt = IMPLEMENT_PROMPT.format(
+        target=job.target, plan=plan, test_command=" ".join(ctx.config.test_command),
+        note=f"\n- The developer adds: {job.note}" if job.note else "",
+    )
+    result = run_agent(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
+    saved = save_candidate(ctx.workdir, ctx.state_dir / "implement.patch")
+    return _agent_summary(result, saved)
+
+
+def verify_implement(ctx: StepContext) -> str:
+    """Keep the implementation only if the project's test command passes with it; changes to
+    existing test files are reverted first."""
+    if not apply_candidate(ctx.workdir, ctx.state_dir / "implement.patch"):
+        return "Nothing was implemented; nothing kept."
+    notes = _revert_existing_tests(ctx, "an implement")
+    changed = [p for _, p in changed_files(ctx.workdir)]
+    shown = "".join(f"\n- {note}" for note in notes)
+    if not changed:
+        return "Nothing was implemented; nothing kept." + shown
+    run = run_test_command(ctx)
+    if not run.ok:
+        worktree.discard_uncommitted(ctx.workdir)
+        return (f"Tests fail after implementing the plan; nothing kept." + shown
+                + f"\n- discarded the changes: the test command failed with them ({run.why})"
+                + f"\nTest output:\n{_tail(run.output, TAIL_CHARS)}")
+    return (f"Implemented the plan; tests pass. Kept {len(changed)} file(s)."
+            + "".join(f"\n- kept {p}" for p in changed) + shown)
 
 
 PLANS = {
@@ -646,4 +882,6 @@ PLANS = {
     "docs": [("write", write_docs), ("verify", verify_docs)],
     "review": [("review", review)],
     "fix": [("write", write_fix), ("verify", verify_fix)],
+    "green": [("write", write_green), ("verify", verify_green)],
+    "implement": [("write", write_implement), ("verify", verify_implement)],
 }

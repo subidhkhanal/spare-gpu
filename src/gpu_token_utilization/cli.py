@@ -432,6 +432,8 @@ class JobKind(str, Enum):
     docs = "docs"
     review = "review"
     fix = "fix"
+    green = "green"  # make the project's tests pass
+    implement = "implement"  # carry out a Markdown plan file
 
 
 def _fail(message: str) -> None:
@@ -441,8 +443,10 @@ def _fail(message: str) -> None:
 
 @app.command()
 def add(
-    kind: JobKind = typer.Argument(..., help="What to do: tests, docs or review."),
-    target: Path = typer.Argument(..., help="File or folder in this repo to work on."),
+    kind: JobKind = typer.Argument(..., help="What to do: tests, docs, review, fix (apply findings given with --note), "
+                                              "green (make the tests pass) or implement (carry out a Markdown plan file)."),
+    target: Path = typer.Argument(..., help="File or folder in this repo to work on ('.' for the whole project); "
+                                             "for implement, the plan file (.md)."),
     note: str = typer.Option(None, "--note", help="Extra instructions for the job."),
 ) -> None:
     """Queue a job. It runs later with `gtu start`; its edited files are copied to spare-gpu/<date>_<time>/."""

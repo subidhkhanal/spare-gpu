@@ -104,7 +104,8 @@ def _model_name(worker) -> str:
 
 
 KEPT_NOTHING = re.compile(r"^(No test files were generated|Kept 0 passing test|No documentation changes were "
-                          r"generated|Kept documentation changes in 0 file|No fix was generated|Kept the fix in 0 file)")
+                          r"generated|Kept documentation changes in 0 file|No fix was generated|Kept the fix in 0 file|"
+                          r"Tests still fail after|Nothing was implemented|Tests fail after implementing the plan)")
 
 
 def kept_nothing(verify_output: str | None) -> bool:

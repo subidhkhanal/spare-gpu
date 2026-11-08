@@ -16,13 +16,18 @@ from .jobs import PLANS, JobConfig, numbered_listing
 from .store import Job, Store
 
 AGENT_STEP_TOKENS = 11_500  # measured 31 Oct: mostly BharatCode's own system prompt, sent on every step
-AGENT_STEPS = {"tests": (3, 7), "docs": (3, 5)}  # read, edit, finish; tests may also run pytest
+AGENT_STEPS = {"tests": (3, 7), "docs": (3, 5),  # read, edit, finish; tests may also run pytest
+               "green": (4, 10), "implement": (4, 10)}  # read, run the tests, edit, run them again, finish
 STEP_DOING = {
     ("tests", "write"): "a Desktop session writes new test files",
     ("tests", "verify"): "run them here, keep only passing tests, commit",
     ("docs", "write"): "a Desktop session adds docstrings and README text",
     ("docs", "verify"): "keep only additive doc changes, commit",
     ("review", "review"): "one request; report saved as gtu-review-<id>.md",
+    ("green", "write"): "run the test command here; if it fails, a Desktop session fixes the code (never the tests)",
+    ("green", "verify"): "run the test command here; done if it passes, else another round (up to green_rounds)",
+    ("implement", "write"): "a Desktop session carries out the Markdown plan file",
+    ("implement", "verify"): "run the test command here, keep the changes only if it passes, commit",
 }
 
 

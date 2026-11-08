@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOB_KINDS = ("tests", "docs", "review", "fix")
+JOB_KINDS = ("tests", "docs", "review", "fix", "green", "implement")
 JOB_STATUSES = ("queued", "running", "paused", "done", "failed", "cancelled")
 FINAL_STATUSES = ("done", "failed", "cancelled")
 STEP_STATUSES = ("pending", "running", "done", "failed")
@@ -175,9 +175,10 @@ class Store:
         self._widen_job_kinds()
 
     def _widen_job_kinds(self) -> None:
-        """An older store limits `kind` with a CHECK constraint that lacks newer kinds (fix). SQLite
-        can't change a constraint in place, so the jobs table is rebuilt once, keeping every row;
-        the steps and requests that point at jobs by id are untouched."""
+        """An older store limits `kind` with a CHECK constraint that lacks newer kinds (fix, then
+        green and implement). SQLite can't change a constraint in place, so the jobs table is
+        rebuilt once, keeping every row; the steps and requests that point at jobs by id are
+        untouched."""
         row = self.conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone()
         if row is None or all(f"'{kind}'" in row["sql"] for kind in JOB_KINDS):
             return

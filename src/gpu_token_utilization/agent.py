@@ -18,7 +18,7 @@ from .bc_config import user_mcp_servers
 
 DEFAULT_MODEL = "bharatcode/qwen-3.8-27b"
 CONFIG_FILE = "opencode.json"
-AGENT_KINDS = ("tests", "docs", "fix")  # job kinds whose steps run as an agent session; review is one answer
+AGENT_KINDS = ("tests", "docs", "fix", "green", "implement")  # job kinds whose steps run as an agent session; review is one answer
 
 
 def job_mcp_servers(given: Mapping[str, dict] | None) -> dict[str, dict]:

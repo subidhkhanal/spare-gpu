@@ -13,6 +13,7 @@ spare-gpu checks BharatCode's live queues for you. When the other model would st
 - **Answers questions sooner** on whichever model is free.
 - **Writes tests, docs and code reviews** for your project. Each job runs as its own Desktop chat that you can open and watch.
 - **Never touches your files.** Each job works on a private copy of your project. The files it changed are put in a `spare-gpu/<date>_<time>/` folder, and you copy over what you want.
+- **Fixes failing tests and follows your plans.** It can change your code until your tests pass (never the tests themselves), or carry out a plan you wrote in a Markdown file.
 - **Keeps only good work.** Generated tests are kept only if they pass. Docs jobs may add documentation but not change code.
 - **Tells you what it did:** which model it used, how much waiting that saved, and the tokens it used.
 
@@ -49,6 +50,8 @@ Open a chat in your project and type `/auto` followed by what you want:
 | `/auto write tests for src/payments.py` | Writes tests and keeps only the ones that pass |
 | `/auto write docs for src/utils.py` | Adds docstrings and README text without changing code |
 | `/auto review src/router.py` | Writes a code review |
+| `/auto make the tests pass` | Changes the code until your tests pass, in up to 3 tries. It never changes the tests. |
+| `/auto implement docs/plan.md` | Carries out the plan in that Markdown file, kept only if your tests still pass |
 | `/auto` | Shows how long each model would wait right now |
 
 Example from 5 Nov, when DeepSeek had a 3-minute queue:
@@ -159,6 +162,7 @@ Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's 
 | `job_token_budget` | Tokens one job may use before it pauses | `GTU_JOB_TOKEN_BUDGET` |
 | `preferred_model` | The model jobs start from | `GTU_PREFERRED_MODEL` |
 | `switch_safe` | Extra job types allowed to move to the faster model | `GTU_SWITCH_SAFE` |
+| `green_rounds` | Tries a "make the tests pass" job gets, 1 to 10 (default 3) | `GTU_GREEN_ROUNDS` |
 
 `gtu doctor` shows which settings are in use and where each one came from.
 
