@@ -16,8 +16,8 @@ from gpu_token_utilization.cli import app
 
 cli = CliRunner()
 HEAVY, STANDARD = "bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b"
-LEAD = "---\n# Installed by spare-gpu\ndescription: lead\nmode: primary\nmodel: {{HEAVY_MODEL}}\n---\nLead on {{HEAVY_MODEL}}.\n"
-SCOUT = "---\n# Installed by spare-gpu\ndescription: scout\nmode: subagent\nmodel: {{STANDARD_MODEL}}\n---\nScout.\n"
+LEAD = "---\n# Installed by spare-gpu\ndescription: lead\nmode: primary\nmodel: {{HEAVY_MODEL}}\nsteps: 60\n---\nLead on {{HEAVY_MODEL}}.\n"
+SCOUT = "---\n# Installed by spare-gpu\ndescription: scout\nmode: subagent\nmodel: {{STANDARD_MODEL}}\nsteps: 30\n---\nScout.\n"
 COMMAND = "---\n# Installed by spare-gpu\ndescription: research\nagent: research-lead\n---\n$ARGUMENTS\n"
 
 
@@ -88,8 +88,8 @@ def test_the_config_file_splits_models_and_hides_helpers_and_pack_tools(pack_dir
 def test_without_the_split_or_research_the_config_file_is_smaller(pack_dir):
     doc = pack.config(pack.select("review"), models())
     assert "small_model" not in doc and "agent" not in doc and "mcp" not in doc
-    assert doc["permission"] == {"spare-gpu_pack_cost": "deny"}  # the shared cost tool, hidden from everyone else
-    assert pack.describe(doc) == "1 pack-only tool(s) hidden from them too"
+    assert doc["permission"] == {"spare-gpu_tally_findings": "deny", "spare-gpu_pack_cost": "deny"}  # the shared cost tool, hidden from everyone else
+    assert pack.describe(doc) == "2 pack-only tool(s) hidden from them too"
     assert pack.describe({"$schema": pack.SCHEMA}) == "nothing yet"
 
 

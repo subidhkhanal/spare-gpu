@@ -5,6 +5,7 @@ description: Checker for /deep-research. Marks claims the notes don't support an
 mode: subagent
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 30
 temperature: 0.1
 permission:
   "*": deny

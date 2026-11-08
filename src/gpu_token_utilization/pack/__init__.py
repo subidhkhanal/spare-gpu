@@ -37,6 +37,10 @@ SERVER = "spare-gpu"  # the MCP server the pack's tools live in; BharatCode name
 SWITCHABLE = ("research-checker", "review-verifier", "security-verifier")
 VARIANT_SUFFIX = "-standard"
 SHARED_TOOLS = ("pack_cost",)  # pack-only tools every lead uses
+# Every pack agent carries a step limit Desktop enforces (`steps` in its frontmatter), so a
+# confused helper stops instead of looping: leads orchestrate and may need more; helpers do one job.
+LEAD_STEPS = 60
+HELPER_STEPS = 30
 # Files an earlier version installed and this one no longer has: removed on install and uninstall.
 RETIRED = (("command", "context-report"), ("agent", "context-lead"))
 # Memory across chats: a short file every agent reads at the start of each request (Desktop's
@@ -63,14 +67,16 @@ COMPONENTS: dict[str, Component] = {
                           ("research-lead", "research-scout", "research-writer", "research-checker"),
                           ("scholar_search", "verify_refs", "build_report", *SHARED_TOOLS), {"exa": EXA_MCP}),
     "review": Component("review", "/code-review", ("code-review",),
-                        ("review-lead", "review-finder", "review-verifier"), SHARED_TOOLS),
+                        ("review-lead", "review-finder", "review-verifier"), ("tally_findings", *SHARED_TOOLS)),
     "security": Component("security", "/security-review", ("security-review",),
-                          ("security-lead", "security-finder", "security-verifier"), ("security_filter", *SHARED_TOOLS)),
+                          ("security-lead", "security-finder", "security-verifier"),
+                          ("security_filter", "tally_findings", *SHARED_TOOLS)),
     "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder"), SHARED_TOOLS),
     # Needs the Playwright MCP from BharatCode's marketplace (server name "playwright"); the pack adds no server for it.
     "verify": Component("verify", "/verify-app", ("verify-app",), ("verify-lead", "verify-driver"), SHARED_TOOLS),
     # No agents of its own: the commands run in the user's current agent, which has the chat's history.
     "memory": Component("memory", "/remember, /handoff and /pickup", ("remember", "handoff", "pickup")),
+    "cost": Component("cost", "/cost", ("cost",)),  # relays `gtu cost --short`; no agent, no tool
 }
 
 

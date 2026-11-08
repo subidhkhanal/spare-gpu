@@ -5,6 +5,7 @@ description: Verifier for /code-review. Re-reads the code for every candidate fi
 mode: subagent
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 30
 temperature: 0.1
 permission:
   "*": deny

@@ -161,7 +161,7 @@ def test_with_the_pack_the_pack_checks_are_included(config_dir, pack_dir, projec
     assert result.exit_code == 0, out(result)
     assert "PASS: pack: spare-gpu's MCP server starts with --pack" in out(result)
     assert "PASS: pack: installed components: split, research" in out(result)
-    assert "PASS: spare-gpu's MCP server starts and offers 10 tools (the pack's: build_report, pack_cost, scholar_search, security_filter, verify_refs)" in out(result)
+    assert "PASS: spare-gpu's MCP server starts and offers 11 tools (the pack's: build_report, pack_cost, scholar_search, security_filter, tally_findings, verify_refs)" in out(result)
     (config_dir / "config.json").unlink()  # the pack's settings file gone, the --pack flag left behind
     result = cli.invoke(app, ["doctor"])
     assert "WARN: spare-gpu's MCP server starts with --pack although the pack's settings file is gone" in out(result)

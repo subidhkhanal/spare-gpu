@@ -5,6 +5,7 @@ description: Finder for /code-review. Reads one slice of a diff for one concern 
 mode: subagent
 hidden: true
 model: {{STANDARD_MODEL}}
+steps: 30
 temperature: 0.2
 permission:
   "*": deny

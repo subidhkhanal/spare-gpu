@@ -5,6 +5,7 @@ description: Finder for /simplify. Reads one slice of code and proposes cleanups
 mode: subagent
 hidden: true
 model: {{STANDARD_MODEL}}
+steps: 30
 temperature: 0.2
 permission:
   "*": deny

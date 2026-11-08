@@ -5,6 +5,7 @@ description: Scout for /deep-research. Searches the web and the paper registries
 mode: subagent
 hidden: true
 model: {{STANDARD_MODEL}}
+steps: 30
 temperature: 0.2
 permission:
   "*": deny

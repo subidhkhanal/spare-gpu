@@ -5,6 +5,7 @@ description: Writer for /deep-research. Drafts one section of the report from th
 mode: subagent
 hidden: true
 model: {{STANDARD_MODEL}}
+steps: 30
 temperature: 0.3
 permission:
   "*": deny

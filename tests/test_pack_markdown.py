@@ -37,6 +37,8 @@ def test_every_file_parses_carries_the_marker_and_only_the_two_placeholders(kind
     assert "{{" not in FILLED.fill(raw) and data["description"] and body.strip()
     if kind == "agent":
         assert data["mode"] in ("primary", "subagent") and data["model"] in (FILLED.heavy, FILLED.standard)
+        # a step limit Desktop enforces, so a confused agent stops instead of looping
+        assert data["steps"] == (pack.LEAD_STEPS if name.endswith("-lead") else pack.HELPER_STEPS), name
         assert data["permission"]["*"] == "deny"  # everything denied first, then what the agent needs
         bash = data["permission"].get("bash", "deny")  # no shell, or git's read-only commands only
         assert bash == "deny" or (bash["*"] == "deny" and all(p.startswith("git ") for p, a in bash.items() if a == "allow"))
@@ -55,7 +57,7 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
                 continue
             lead = parse(files[("command", command)])[0].get("agent")
             if lead is None:  # memory's commands run in the user's own agent, which has the chat's history
-                assert component.name == "memory" and not component.agents, command
+                assert not component.agents, command  # memory and cost: no agents of their own
                 continue
             assert ("agent", lead) in files, f"{command}: its agent {lead} is in the pack"
             data, _ = parse(files[("agent", lead)])
@@ -101,6 +103,8 @@ def test_review_agents_read_only_and_the_lead_hands_fixes_to_a_job():
     lead, lead_body = parse(files["review-lead"])
     assert "edit" not in lead["permission"] and lead["permission"]["spare-gpu_spare_delegate"] == "allow"
     assert lead["permission"]["bash"]["git diff*"] == "allow"
+    assert lead["permission"]["spare-gpu_tally_findings"] == "allow" and "`tally_findings` tool" in lead_body
+    assert "--plan" in lead_body and "review-verifier-standard` once more, told to refute" in " ".join(lead_body.split())
     flat = " ".join(lead_body.split())
     for step in ("low 2", "medium 4", "high 6", "deep 6 twice", "all finders in one message", "review-verifier",
                  "refute", 'type "fix"', "spare_delegate", "spare_waits", "Never claim a number you didn't measure"):
@@ -118,6 +122,7 @@ def test_security_agents_never_run_exploit_code_and_the_lead_filters_by_rule():
     files = {n: p for k, n, p in pack.markdown_files([COMPONENTS["security"]]) if k == "agent"}
     lead, lead_body = parse(files["security-lead"])
     assert "edit" not in lead["permission"] and lead["permission"]["spare-gpu_security_filter"] == "allow"
+    assert lead["permission"]["spare-gpu_tally_findings"] == "allow" and "`tally_findings` tool" in lead_body and "--plan" in lead_body
     assert "spare-gpu_spare_delegate" not in lead["permission"]  # a security review never applies changes
     flat = " ".join(lead_body.split())
     for step in ("five `security-finder` tasks in one message", "`security_filter` tool", "security-verifier", "refute",
@@ -233,3 +238,13 @@ def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else
     assert (doc["permission"]["spare-gpu_scholar_search"] == doc["permission"]["spare-gpu_verify_refs"]
             == doc["permission"]["spare-gpu_build_report"] == "deny")
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}
+
+
+def test_every_lead_stops_at_plan_and_every_agent_has_its_step_limit():
+    for component in COMPONENTS.values():
+        for kind, name, path in pack.markdown_files([component]):
+            if kind != "agent":
+                continue
+            data, body = parse(path)
+            if name.endswith("-lead"):
+                assert "`--plan`" in body and "stop without starting anything" in " ".join(body.split()), name

@@ -115,6 +115,15 @@ def run(folder: Path, how: str = "") -> list[Finding]:
                 unfilled.append(f"{kind}/{name}.md")
     found.append(Finding(FAIL if missing else PASS, "files: " + (f"missing {', '.join(missing)}; run `gtu integrate --pack`" if missing
                                                                  else "every command and agent of the installed components is there")))
+    unlimited = []
+    if components:
+        for kind, name in expected:
+            path = folder / kind / f"{name}.md"
+            if kind == "agent" and path.is_file() and not str(frontmatter(path.read_text(encoding="utf-8-sig")).get("steps", "")).isdigit():
+                unlimited.append(f"{kind}/{name}.md")
+    if unlimited:
+        found.append(Finding(FAIL, f"no step limit (steps:) in {', '.join(unlimited)}; a helper could loop for an hour. "
+                                   "Run `gtu integrate --pack`"))
     if unmarked:
         found.append(Finding(WARN, f"edited by you (marker removed), so updates leave them alone: {', '.join(unmarked)}"))
     if unfilled:

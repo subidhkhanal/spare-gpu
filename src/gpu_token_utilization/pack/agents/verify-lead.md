@@ -5,6 +5,7 @@ description: Lead of /verify-app. Turns a request into concrete checks, starts o
 mode: primary
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 60
 temperature: 0.2
 permission:
   "*": deny
@@ -37,7 +38,9 @@ MCP, several at once, and write down exactly what they saw. Nobody changes the a
    outcome each. Show the plan in your reply as you go on.
 
 ## Drive, in parallel
-4. Start one `verify-driver` task per check, all in one message. Each prompt names: the URL,
+4. If the request ends with `--plan`: reply with the plan, the number of drivers and their
+   model, and the `spare_waits` estimate, and stop without starting anything. Otherwise start one
+   `verify-driver` task per check, all in one message. Each prompt names: the URL,
    the check's steps and pass condition, the slug, and the one notes file the driver owns
    (`verify/<slug>/steps-<n>.md`). Tell it to record what it did and what it saw, verbatim,
    and never to guess an outcome.

@@ -5,6 +5,7 @@ description: Verifier for /security-review. Re-reads the code for every filtered
 mode: subagent
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 30
 temperature: 0.1
 permission:
   "*": deny

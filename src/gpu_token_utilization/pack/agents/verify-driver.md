@@ -5,6 +5,7 @@ description: Driver for /verify-app. Works a real browser through the Playwright
 mode: subagent
 hidden: true
 model: {{STANDARD_MODEL}}
+steps: 30
 temperature: 0.1
 permission:
   "*": deny

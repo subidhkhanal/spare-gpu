@@ -5,6 +5,7 @@ description: Lead of /deep-research. Plans, starts scouts in parallel, finds gap
 mode: primary
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 60
 temperature: 0.2
 permission:
   "*": deny
@@ -48,7 +49,10 @@ several at once. The result is a research report (a literature review), not a pa
    at the end uses it.
 
 ## Plan
-4. Write `research/<slug>/plan.md`: the question in one sentence; the sub-questions (each
+4. If the request ends with `--plan`: write the plan below, then reply with it, the number of
+   scouts and writer calls it means and their models, and the `spare_waits` estimate, and stop
+   without starting anything. Otherwise carry on.
+   Write `research/<slug>/plan.md`: the question in one sentence; the sub-questions (each
    answerable on its own); what a good answer must cover; the sources allowed. Show the plan to
    the user in your reply as you go on; don't wait for approval.
 

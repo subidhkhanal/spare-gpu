@@ -20,7 +20,7 @@ from gpu_token_utilization.store import RequestLog, Store
 from conftest import desktop_db, quick_plans, quick_tools
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
+PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "tally_findings", "pack_cost"}  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to `gtu` commands
 KEY = "bc_live_test_key_not_real"
 

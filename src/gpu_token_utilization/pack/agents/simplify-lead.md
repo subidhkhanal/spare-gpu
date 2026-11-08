@@ -5,6 +5,7 @@ description: Lead of /simplify. Slices the code, starts finders in parallel for 
 mode: primary
 hidden: true
 model: {{HEAVY_MODEL}}
+steps: 60
 temperature: 0.2
 permission:
   "*": deny
@@ -42,7 +43,9 @@ copy by a fix job that runs in front of the user and are kept only if the projec
 2. Call the `spare_waits` tool once and keep the answer for the cost summary.
 
 ## Finders, in parallel
-3. Split the files into slices of at most about 400 lines each and start one `simplify-finder`
+3. If the request ends with `--plan`: reply with the slices below, the number of finders and
+   their model, and the `spare_waits` estimate, and stop without starting anything. Otherwise
+   split the files into slices of at most about 400 lines each and start one `simplify-finder`
    per slice in one message. Each prompt names the files and ranges, and the output shape: a
    JSON list of candidates with file, line, kind (reuse, simplify, efficiency), what (the change
    in one sentence), why (what it removes or saves), risk (none, low, medium), and
