@@ -167,7 +167,7 @@ def test_integrate_pack_installs_everything_and_says_what_it_did(config_dir, pac
     assert result.exit_code == 0, out
     assert "Pack models: heavy DeepSeek V4.1 Flash (bharatcode/deepseek-v4.1-flash), standard Qwen 3.8 27B" in out
     assert f"Wrote the pack's settings in {config_dir / 'config.json'}: titles and explore on Qwen 3.8 27B; " in out
-    assert "1 helper agent(s) hidden" in out and "5 pack-only tool(s) hidden" in out and "MCP: exa" in out
+    assert "1 helper agent(s) hidden" in out and "6 pack-only tool(s) hidden" in out and "MCP: exa" in out
     assert "Added /deep-research" in out and "Added the research-lead agent" in out and "Added the research-scout agent" in out
     assert "To undo the pack: gtu integrate --pack --uninstall" in out
     lead = (config_dir / "agent" / "research-lead.md").read_text(encoding="utf-8")
