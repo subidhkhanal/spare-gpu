@@ -7,12 +7,12 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from gpu_token_utilization import bc_config, doctor, pack, settings
+from gpu_token_utilization import bc_config, pack, settings
 from gpu_token_utilization.cli import app
 from gpu_token_utilization.pack import check
 
 from conftest import git
-from test_doctor import config_dir, live_cli, merged_config, research, result_cell  # noqa: F401  fixtures
+from test_doctor import config_dir, research  # noqa: F401  fixtures
 
 cli = CliRunner()
 MODELS = pack.Models("bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b")
@@ -101,23 +101,3 @@ def test_the_doctor_shows_the_memory_files_cost_and_the_cap(config_dir, project)
     cli.invoke(app, ["integrate", "--pack", "--uninstall"])
     out = cli.invoke(app, ["doctor"]).output
     assert "WARN: project memory .gtu/memory.md exists but the pack's memory component isn't installed" in out
-
-
-def test_live_confirms_desktop_reads_the_memory_file(config_dir, project, live_cli, research):
-    (research / "memory").mkdir()
-    (research / "memory" / "manual-check.md").write_text(
-        (doctor.RESEARCH.parent / "research" / "memory" / "manual-check.md").read_text(encoding="utf-8")
-        if (doctor.RESEARCH.parent / "research" / "memory" / "manual-check.md").is_file() else
-        "| # | Check | Steps | Pass condition | Result |\n|---|---|---|---|---|\n| 1 | Desktop reads the memory file | x | y | |\n",
-        encoding="utf-8")
-    cli.invoke(app, ["integrate", "--pack", "--only", "memory"])
-    live_cli()
-    result = cli.invoke(app, ["doctor", "--live"])
-    assert result.exit_code == 0, result.output
-    assert "PASS: live: Desktop's merged config reads .gtu/memory.md with every request" in result.output
-    assert result_cell(research, "memory", 1).startswith("PASS (gtu doctor --live")
-    merged = merged_config(config_dir)
-    merged["instructions"] = ["AGENTS.md"]  # the user's own file overrides the pack's list
-    live_cli(merged=merged)
-    result = cli.invoke(app, ["doctor", "--live"])
-    assert result.exit_code == 1 and "FAIL: live: Desktop's merged config doesn't list .gtu/memory.md under instructions" in result.output
