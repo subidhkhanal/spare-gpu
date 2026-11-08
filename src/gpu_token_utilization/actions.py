@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable
 
 from . import runstate, worktree
-from .agent_cli import CLI_KINDS, CliNotFound, resolve_command
 from .store import Job, Store, StoreError
 
 
@@ -19,7 +18,7 @@ class ActionError(Exception):
 @dataclass
 class Outcome:
     job: Job
-    note: str | None = None  # something the user should know, e.g. the CLI is missing
+    note: str | None = None  # something the user should know, e.g. a big folder to copy
 
 
 def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target: str,
@@ -45,11 +44,6 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
     except StoreError as exc:
         raise ActionError(str(exc)) from None
     notes = []
-    if job.kind in CLI_KINDS:
-        try:
-            resolve_command()
-        except CliNotFound as exc:
-            notes.append(f"This job won't run yet. {exc}\nIt stays queued and runs on the first `gtu start` after that.")
     size = worktree.size_warning(repo)  # a plain folder whose copy would be big: say so now, not at 3 am
     if size:
         notes.append(size)
@@ -71,7 +65,7 @@ def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
     if runstate.wait_for_exit(pid, wait):
         lines.append("It stopped cleanly.")
     elif runstate.kill_tree(pid):
-        lines.append(f"It didn't stop within {wait:g} s, so it and its BharatCode CLI process were killed.")
+        lines.append(f"It didn't stop within {wait:g} s, so it was killed. A Desktop session it had started may still be finishing in Desktop; stop it there if you need to.")
     else:
         raise ActionError(f"process {pid} doesn't look like gtu, so it was not killed; stop it yourself.")
     runstate.clear(folder)

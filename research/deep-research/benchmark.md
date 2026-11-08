@@ -41,9 +41,12 @@ Fill the key-paper lists before running; 5 to 8 papers each, chosen by someone w
 
 ## Scripts
 
-`python scripts/eval_research.py research/deep-research/tasks.json` runs every question in each
-setup (deepseek, split, lite, and split-standard-roles for the checker's switch-safety) through
-BharatCode's CLI, tallies `sources.json` verdicts and key-paper coverage, records tokens per
-model from `bharatcode stats`, and writes `results-<date>.json` and `results.md` here. Fill the
+`python scripts/eval_research.py research/deep-research/tasks.json --setup <setup>` runs every
+question as a BharatCode Desktop session on the research lead, tallies `sources.json` verdicts and
+key-paper coverage, records the exact tokens per model from Desktop's own record of the replies,
+and adds the setup's rows to `results-<date>.json` and `results.md` here. Run it from Desktop's
+terminal once per setup (deepseek, split, lite, and split-standard-roles for the checker's
+switch-safety): install the pack for the setup (the script prints the command) and restart
+Desktop before each. Fill the
 `key_papers` lists in tasks.json first (DOIs or arXiv ids). `--write-policy` records the
 research-checker verdict in routing_policy.json. Claims support is a column to fill by hand.

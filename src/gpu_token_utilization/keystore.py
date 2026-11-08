@@ -2,7 +2,7 @@
 
 Credential Manager keeps it encrypted and readable only by the current Windows account,
 and it never sits in an environment variable, so subprocesses (model-written tests, the
-BharatCode CLI) can't see it. Talks to advapi32 through ctypes; no extra dependency.
+commands spare-gpu runs) can't see it. Talks to advapi32 through ctypes; no extra dependency.
 """
 
 from __future__ import annotations

@@ -1,17 +1,18 @@
 """The benchmark machinery without BharatCode: the command prompt comes from the pack's own file,
-a run through the (fake) CLI is parsed, research runs are tallied from sources.json, review
+a lead's run as a (fake) Desktop session is read, research runs are tallied from sources.json, review
 findings are matched to seeds, roles are judged with the eval_models rule, and the policy keeps
 the job types."""
 
 import json
 import subprocess
-import sys
+from datetime import datetime, timezone
 
 import pytest
 
-from gpu_token_utilization import evalpack
+from gpu_token_utilization import evalpack, stats
+from gpu_token_utilization.fakedesktop import FakeDesktop, Step
 
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
+from conftest import desktop_db
 
 
 def test_the_prompt_is_the_packs_command_with_the_arguments_filled_in():
@@ -21,6 +22,8 @@ def test_the_prompt_is_the_packs_command_with_the_arguments_filled_in():
 
 
 def test_install_builds_the_right_gtu_call_per_setup(monkeypatch):
+    assert evalpack.install_args("lite", ["research"]) == (
+        ["gtu", "integrate", "--pack", "--only", "split,research", "--lite"], {})
     calls = []
     evalpack.install("lite", ["research"], gtu=["gtu"], runner=lambda args, **kw: calls.append((args, kw["env"])))
     evalpack.install("deepseek", ["review"], gtu=["gtu"], runner=lambda args, **kw: calls.append((args, kw["env"])))
@@ -32,16 +35,30 @@ def test_install_builds_the_right_gtu_call_per_setup(monkeypatch):
         evalpack.install("nope", [], runner=lambda *a, **k: None)
 
 
-def test_a_run_through_the_cli_is_parsed(tmp_path, monkeypatch):
-    scenario = tmp_path / "scenario.json"
-    scenario.write_text(json.dumps({"steps": [{"tokens": 5000}, {"tokens": 1000}], "text": "Findings: src/a.py:12 off by one"}))
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
-    run = evalpack.run_command(tmp_path, "review-lead", "review medium", "split", command=FAKE_CLI)
-    assert run.exit_code == 0 and run.steps == 2 and run.tokens["input"] == 5900 and run.tokens["output"] == 100
-    assert run.text == "Findings: src/a.py:12 off by one" and run.error is None
+def test_a_leads_run_is_a_desktop_session_on_that_agent(tmp_path):
+    desktop = FakeDesktop(steps=[Step(5000), Step(1000, text="Findings: src/a.py:12 off by one")])
+    run = evalpack.run_command(tmp_path, "review-lead", "review medium", agent=desktop.agent())
+    assert run.exit_code == 0 and run.steps == 2 and run.tokens["input"] == 5980 and run.tokens["output"] == 20
+    assert run.text == "Findings: src/a.py:12 off by one" and run.error is None and run.started
     assert evalpack.findings_from_text(run.text) == {("src/a.py", 12)}
-    slow = evalpack.run_command(tmp_path, "x", "y", "split", timeout=0.01, command=[sys.executable, "-c", "import time; time.sleep(2)"])
-    assert slow.exit_code == -1 and "timed out" in slow.error
+    (session,) = desktop.sessions.values()
+    assert session["prompt"]["agent"] == "review-lead" and "model" not in session["prompt"]  # the lead's own model
+    assert session["permission"] is None and session["config"] is None  # none of a job's rules
+    outside = evalpack.run_command(tmp_path, "x", "y")  # not run from Desktop's terminal
+    assert outside.exit_code == -1 and "Desktop's terminal" in outside.error
+
+
+def test_tokens_by_model_are_this_projects_since_the_run_began(tmp_path, monkeypatch):
+    began = datetime(2026, 11, 7, 18, 0, tzinfo=timezone.utc)
+    ms = int(began.timestamp() * 1000)
+    reply = {"input": 100, "output": 10, "reasoning": 0, "cache": {"read": 0, "write": 0}, "total": 110}
+    db = desktop_db(tmp_path / "d.db", [(str(tmp_path), ms + 5, "bharatcode/qwen-3.8-27b", reply),
+                                        (str(tmp_path), ms - 5, "bharatcode/qwen-3.8-27b", reply)])
+    monkeypatch.setenv(stats.DB_ENV, str(db))
+    run = evalpack.RunResult("", 1.0, 0, started=began)
+    assert evalpack.tokens_by_model(run, tmp_path) == {"bharatcode/qwen-3.8-27b": 110}
+    monkeypatch.delenv(stats.DB_ENV)
+    assert evalpack.tokens_by_model(run, tmp_path) == {}  # no Desktop data: nothing claimed
 
 
 def test_research_runs_are_tallied_from_sources_json(tmp_path):
@@ -87,10 +104,7 @@ def test_roles_are_judged_with_the_eval_models_rule_and_written_next_to_the_job_
     assert written["evidence"]["review-verifier"]["tasks"] == 10 and "research-checker" not in written["evidence"]
 
 
-def test_stats_delta_and_the_markdown_table():
-    before = {"m": {"tokens": 100.0}}
-    after = {"m": {"tokens": 350.0}, "n": {"tokens": 20.0}}
-    assert evalpack.stats_delta(before, after) == {"m": 250.0, "n": 20.0} and evalpack.stats_delta(None, after) == {}
+def test_the_markdown_table():
     table = evalpack.markdown_table([{"setup": "split", "recall": 0.5, "precision": None}], ["setup", "recall", "precision"])
     assert table.splitlines() == ["| setup | recall | precision |", "|---|---|---|", "| split | 0.50 |  |"]
 

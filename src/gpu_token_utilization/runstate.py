@@ -105,7 +105,7 @@ def wait_for_exit(pid: int, seconds: float, poll: float = 0.2) -> bool:
 
 
 def kill_tree(pid: int) -> bool:
-    """Kill the process and its children (the BharatCode CLI). False if it doesn't look like gtu."""
+    """Kill the process and its children. False if it doesn't look like gtu."""
     if not _looks_like_gtu(pid):
         return False
     if os.name == "nt":
@@ -113,7 +113,7 @@ def kill_tree(pid: int) -> bool:
     else:
         import signal
 
-        # Not killpg on gtu's own group: that may be the user's shell. The CLI runs in its own
+        # Not killpg on gtu's own group: that may be the user's shell. A child may run in its own
         # session, so kill each child's group, then gtu itself.
         children = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
         for child in children:

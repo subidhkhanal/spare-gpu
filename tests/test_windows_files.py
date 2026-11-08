@@ -9,14 +9,12 @@ from pathlib import Path
 import pytest
 
 from gpu_token_utilization import worktree
-from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.fakeapi import Reply
 from gpu_token_utilization.jobs import JobConfig, numbered_listing
 from gpu_token_utilization.scheduler import Scheduler
 
 from conftest import git
 
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
 BOM = "﻿"
 SOURCE = "def add(a, b):\n    return a + b\n"
 DOCUMENTED = 'def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n'
@@ -35,15 +33,13 @@ def make_repo(root, files: dict[str, bytes], autocrlf="false"):
 
 
 @pytest.fixture
-def run_job(store, client, make_gate, fake, tmp_path, monkeypatch):
+def run_job(store, client, make_gate, fake, scenario):
     def run(repo, kind, target, writes=None, review="## Likely bugs\nNothing found."):
-        scenario = tmp_path / "scenario.json"
-        scenario.write_text(json.dumps({"steps": [{"tokens": 1000, "writes": writes or {}}]}))
-        monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
+        desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}])
         fake.queue(Reply(content=review))
         job = store.add_job(kind, target, str(repo))
         logs = []
-        Scheduler(store, make_gate(), client, cli=BharatCodeCli(command=FAKE_CLI, timeout=60),
+        Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=60),
                   config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
                   sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append, ignore_gate=True).run()
         return store.get_job(job.id), store.steps(job.id), logs

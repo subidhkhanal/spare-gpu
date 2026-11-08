@@ -1,4 +1,4 @@
-"""Registering spare-gpu's MCP server in BharatCode's CLI config (`gtu setup`).
+"""Registering spare-gpu's MCP server in BharatCode Desktop's config (`gtu setup`, `gtu integrate`).
 
 BharatCode (built on OpenCode) reads a global JSONC file, e.g.
 %APPDATA%\\BharatCode\\Config\\opencode.jsonc. We add an "mcp" entry for spare-gpu:
@@ -13,12 +13,9 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-from .agent_cli import CliNotFound, resolve_command
-from .api import env_without_key
 
 SERVER_NAME = "spare-gpu"
 CONFIG_DIR_ENV = "GTU_BHARATCODE_CONFIG_DIR"  # tests (and unusual setups) point this elsewhere
@@ -31,23 +28,11 @@ class ConfigError(Exception):
 
 
 def locate_config_dir() -> tuple[Path, str]:
-    """Where BharatCode keeps its global config, and how we know: asked from its CLI when it's
-    installed, else BharatCode's default location."""
+    """Where the released BharatCode Desktop keeps its global config, and how we know."""
     override = os.environ.get(CONFIG_DIR_ENV, "").strip()
     if override:
         return Path(override), f"from {CONFIG_DIR_ENV}"
-    try:
-        proc = subprocess.run([*resolve_command(), "debug", "paths"], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60, stdin=subprocess.DEVNULL,
-                              env=env_without_key())
-        for line in (proc.stdout + proc.stderr).splitlines():
-            parts = re.sub(r"\x1b\[[0-9;]*m", "", line).split(None, 1)
-            if len(parts) == 2 and parts[0] == "config":
-                return Path(parts[1].strip()), "reported by `bharatcode debug paths`"
-    except (CliNotFound, OSError, subprocess.TimeoutExpired):
-        pass
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "BharatCode" / "Config", "BharatCode's default location (its CLI didn't say)"
+    return channel_config_dir("stable"), "BharatCode Desktop's config folder"
 
 
 def config_dir() -> Path:
@@ -55,37 +40,33 @@ def config_dir() -> Path:
 
 
 # BharatCode keeps one config folder per release channel, named after the product (core's
-# storage-paths.ts): the CLI and the released Desktop app share "BharatCode"; Desktop's beta,
+# storage-paths.ts): the released Desktop app uses "BharatCode"; Desktop's beta,
 # dev and local builds use their own. A Desktop build from source runs as "dev" by default.
 CHANNELS = {"stable": "BharatCode", "beta": "BharatCode Beta", "dev": "BharatCode Dev", "local": "BharatCode Local"}
 
 
-def channel_config_dir(channel: str, ask_cli: bool = True) -> Path:
-    """A channel's config folder. The stable one is what BharatCode's CLI reports (unless
-    `ask_cli` is off: starting the CLI is slow and not for a job's start), else the default."""
+def channel_config_dir(channel: str) -> Path:
+    """A channel's config folder: %APPDATA%\\<product name>\\Config."""
     override = os.environ.get(CONFIG_DIR_ENV, "").strip()
     if override:  # tests: the other channels' folders sit under the override
         return Path(override) if channel == "stable" else Path(override) / CHANNELS[channel]
-    if channel == "stable" and ask_cli:
-        return config_dir()
     base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     return Path(base) / CHANNELS[channel] / "Config"
 
 
 def installed_channels() -> list[str]:
-    """Channels with a config folder on this machine; stable always (the CLI and released app)."""
+    """Channels with a config folder on this machine; stable always (the released app)."""
     return ["stable"] + [c for c in CHANNELS if c != "stable" and channel_config_dir(c).is_dir()]
 
 
 def user_mcp_servers() -> dict[str, dict]:
     """The MCP servers in the user's global BharatCode config, by name, from every channel's
-    config folder on this machine (the released app and the CLI share one; beta and dev builds
-    have their own; the stable one wins a clash). For jobs, which switch them off: the folders
-    are found without starting the CLI, and a file that can't be read or parsed is skipped, so
-    the user's config can never stop a job."""
+    config folder on this machine (the released app has one; beta and dev builds have their own;
+    the stable one wins a clash). For jobs, which switch them off: a file that can't be read or
+    parsed is skipped, so the user's config can never stop a job."""
     found: dict[str, dict] = {}
     for channel in CHANNELS:
-        folder = channel_config_dir(channel, ask_cli=False)
+        folder = channel_config_dir(channel)
         if not folder.is_dir():
             continue
         try:
@@ -408,21 +389,3 @@ def remove_commands(folder: Path) -> list[str]:
     """Remove the slash commands spare-gpu installed (only files still carrying its marker)."""
     names = [("command", source.stem) for source in sorted(COMMANDS_DIR.glob("*.md"))]
     return [key.split("/", 1)[1] for key in remove_markdown(folder, names)]
-
-
-def connected(path: Path, timeout: float = 90.0) -> bool | None:
-    """Ask BharatCode's CLI whether spare-gpu connects (None if the CLI can't be run). Points it
-    at exactly the file we edited."""
-    try:
-        args = [*resolve_command(), "mcp", "list"]
-    except CliNotFound:
-        return None
-    try:
-        proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=timeout, stdin=subprocess.DEVNULL, cwd=Path.home(),
-                              env=env_without_key(OPENCODE_CONFIG=str(path)))
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    text = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
-    return any(SERVER_NAME in line and "connected" in line and "not connected" not in line
-               for line in text.splitlines())

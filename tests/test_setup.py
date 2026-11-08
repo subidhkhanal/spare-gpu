@@ -115,8 +115,8 @@ def test_setup_with_a_key_registers_and_confirms_the_connection(config_dir, monk
     out = result.output
     assert result.exit_code == 0, out
     assert "1/3" in out and "Found in the BHARATCODE_API_KEY environment variable" in out
-    assert "BharatCode's CLI 0.0.0-fake and signed in" in out
-    assert "Added the \"spare-gpu\" entry" in out and "BharatCode reports: spare-gpu connected" in out
+    assert "2/3  BharatCode Desktop" in out and "BharatCode Desktop: found (stable)" in out
+    assert "Added the \"spare-gpu\" entry" in out
     assert "queue tests for src/utils tonight" in out
     assert entry_in(config_dir / "opencode.jsonc")["command"][-1] == "mcp"
     again = cli.invoke(app, ["setup"])
@@ -133,14 +133,13 @@ def test_setup_without_a_key_asks_for_it_once(config_dir):
     assert "bc_live_typed_in_setup" not in result.output
 
 
-def test_setup_without_bharatcodes_cli_still_registers(config_dir, monkeypatch):
+def test_setup_before_desktop_is_installed_still_registers(tmp_path, monkeypatch):
     monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    monkeypatch.delenv("GTU_BHARATCODE_CMD")
-    monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "fresh"))  # no BharatCode folder yet
     result = cli.invoke(app, ["setup"])
     assert result.exit_code == 0, result.output
-    assert "isn't installed yet" in result.output and "npm install -g bharatcode" in result.output
-    assert entry_in(config_dir / "opencode.jsonc") is not None
+    assert "no config folder found yet" in result.output
+    assert entry_in(tmp_path / "fresh" / "BharatCode" / "Config" / "opencode.jsonc") is not None
 
 
 def test_setup_remove(config_dir, monkeypatch):
@@ -157,11 +156,9 @@ def test_integrate_says_what_it_found_changed_and_how_to_undo(config_dir):
     result = cli.invoke(app, ["integrate"])
     out = result.output
     assert result.exit_code == 0, out
-    assert "BharatCode's CLI 0.0.0-fake and signed in" in out
     assert f"Config file: {config_dir / 'opencode.jsonc'} (from GTU_BHARATCODE_CONFIG_DIR)" in out
     assert 'Added the "spare-gpu" entry under "mcp"' in out and "mcp" in out
     assert "opencode.jsonc.spare-gpu-backup" in out and "To undo: gtu integrate --uninstall" in out
-    assert "BharatCode reports: spare-gpu connected" in out
     backup = config_dir / "opencode.jsonc.spare-gpu-backup"
     assert "mcp" not in backup.read_text(encoding="utf-8")  # the backup is the file as it was
 
@@ -255,13 +252,11 @@ def test_the_auto_command_is_installed_in_each_desktop_channel(config_dir):
     assert (dev / "command" / "auto.md").is_file() and (config_dir / "command" / "auto.md").is_file()
 
 
-def test_integrate_without_bharatcodes_cli_uses_the_default_location(tmp_path, monkeypatch):
-    monkeypatch.delenv("GTU_BHARATCODE_CMD")
-    monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
+def test_integrate_uses_desktops_config_folder(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     result = cli.invoke(app, ["integrate"])
     assert result.exit_code == 0, result.output
-    assert "isn't installed yet" in result.output and "BharatCode's default location" in result.output
+    assert "BharatCode Desktop's config folder" in result.output
     assert entry_in(tmp_path / "BharatCode" / "Config" / "opencode.jsonc") is not None
 
 

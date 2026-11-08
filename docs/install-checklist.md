@@ -46,16 +46,16 @@ In a folder with a small git repo of your own:
    own branch and files are unchanged (`git status` is clean).
 7. [ ] `gtu report` prints a summary and says the report was committed to the job's branch.
 
-## D. Tests and docs jobs (need BharatCode's own CLI)
+## D. Tests and docs jobs (need BharatCode Desktop)
 
-1. [ ] Before installing the CLI: `gtu add tests <file>` queues the job and says it won't run yet,
-   with the install steps; `gtu check` says "BharatCode CLI: not available"; `gtu start`
-   runs any review jobs and leaves the tests job **queued** (`gtu list`), not failed.
-2. [ ] Node.js is installed, then (new terminal) `npm.cmd install -g bharatcode` and
-   `bharatcode.cmd auth login`. Note whether plain `npm` says "running scripts is disabled".
-3. [ ] `gtu check` says "BharatCode CLI: installed (...) and signed in".
-4. [ ] `gtu start`: the queued tests job finishes and its branch contains only passing
-   tests (`git show gtu/<job-id> --stat`).
+1. [ ] Before installing Desktop: `gtu check` says "BharatCode Desktop: no config folder found
+   yet"; `gtu add tests <file>` queues the job; `gtu start` in an ordinary terminal runs any
+   review jobs and leaves the tests job **queued** (`gtu list`), not failed, saying it needs Desktop.
+2. [ ] Install BharatCode Desktop, sign in, and open it once. `gtu integrate`, then restart Desktop.
+3. [ ] `gtu check` says "BharatCode Desktop: found (stable)".
+4. [ ] In Desktop's terminal, in the repo: `gtu start`. It says "Running jobs through BharatCode
+   Desktop"; the queued tests job runs as a Desktop session named "spare-gpu: ..." and its files
+   in `spare-gpu\<date>_<time>\` are only passing tests.
 5. [ ] In another terminal while a job runs: `gtu stop` says it stopped, and `gtu list` shows the
    job as paused, not failed.
 

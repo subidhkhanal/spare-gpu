@@ -48,10 +48,10 @@ def test_allowed_commands(command):
     "bharatcode run 'add docstrings to src/utils'", "bharatcode.cmd run x", "opencode run x", "bharatcode",
 ])
 def test_bharatcodes_own_cli_is_never_started_from_here(command, monkeypatch):
-    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode's CLI"):
+    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode itself"):
         freerun.check_command(command)
     monkeypatch.setenv("GTU_RUN_ALLOWED", "bharatcode run, opencode")  # the escape hatch doesn't reach it
-    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode's CLI"):
+    with pytest.raises(freerun.FreeRunError, match="doesn't start BharatCode itself"):
         freerun.check_command(command)
 
 
@@ -67,7 +67,7 @@ def test_a_bharatcode_run_queued_before_this_rule_is_refused_when_it_comes_up(gi
         cmd = store.add_command("bharatcode run 'add type hints'", str(git_repo))  # queued by an older version
         said = []
         assert freerun.wait_and_run(store, cmd.id, sleep=fake.clock.sleep, say=said.append) is None
-        assert store.get_command(cmd.id).status == "failed" and "doesn't start BharatCode's CLI" in said[-1]
+        assert store.get_command(cmd.id).status == "failed" and "doesn't start BharatCode itself" in said[-1]
 
 
 @pytest.mark.parametrize("command, why", [

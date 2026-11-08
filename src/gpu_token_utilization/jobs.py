@@ -1,18 +1,18 @@
 """The three job types and the steps they are made of.
 
-tests:  write   - BharatCode's CLI writes new test files (it may run allowlisted test commands);
+tests:  write   - a BharatCode Desktop session writes new test files (it may run allowlisted test commands);
                   the result is saved as a patch outside the worktree, nothing is committed yet.
         verify  - we apply the patch, run each new test file ourselves with the allowlisted
                   test command, drop failing tests, discard files that still fail, revert any
                   change that is not a new test file, and commit what is left.
-docs:   write   - the CLI adds docstrings and README text (no commands allowed); saved as a patch.
+docs:   write   - the session adds docstrings and README text (no commands allowed); saved as a patch.
         verify  - we keep a Python file only if its code is unchanged apart from docstrings and no
                   existing docstring was removed or shortened, and a Markdown file only if no line
                   was removed; everything else is reverted. Then commit.
 review: review  - our own client sends the code (with line numbers) and writes the answer to
                   gtu-review-<job-id>.md. No source file is changed.
 
-Saving the CLI's work as a patch before checking it means a crash during the check never loses
+Saving the session's work as a patch before checking it means a crash during the check never loses
 it and never leaves unchecked work committed.
 """
 
@@ -31,10 +31,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import worktree
-from .agent_cli import CONFIG_FILE, CREDENTIAL_RETRIES, CliNotFound, CliResult
+from .agent import CONFIG_FILE, AgentResult
 from .api import env_without_key
 from .budget import BudgetExceeded
 from .client import BharatCodeError, BusyError
+from .desktop import DESKTOP_NEEDED, DesktopNotFound
 from .runstate import StopRequested
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ class JobConfig:
     test_command: tuple[str, ...] = ("python", "-m", "pytest")
     allowed_commands: tuple[str, ...] = DEFAULT_ALLOWED
     test_timeout: float = 300.0
-    cli_timeout: float = 900.0
+    agent_timeout: float = 900.0  # one job step, as one Desktop session
     review_max_chars: int = 40_000
     review_max_tokens: int = 4_000
 
@@ -66,8 +67,8 @@ class JobConfig:
             cfg.allowed_commands = tuple(c.strip() for c in os.environ["GTU_ALLOWED_COMMANDS"].split(",") if c.strip())
         if os.environ.get("GTU_TEST_TIMEOUT"):
             cfg.test_timeout = float(os.environ["GTU_TEST_TIMEOUT"])
-        if os.environ.get("GTU_CLI_TIMEOUT"):
-            cfg.cli_timeout = float(os.environ["GTU_CLI_TIMEOUT"])
+        if os.environ.get("GTU_AGENT_TIMEOUT"):
+            cfg.agent_timeout = float(os.environ["GTU_AGENT_TIMEOUT"])
         cfg.check()
         return cfg
 
@@ -103,7 +104,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def changed_files(workdir: Path) -> list[tuple[str, str]]:
-    """(git status code, path) for every change in the worktree, except our CLI config and caches.
+    """(git status code, path) for every change in the worktree, except the job's permission file and caches.
     -z: names come back raw (spaces, quotes, non-ASCII) instead of quoted and escaped."""
     out = []
     entries = _git(workdir, "status", "--porcelain", "-z", "-uall").split("\0")
@@ -133,8 +134,8 @@ def source_text(data: bytes) -> str:
 
 
 def match_file_style(file: Path, original: bytes) -> None:
-    """Give a rewritten file the original's byte-order mark and line endings. The CLI (and
-    many editors) normalise both, which would make the branch's diff show every line changed."""
+    """Give a rewritten file the original's byte-order mark and line endings. The model's edit
+    tools (and many editors) normalise both, which would make the branch's diff show every line changed."""
     data = file.read_bytes()
     body = data.removeprefix(BOM).replace(b"\r\n", b"\n")
     if original.count(b"\r\n") * 2 > original.count(b"\n"):  # mostly CRLF
@@ -193,35 +194,33 @@ def head_text(workdir: Path, path: str) -> str | None:
     return None if data is None else source_text(data)
 
 
-# --- the CLI step shared by tests and docs ---------------------------------------------
+# --- the agent step shared by tests and docs ---------------------------------------------
 
-def run_cli(ctx: StepContext, prompt: str, *, edit: bool, commands: tuple[str, ...]) -> CliResult:
-    if ctx.cli is None:
-        raise CliNotFound("no BharatCode CLI is configured for this run")
+def run_agent(ctx: StepContext, prompt: str, *, edit: bool, commands: tuple[str, ...]) -> AgentResult:
+    if ctx.agent is None:
+        raise DesktopNotFound(DESKTOP_NEEDED)
     budget = ctx.budget_remaining()
     if budget <= 0:
-        raise BudgetExceeded("token budget used up before the CLI could start")
-    result = ctx.cli.run(
-        ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget, on_step=ctx.log_cli_step,
+        raise BudgetExceeded("token budget used up before the session could start")
+    result = ctx.agent.run(
+        ctx.workdir, prompt, edit=edit, commands=commands, token_budget=budget, on_step=ctx.log_agent_step,
         should_stop=ctx.should_stop,
-        on_retry=lambda n: ctx.log(f"  BharatCode couldn't read its own sign-in; continuing the same session "
-                                   f"(retry {n} of {CREDENTIAL_RETRIES})."),
     )
     if result.stopped == "stop":
         raise StopRequested("stopped by `gtu stop`")
-    label = getattr(ctx.cli, "label", "BharatCode CLI")
+    label = getattr(ctx.agent, "label", "BharatCode Desktop")
     if result.stopped == "budget":
         raise BudgetExceeded(f"stopped {label} after {result.tokens} tokens: budget reached")
     if result.stopped == "timeout":
-        raise BusyError(f"{label} did not finish within {ctx.cli.timeout:.0f} s")
+        raise BusyError(f"{label} did not finish within {ctx.agent.timeout:.0f} s")
     if not result.ok:
         raise BharatCodeError(f"{label} failed: {result.error or 'unknown error'}")
     return result
 
 
-def _cli_summary(result: CliResult, saved: list[str]) -> str:
+def _agent_summary(result: AgentResult, saved: list[str]) -> str:
     return (
-        f"BharatCode CLI: {len(result.steps)} step(s), {result.tokens} tokens; "
+        f"BharatCode Desktop: {len(result.steps)} step(s), {result.tokens} tokens; "
         f"changed {len(saved)} file(s): {', '.join(saved) or 'none'}.\n{result.text}"
     ).strip()
 
@@ -244,9 +243,9 @@ def write_tests(ctx: StepContext) -> str:
         target=job.target, test_command=" ".join(ctx.config.test_command),
         note=f"\n- The developer adds: {job.note}" if job.note else "",
     )
-    result = run_cli(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
+    result = run_agent(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
     saved = save_candidate(ctx.workdir, ctx.state_dir / "tests.patch")
-    return _cli_summary(result, saved)
+    return _agent_summary(result, saved)
 
 
 def _test_names(xml_path: Path) -> tuple[set[str], set[str]]:
@@ -370,9 +369,9 @@ DOC_FILES = (".md", ".rst", ".txt")
 def write_docs(ctx: StepContext) -> str:
     job = ctx.job
     prompt = DOCS_PROMPT.format(target=job.target, note=f"\n- The developer adds: {job.note}" if job.note else "")
-    result = run_cli(ctx, prompt, edit=True, commands=())
+    result = run_agent(ctx, prompt, edit=True, commands=())
     saved = save_candidate(ctx.workdir, ctx.state_dir / "docs.patch")
-    return _cli_summary(result, saved)
+    return _agent_summary(result, saved)
 
 
 class _StripDocstrings(ast.NodeTransformer):
@@ -584,9 +583,9 @@ def write_fix(ctx: StepContext) -> str:
     if not (job.note or "").strip():
         raise BharatCodeError("a fix job needs the findings to apply, in its note")
     prompt = FIX_PROMPT.format(findings=job.note.strip(), test_command=" ".join(ctx.config.test_command))
-    result = run_cli(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
+    result = run_agent(ctx, prompt, edit=True, commands=ctx.config.allowed_commands)
     saved = save_candidate(ctx.workdir, ctx.state_dir / "fix.patch")
-    return _cli_summary(result, saved)
+    return _agent_summary(result, saved)
 
 
 def verify_fix(ctx: StepContext) -> str:

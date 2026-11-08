@@ -1,6 +1,6 @@
 """spare-gpu's MCP server: each of the five tools against fakes (BharatCode's API, live stats and
 history, and the background processes), missing-store handling, the real protocol (in memory and
-over stdio, the way BharatCode's CLI runs it), and sharing the store between processes.
+over stdio, the way BharatCode Desktop runs it), and sharing the store between processes.
 Commands queued with `gtu run-when-free` are covered in test_freerun.py."""
 
 import json
@@ -19,11 +19,11 @@ from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
 from gpu_token_utilization.store import RequestLog, Store
 
-from conftest import STATS
+from conftest import desktop_db
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
 PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"}  # only for `gtu mcp --pack`
-REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to the CLI
+REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to `gtu` commands
 KEY = "bc_live_test_key_not_real"
 
 
@@ -264,25 +264,35 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
 
 
-def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_delta(tools, git_repo, fake, monkeypatch):
+def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_this_projects_tokens(
+        tools, git_repo, fake, monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+
     from gpu_token_utilization import stats
 
     fake.usage_busy(1)
     plain = tools.waits()
     assert "Pack roles" not in plain  # a plain server says nothing about the pack
-    later = stats.parse_stats(STATS.replace("120.5K", "150.5K").replace("30 │", "34 │").replace("300.0K", "420.0K"))
-    readings = iter([stats.parse_stats(STATS), later, later])  # the snapshot, pack_cost, and the second waits call
-    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: next(readings))
     text = tools.waits(roles=True)
     assert "Pack roles, which variant to start now" in text
     for role in ("research-checker", "review-verifier", "security-verifier"):
         assert f"- {role}: start `{role}` (" in text  # unmeasured roles stay on the heavy model
     assert (git_repo / ".gtu" / "pack-usage.json").is_file()
     assert (git_repo / ".gtu" / ".gitignore").read_text(encoding="utf-8") == "*\n"  # never shows up as a change
+    assert "no token figures" in tools.pack_cost()  # no Desktop data on this machine: said, never estimated
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    qwen = {"input": 500, "output": 40, "reasoning": 0, "cache": {"read": 8000, "write": 0}, "total": 8540}
+    deepseek = {"input": 180, "output": 769, "reasoning": 0, "cache": {"read": 25600, "write": 0}, "total": 26549}
+    db = desktop_db(tmp_path / "desktop.db", [(str(git_repo), now + 1000, "bharatcode/qwen-3.8-27b", qwen),
+                                               (str(git_repo), now + 2000, "bharatcode/qwen-3.8-27b", qwen),
+                                               (str(git_repo), now + 3000, "bharatcode/deepseek-v4.1-flash", deepseek),
+                                               (str(tmp_path / "elsewhere"), now + 4000, "bharatcode/qwen-3.8-27b", qwen),
+                                               (str(git_repo), now - 3_600_000, "bharatcode/qwen-3.8-27b", qwen)])
+    monkeypatch.setenv(stats.DB_ENV, str(db))
     cost = tools.pack_cost()
-    assert cost.startswith("Tokens used on this machine since the spare_waits call 0 min ago")
-    assert "- DeepSeek V4.1 Flash: +30,000 tokens in 0 message(s)" in cost
-    assert "- Qwen 3.8 27B: +120,000 tokens in 4 message(s)" in cost
+    assert cost.startswith("Tokens used in this project's BharatCode Desktop sessions since the spare_waits call 0 min ago")
+    assert "- DeepSeek V4.1 Flash: 26,549 tokens in 1 message(s) (180 input, 769 output, 25,600 read from cache)" in cost
+    assert "- Qwen 3.8 27B: 17,080 tokens in 2 message(s)" in cost  # not the other project's, not the earlier one
     monkeypatch.setenv("GTU_SWITCH_SAFE", "review-verifier")  # measured (or marked) switch-safe: the router may move it
     routed = tools.waits(roles=True)
     assert "- review-verifier: start `" in routed and "- research-checker: start `research-checker` (" in routed
@@ -290,9 +300,8 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_the_token_
 
 def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_queued(git_repo, fake, monkeypatch):
     from test_routing_jobs import wait_figures  # DeepSeek queued about 2 minutes, Qwen idle
-    from gpu_token_utilization import router, stats
+    from gpu_token_utilization import router
 
-    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: None)
     (git_repo / ".gtu").mkdir()
     (git_repo / ".gtu" / "switch-safe").write_text("review-verifier\n", encoding="utf-8")  # the project's own override
     tools = SpareTools(git_repo, launch=lambda repo: 1, http=wait_figures)
@@ -304,14 +313,11 @@ def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_
     assert "- review-verifier: start `review-verifier-standard`" in again and "still routed away" not in again
 
 
-def test_pack_cost_without_a_snapshot_or_a_cli_says_so(tools, git_repo, monkeypatch):
-    from gpu_token_utilization import stats
-
-    assert tools.pack_cost().startswith("No usage snapshot")
+def test_pack_cost_without_a_start_time_or_desktop_data_says_so(tools, git_repo):
+    assert tools.pack_cost().startswith("No start time")
     (git_repo / ".gtu").mkdir(exist_ok=True)
-    (git_repo / ".gtu" / "pack-usage.json").write_text('{"at": "2026-11-06T10:00:00+00:00", "models": {}}', encoding="utf-8")
-    monkeypatch.setattr(stats, "model_usage", lambda days=1, command=None: None)
-    assert "no token figures" in tools.pack_cost()
+    (git_repo / ".gtu" / "pack-usage.json").write_text('{"at": "2026-11-06T10:00:00+00:00"}', encoding="utf-8")
+    assert "no token figures" in tools.pack_cost()  # conftest leaves no Desktop session data to read
 
 
 def test_security_filter_through_the_tool(git_repo, fake):
@@ -367,7 +373,7 @@ def test_protocol_calls_return_plain_text(tools, git_repo):
     assert "review src, queued" in status.content[0].text
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode's CLI uses on Windows")
+@pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode Desktop uses on Windows")
 def test_gtu_mcp_over_stdio_like_bharatcode_runs_it(git_repo):
     # A real `gtu mcp` subprocess: nothing but protocol may reach stdout, on Windows too.
     # (A status call on a fresh repo needs no store, no key and no network.)

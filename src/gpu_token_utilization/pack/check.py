@@ -174,7 +174,7 @@ def check_channels() -> list[Finding]:
     for channel in bc_config.installed_channels():
         if channel == "stable":
             continue
-        folder = bc_config.channel_config_dir(channel, ask_cli=False)
+        folder = bc_config.channel_config_dir(channel)
         if not any(bc_config.is_pack_file(folder / n) for n in bc_config.PACK_NAMES):
             found.append(Finding(WARN, f"BharatCode Desktop's {channel} channel has a config folder without the pack: "
                                        f"`gtu integrate --pack --channel {channel}`"))

@@ -85,9 +85,9 @@ def run_task(conn, task: dict, model: str, workdir: Path, job_budget: int, log=p
         job = store.add_job(task["kind"], task["target"], str(repo))
         store.set_route(job.id, model, model, "evaluation run")  # pinned: no routing during an eval
         config = JobConfig.from_env()
-        agent = desktop.DesktopAgent(conn, model=f"bharatcode/{model}", timeout=config.cli_timeout)
+        agent = desktop.DesktopAgent(conn, model=f"bharatcode/{model}", timeout=config.agent_timeout)
         budgets = Budgets(per_job=job_budget, per_night=max(job_budget * 4, 10_000_000))
-        Scheduler(store, Gate(store, GateConfig()), None, cli=agent, config=config, budgets=budgets,
+        Scheduler(store, Gate(store, GateConfig()), None, agent=agent, config=config, budgets=budgets,
                   ignore_gate=True, log=log).run()
         status = store.get_job(job.id).status
         if status == "failed":

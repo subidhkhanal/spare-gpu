@@ -1,4 +1,4 @@
-"""Runs job steps through BharatCode Desktop's own local server, instead of the `bharatcode` CLI.
+"""Runs job steps through BharatCode Desktop's own local server.
 
 Desktop runs BharatCode's server (the OpenCode HTTP API) on 127.0.0.1 with a password made for
 each launch, and starts MCP servers such as ours as its child processes. They inherit
@@ -6,12 +6,12 @@ OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD, but not the port, so the po
 the one a parent process listens on (or given in GTU_DESKTOP_URL, which the MCP server sets for
 the background runner it starts). A job step is then one Desktop session:
 - created in the job's worktree (`?directory=`), so it shows up in Desktop like any other chat;
-- with the same deny-first permission file the CLI runner used, written into the worktree;
+- with the job's deny-first permission file (agent.permission_config), written into the worktree;
 - with the model chosen per task (the router's "sticky per task" rule);
 - polled for its steps, so tokens are reported as they come in and the token budget, the
   timeout and `gtu stop` all abort the session.
-It uses Desktop's sign-in, so the CLI's credential-store bug and its separate login are gone.
-Jobs only run while Desktop is open: the server lives inside it.
+It uses Desktop's sign-in, so spare-gpu needs no login of its own for it. Jobs only run while
+Desktop is open: the server lives inside it.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from typing import Callable, Mapping
 
 import httpx
 
-from .agent_cli import CONFIG_FILE, DEFAULT_MODEL, CliResult, CliStep, permission_config
+from .agent import CONFIG_FILE, DEFAULT_MODEL, AgentResult, AgentStep, permission_config
 
 URL_ENV = "GTU_DESKTOP_URL"
 USER_ENV = "OPENCODE_SERVER_USERNAME"
@@ -38,7 +38,7 @@ HEALTH = "/global/health"
 ANCESTORS = 6
 WEAK_CANDIDATES = 8  # ports with little evidence of being a server, tried after the likely ones
 POLL_RETRIES = 5
-STALL_POLLS = 15  # polls a session may sit idle with an unfinished reply before the step gives up  # dropped connections in a row while following a session before giving up
+STALL_POLLS = 15  # polls a session may sit idle with an unfinished reply before the step gives up
 
 
 DESKTOP_NEEDED = ("Tests and docs jobs run inside BharatCode Desktop: open this project in Desktop and ask "
@@ -216,7 +216,7 @@ def _error_text(error: dict) -> str:
 
 
 class DesktopAgent:
-    """Same interface as agent_cli.BharatCodeCli.run, backed by a Desktop session."""
+    """Runs a job step (or a named agent, for the benchmarks) as a Desktop session and follows it."""
 
     label = "BharatCode Desktop"
 
@@ -238,37 +238,51 @@ class DesktopAgent:
         self._clock = clock
 
     def run(self, workdir: Path, prompt: str, *, edit: bool = True, commands: tuple[str, ...] = (),
-            token_budget: int | None = None, on_step: Callable[[CliStep], None] = lambda step: None,
-            should_stop: Callable[[], bool] = lambda: False,
-            on_retry: Callable[[int], None] = lambda attempt: None) -> CliResult:
+            token_budget: int | None = None, on_step: Callable[[AgentStep], None] = lambda step: None,
+            should_stop: Callable[[], bool] = lambda: False) -> AgentResult:
+        """A job step: a session under the job's permission file and rules, on this agent's model."""
         workdir = Path(workdir)
         config = workdir / CONFIG_FILE
         config.write_text(json.dumps(permission_config(edit, commands, self.mcp_servers), indent=2), encoding="utf-8")
-        result = CliResult(exit_code=None, text="")
+        try:
+            return self._session(workdir, prompt, {"permission": session_rules(edit, commands)},
+                                 {"model": _model_ref(self.model)}, token_budget, on_step, should_stop)
+        finally:
+            config.unlink(missing_ok=True)
+
+    def run_agent(self, workdir: Path, agent: str | None, prompt: str, *, token_budget: int | None = None,
+                  on_step: Callable[[AgentStep], None] = lambda step: None) -> AgentResult:
+        """One of Desktop's agents (a pack lead for the benchmarks; None: Desktop's default agent)
+        on a prompt, as a session in `workdir`. The agent keeps its own model and permissions:
+        nothing of a job's applies."""
+        return self._session(Path(workdir), prompt, {}, {"agent": agent} if agent else {}, token_budget, on_step,
+                             lambda: False)
+
+    def _session(self, workdir: Path, prompt: str, session_extra: dict, prompt_extra: dict, token_budget,
+                 on_step, should_stop) -> AgentResult:
+        result = AgentResult(exit_code=None, text="")
         where = {"directory": str(workdir)}
         try:
             with self.conn.client(transport=self._transport) as http:
                 created = http.post("/session", params=where, json={
-                    "title": f"spare-gpu: {prompt.splitlines()[0][:60]}",
-                    "permission": session_rules(edit, commands),
+                    "title": f"spare-gpu: {prompt.splitlines()[0][:60]}" if prompt.strip() else "spare-gpu",
+                    **session_extra,
                 })
                 created.raise_for_status()
                 session = created.json()["id"]
                 sent = http.post(f"/session/{session}/prompt_async", params=where,
-                                 json={"model": _model_ref(self.model), "parts": [{"type": "text", "text": prompt}]})
+                                 json={**prompt_extra, "parts": [{"type": "text", "text": prompt}]})
                 sent.raise_for_status()
                 self._follow(http, session, where, result, token_budget, on_step, should_stop)
         except httpx.HTTPError as exc:
             result.error = f"BharatCode Desktop's server: {exc}"
-        finally:
-            config.unlink(missing_ok=True)
         if result.exit_code is None:
             result.exit_code = 1 if result.error or result.stopped else 0
         return result
 
     def ask(self, workdir: Path, messages: list[dict], *, token_budget: int | None = None,
-            on_step: Callable[[CliStep], None] = lambda step: None,
-            should_stop: Callable[[], bool] = lambda: False) -> CliResult:
+            on_step: Callable[[AgentStep], None] = lambda step: None,
+            should_stop: Callable[[], bool] = lambda: False) -> AgentResult:
         """A one-answer request (the review job) as a Desktop session that may read but not edit
         or run anything, so it needs Desktop's sign-in rather than spare-gpu's own API key."""
         prompt = "\n\n".join(m["content"] for m in messages if m.get("content"))
@@ -335,7 +349,7 @@ class DesktopAgent:
         return {sid: s for sid, s in response.json().items() if (s or {}).get("type") != "idle"}
 
     @staticmethod
-    def _read(messages: list[dict], seen: set[str], result: CliResult, on_step) -> bool:
+    def _read(messages: list[dict], seen: set[str], result: AgentResult, on_step) -> bool:
         """Take in new steps; True once the assistant has finished its last message."""
         texts, last = [], None
         for message in messages:
@@ -349,13 +363,13 @@ class DesktopAgent:
                     seen.add(part.get("id"))
                     tokens = part.get("tokens") or {}
                     cache = tokens.get("cache") or {}
-                    step = CliStep(
+                    step = AgentStep(
                         input_tokens=tokens.get("input") or 0, output_tokens=tokens.get("output") or 0,
                         reasoning_tokens=tokens.get("reasoning") or 0, cache_read_tokens=cache.get("read") or 0,
                         total_tokens=tokens.get("total") or sum(
                             [tokens.get("input") or 0, tokens.get("output") or 0, tokens.get("reasoning") or 0,
                              cache.get("read") or 0, cache.get("write") or 0]),
-                        elapsed_ms=None,
+                        elapsed_ms=None, cache_write_tokens=cache.get("write") or 0,
                     )
                     result.steps.append(step)
                     on_step(step)
@@ -371,6 +385,6 @@ class DesktopAgent:
             return False
         if last.get("error"):
             result.error = _error_text(last["error"])
-        # Every text part, like BharatCodeCli: a review's body often comes before a closing remark.
+        # Every text part: a review's body often comes before a closing remark.
         result.text = "\n".join(t.strip() for t in texts if t.strip())
         return True

@@ -1,5 +1,4 @@
 import json
-import sys
 import uuid
 from datetime import time
 
@@ -10,6 +9,7 @@ from gpu_token_utilization import keystore
 from gpu_token_utilization.keystore import TARGET_ENV
 from gpu_token_utilization.client import BharatCodeClient, RetryPolicy
 from gpu_token_utilization.fakeapi import FakeBharatCode
+from gpu_token_utilization.fakedesktop import FakeDesktop, Step
 from gpu_token_utilization.gate import Gate, GateConfig
 from gpu_token_utilization.store import Store
 
@@ -24,11 +24,13 @@ def no_real_api_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_real_desktop(monkeypatch):
+def no_real_desktop(monkeypatch, tmp_path):
     """No test may find a real BharatCode Desktop server (pytest run from Desktop's terminal
     would inherit its password). Tests that need one use fakedesktop."""
-    for name in ("OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME", "GTU_DESKTOP_URL", "XDG_STATE_HOME", "OPENCODE_DB"):
+    for name in ("OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME", "GTU_DESKTOP_URL", "XDG_STATE_HOME",
+                 "GTU_DESKTOP_DB"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))  # no real Desktop session data either
 
 
 @pytest.fixture(autouse=True)
@@ -36,12 +38,6 @@ def no_real_bharatcode_config(monkeypatch, tmp_path):
     """No test may read the user's real BharatCode config (jobs read it to switch its MCP servers
     off). Tests that need one write it under GTU_BHARATCODE_CONFIG_DIR or this APPDATA."""
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
-
-
-@pytest.fixture(autouse=True)
-def fake_bharatcode_cli(monkeypatch):
-    """No test ever starts the real BharatCode CLI; tests about a missing CLI delete this."""
-    monkeypatch.setenv("GTU_BHARATCODE_CMD", json.dumps([sys.executable, "-m", "gpu_token_utilization.fakecli"]))
 
 
 @pytest.fixture(autouse=True)
@@ -130,25 +126,46 @@ def make_gate(fake, store, client):
     return make
 
 
-# What `bharatcode stats --models` prints (its MODEL USAGE box), for the stats and pack_cost tests.
-STATS = """┌────────────────────────────────────────────────────────┐
-│                      MODEL USAGE                       │
-├────────────────────────────────────────────────────────┤
-│ bharatcode/deepseek-v4.1-flash                         │
-│   Messages                                         12 │
-│   Input Tokens                                  120.5K │
-│   Output Tokens                                   8.2K │
-│   Cache Read                                     40.0K │
-│   Cache Write                                       0 │
-│   Cost                                        $0.0000 │
-├────────────────────────────────────────────────────────┤
-│ bharatcode/qwen-3.8-27b                                │
-│   Messages                                         30 │
-│   Input Tokens                                  300.0K │
-│   Output Tokens                                  20.0K │
-│   Cache Read                                        0 │
-│   Cache Write                                       0 │
-│   Cost                                        $0.0000 │
-└────────────────────────────────────────────────────────┘
-"""
+@pytest.fixture
+def desktop_fake():
+    """A fake BharatCode Desktop server; desktop_fake.agent() is a DesktopAgent talking to it."""
+    return FakeDesktop()
 
+
+@pytest.fixture
+def scenario(desktop_fake):
+    """Script the fake Desktop's sessions: each step's tokens, the files it writes and how many
+    polls it takes, then an error or the closing text. Returns the fake, whose .sessions record
+    each session's folder, prompt and permission file."""
+    def script(steps=None, error=None, text="done"):
+        given = steps or [{"tokens": 1000}]
+        desktop_fake.steps = [Step(tokens=s.get("tokens", 1000), writes=s.get("writes") or {}, polls=s.get("polls", 1))
+                              for s in given]
+        if not error:
+            desktop_fake.steps[-1].text = text
+        desktop_fake.error = error
+        return desktop_fake
+
+    return script
+
+
+def desktop_db(path, replies):
+    """A BharatCode Desktop session database with the tables stats.tokens_since reads. replies:
+    (folder, ms since epoch, model, {"input", "output", "reasoning", "cache": {"read", "write"}, "total"})."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    db.execute("create table session (id text primary key, directory text)")
+    db.execute("create table message (id text primary key, session_id text, time_created integer, data text)")
+    sessions = {}
+    for n, (folder, at, model, tokens) in enumerate(replies, 1):
+        sid = sessions.setdefault(folder, f"ses_{len(sessions) + 1}")
+        db.execute("insert or ignore into session values (?, ?)", (sid, folder))
+        provider, _, model_id = model.partition("/")
+        data = {"role": "assistant", "providerID": provider, "modelID": model_id, "tokens": tokens}
+        db.execute("insert into message values (?, ?, ?, ?)", (f"msg_{n}", sid, at, json.dumps(data)))
+        db.execute("insert into message values (?, ?, ?, ?)", (f"msg_{n}_user", sid, at, json.dumps({"role": "user"})))
+    db.commit()
+    db.close()
+    return path

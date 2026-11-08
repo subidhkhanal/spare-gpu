@@ -1,8 +1,12 @@
-"""Benchmarks for the pack's commands (plan §8): run a command through BharatCode's CLI in each
-setup, tally the outcome from the files it leaves, measure tokens per model with `bharatcode
-stats`, and decide which switchable roles are switch-safe with the rule scripts/eval_models.py
-uses for job types. scripts/eval_research.py and scripts/eval_review.py are thin wrappers;
-everything here runs without BharatCode in the tests (a fake CLI, recorded files).
+"""Benchmarks for the pack's commands (plan §8): run a command's lead as a BharatCode Desktop
+session in each setup, tally the outcome from the files it leaves, read the tokens per model from
+Desktop's own record of the replies, and decide which switchable roles are switch-safe with the
+rule scripts/eval_models.py uses for job types. scripts/eval_research.py and scripts/eval_review.py
+are thin wrappers; everything here runs without BharatCode in the tests (a fake Desktop server,
+recorded files).
+
+Desktop reads the pack's config when it starts, so a run covers one setup: install it
+(install_args), restart Desktop, and run the script from Desktop's terminal.
 
 A setup is how the pack is installed for the run:
   deepseek              every role on the heavy model (GTU_MODELS names it twice)
@@ -19,11 +23,11 @@ import re
 import statistics
 import subprocess
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import pack, scholar, stats
-from .agent_cli import resolve_command
+from . import desktop, pack, scholar, stats
 from .api import env_without_key
 
 HEAVY, STANDARD = "deepseek-v4.1-flash", "qwen-3.8-27b"
@@ -40,7 +44,7 @@ COMMAND_LEADS = {"deep-research": "research-lead", "code-review": "review-lead",
                  "simplify": "simplify-lead"}
 
 
-# --- running a command through the CLI -----------------------------------------------------------
+# --- running a command's lead in Desktop -----------------------------------------------------------
 
 def command_prompt(command: str, arguments: str, source: Path = pack.PACK_DIR) -> str:
     """The command's template from the pack, with $ARGUMENTS filled in: what Desktop sends."""
@@ -49,15 +53,20 @@ def command_prompt(command: str, arguments: str, source: Path = pack.PACK_DIR) -
     return body.strip().replace("$ARGUMENTS", arguments)
 
 
-def install(setup: str, components: list[str], gtu: list[str] | None = None, runner=subprocess.run) -> None:
-    """Install the pack for a setup: `gtu integrate --pack --only split,<components> [--lite]`
-    with the setup's environment. The CLI reads the config at every `bharatcode run`, so no
-    restart is needed between setups."""
+def install_args(setup: str, components: list[str], gtu: list[str] | None = None) -> tuple[list[str], dict]:
+    """The command that installs the pack for a setup, `gtu integrate --pack --only
+    split,<components> [--lite]`, and the environment variables it needs."""
     chosen = SETUPS[setup]
     args = [*(gtu or ["gtu"]), "integrate", "--pack", "--only", ",".join(["split", *components])]
     if chosen["lite"]:
         args.append("--lite")
-    runner(args, check=True, env=env_without_key(**chosen["env"]), stdin=subprocess.DEVNULL)
+    return args, dict(chosen["env"])
+
+
+def install(setup: str, components: list[str], gtu: list[str] | None = None, runner=subprocess.run) -> None:
+    """Install the pack for a setup. Desktop picks it up when it next starts."""
+    args, env = install_args(setup, components, gtu)
+    runner(args, check=True, env=env_without_key(**env), stdin=subprocess.DEVNULL)
 
 
 @dataclass
@@ -68,47 +77,32 @@ class RunResult:
     steps: int = 0
     tokens: dict = field(default_factory=dict)  # input/output/cache totals of the lead's own session
     error: str | None = None
+    started: datetime | None = None  # when the run began, for tokens_by_model
 
 
-def run_command(project: Path, lead: str, prompt: str, setup: str, timeout: float = 3600.0,
-                command: list[str] | None = None) -> RunResult:
-    """One `bharatcode run --agent <lead>` in the project, with the setup's environment."""
-    argv = command or resolve_command()
-    env = env_without_key(**SETUPS[setup]["env"])
-    started = time.monotonic()
+def run_command(project: Path, lead: str, prompt: str, timeout: float = 3600.0,
+                agent: desktop.DesktopAgent | None = None) -> RunResult:
+    """The lead agent on the command's prompt, as a Desktop session in the project. Needs Desktop
+    (run from its terminal); `agent` is for the tests."""
+    began, started = datetime.now(timezone.utc), time.monotonic()
     try:
-        proc = subprocess.run([*argv, "run", "--dir", str(project), "--agent", lead, "--format", "json", prompt],
-                              cwd=project, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=timeout, stdin=subprocess.DEVNULL, env=env)
-    except subprocess.TimeoutExpired:
-        return RunResult("", time.monotonic() - started, -1, error=f"timed out after {timeout:.0f} s")
-    text, steps, tokens, error = [], 0, {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}, None
-    for line in proc.stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        kind = event.get("type")
-        if kind == "text":
-            text.append((event.get("part") or {}).get("text", ""))
-        elif kind == "step_finish":
-            steps += 1
-            t = (event.get("part") or {}).get("tokens") or {}
-            tokens["input"] += t.get("input", 0)
-            tokens["output"] += t.get("output", 0) + t.get("reasoning", 0)
-            tokens["cache_read"] += (t.get("cache") or {}).get("read", 0)
-            tokens["cache_write"] += (t.get("cache") or {}).get("write", 0)
-        elif kind == "error":
-            error = ((event.get("error") or {}).get("data") or {}).get("message") or "error"
-    return RunResult("".join(text), time.monotonic() - started, proc.returncode, steps, tokens, error)
+        agent = agent or desktop.DesktopAgent(desktop.discover(), timeout=timeout)
+    except desktop.DesktopNotFound as exc:
+        return RunResult("", 0.0, -1, error=f"{exc}. Run the benchmark from BharatCode Desktop's terminal.", started=began)
+    result = agent.run_agent(project, lead, prompt)
+    tokens = {"input": sum(s.input_tokens for s in result.steps),
+              "output": sum(s.output_tokens + s.reasoning_tokens for s in result.steps),
+              "cache_read": sum(s.cache_read_tokens for s in result.steps)}
+    error = result.error or (f"stopped: {result.stopped}" if result.stopped else None)
+    return RunResult(result.text, time.monotonic() - started, result.exit_code or 0, len(result.steps), tokens,
+                     error, began)
 
 
-def stats_delta(before: dict | None, after: dict | None) -> dict[str, float]:
-    """Tokens per model between two `bharatcode stats --models` readings (stats.parse_stats)."""
-    if not before or not after:
-        return {}
-    return {model: figures["tokens"] - (before.get(model) or {}).get("tokens", 0.0) for model, figures in after.items()
-            if figures["tokens"] - (before.get(model) or {}).get("tokens", 0.0) > 0}
+def tokens_by_model(run: RunResult, project: Path) -> dict[str, int]:
+    """Tokens per model in the project's Desktop sessions since the run began: the lead's and every
+    helper's, exact, from Desktop's own record. Empty when Desktop's data isn't found."""
+    figures = stats.tokens_since(run.started, Path(project)) if run.started else None
+    return {model: used["tokens"] for model, used in (figures or {}).items() if used["tokens"] > 0}
 
 
 # --- /deep-research ------------------------------------------------------------------------------
@@ -239,7 +233,3 @@ def markdown_table(rows: list[dict], columns: list[str]) -> str:
     lines = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
     lines += ["| " + " | ".join(cell(r.get(c)) for c in columns) + " |" for r in rows]
     return "\n".join(lines)
-
-
-def usage_snapshot(command: list[str] | None = None) -> dict | None:
-    return stats.model_usage(days=1, command=command)

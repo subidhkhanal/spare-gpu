@@ -11,7 +11,6 @@ import pytest
 from typer.testing import CliRunner
 
 from gpu_token_utilization import runstate, worktree
-from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.cli import app
 from gpu_token_utilization.jobs import JobConfig
@@ -21,7 +20,6 @@ from gpu_token_utilization.store import Store
 from conftest import git
 
 runner = CliRunner()
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
 
 
 # --- run file and process helpers ----------------------------------------------------------
@@ -72,25 +70,24 @@ def test_stop_while_waiting_for_the_gate(fake, store, client, make_gate, job_rep
     assert store.get_job(job.id).status == "queued"  # never started, so nothing to pause
 
 
-def test_stop_mid_cli_step_kills_it_and_leaves_the_job_paused_and_clean(
-        git_repo, store, client, make_gate, fake, tmp_path, monkeypatch):
-    scenario = tmp_path / "scenario.json"
-    scenario.write_text(json.dumps({"steps": [{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"},
-                                               "sleep": 60}]}))
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
+def test_stop_mid_session_step_aborts_it_and_leaves_the_job_paused_and_clean(
+        git_repo, store, client, make_gate, fake, scenario):
+    # a step that would take 60 s of polls (0.05 s each), writing half a file as it starts
+    desktop = scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"}, "polls": 1200}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
     flag = threading.Event()
     threading.Timer(3.0, flag.set).start()
 
     def make(should_stop):
-        return Scheduler(store, make_gate(), client, cli=BharatCodeCli(command=FAKE_CLI, timeout=120),
+        return Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=120, poll=0.05, sleep=time.sleep),
                          budgets=Budgets(), config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
                          sleep=fake.clock.sleep, now=fake.clock.utcnow, should_stop=should_stop)
 
     started = time.monotonic()
     s = make(flag.is_set)
     s.run()
-    assert time.monotonic() - started < 20  # the 60 s CLI step was cut short
+    assert time.monotonic() - started < 20  # the 60 s step was cut short
+    assert next(iter(desktop.sessions.values()))["aborted"]  # and its session stopped
     assert s.stopped and store.get_job(job.id).status == "paused"  # paused, not failed
     assert [st["status"] for st in store.steps(job.id)] == ["pending", "pending"]
     wt = worktree.worktree_path(git_repo, job.id)
@@ -98,8 +95,7 @@ def test_stop_mid_cli_step_kills_it_and_leaves_the_job_paused_and_clean(
     assert worktree.changed_files(wt, None) == []  # nothing half-done was kept
 
     # resume: a quick, good run this time
-    scenario.write_text(json.dumps({"steps": [{"tokens": 100, "writes": {
-        "tests/test_gtu_x.py": "def test_ok():\n    assert True\n"}}]}))
+    scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "def test_ok():\n    assert True\n"}}])
     make(lambda: False).run()
     assert store.get_job(job.id).status == "done"
 

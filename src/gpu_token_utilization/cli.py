@@ -16,7 +16,6 @@ from . import keystore
 from .client import DEFAULT_MODEL, AuthError, BharatCodeClient, BharatCodeError, BusyError, RetryPolicy
 from .demo import DEMO_RETRY, DEMO_TIMEOUT, pick_file, run_demo
 from .gate import WAIT_ENV, Gate, GateConfig
-from .agent_cli import CLI_KINDS, CMD_ENV, BharatCodeCli, CliNotFound, cli_status, resolve_command
 from .budget import Budgets
 from .jobs import JobConfig
 from .scheduler import Scheduler
@@ -91,11 +90,11 @@ def main(
 
 @app.command()
 def setup(
-    remove: bool = typer.Option(False, "--remove", help="Unregister spare-gpu from BharatCode's CLI."),
+    remove: bool = typer.Option(False, "--remove", help="Unregister spare-gpu from BharatCode Desktop."),
     check_key: bool = typer.Option(True, "--check/--no-check",
                                    help="Test a newly entered key with one 1-token request."),
 ) -> None:
-    """Set everything up in one go: your API key, and spare-gpu's MCP server in BharatCode's CLI.
+    """Set everything up in one go: your API key, and spare-gpu's MCP server in BharatCode Desktop.
     Safe to run again."""
     if remove:
         _uninstall()
@@ -114,11 +113,11 @@ def setup(
     else:
         _read_check_save_key(check_key)
 
-    typer.echo("\n2/3  BharatCode's CLI (where you'll talk to spare-gpu)")
-    status = _report_cli_for_integration("     ")
+    typer.echo("\n2/3  BharatCode Desktop (where you'll talk to spare-gpu)")
+    _report_desktop("     ")
 
-    typer.echo("\n3/3  spare-gpu's MCP server in BharatCode")
-    if not _register("     ", status):
+    typer.echo("\n3/3  spare-gpu's MCP server in BharatCode Desktop")
+    if not _register("     "):
         raise typer.Exit(1)
     typer.echo("\nDone. Open BharatCode in one of your projects and ask, for example:")
     for phrase in EXAMPLE_PHRASES:
@@ -132,7 +131,7 @@ def integrate(
                                                               "(with --pack: only the pack)."),
     channel: str = typer.Option(
         "all", "--channel",
-        help="Which BharatCode to register with: stable (the released Desktop app and the CLI), beta, dev "
+        help="Which BharatCode Desktop to register with: stable (the released app), beta, dev "
              "(a Desktop build from source), local, or all (every one installed here; the default).",
     ),
     with_pack: bool = typer.Option(False, "--pack", help="Also install the command pack: /deep-research, "
@@ -141,7 +140,7 @@ def integrate(
                                                   + ", ".join(pack.COMPONENTS) + " (default: all)."),
     lite: bool = typer.Option(False, "--lite", help="Qwen-only plan: every pack role runs on the standard model."),
 ) -> None:
-    """Register spare-gpu's MCP server with BharatCode Desktop (and its CLI). Backs each config up
+    """Register spare-gpu's MCP server with BharatCode Desktop. Backs each config up
     first, says exactly what it changed and how to undo it, and is safe to run again."""
     if channel != "all" and channel not in bc_config.CHANNELS:
         _fail(f"unknown channel {channel!r}; use one of {', '.join(bc_config.CHANNELS)} or all.")
@@ -236,27 +235,13 @@ def _uninstall_pack(channel: str) -> None:
 
 
 def _register_channel(pad: str, channel: str, with_pack: bool = False) -> bool:
-    """Register spare-gpu in one channel's config. Stable is shared with the CLI, which can confirm
-    the server connects; Desktop-only channels are checked by Desktop when it starts."""
-    if channel == "stable":
-        return _register(pad, _report_cli_for_integration(pad), with_pack=with_pack)
-    folder = bc_config.channel_config_dir(channel)
-    return _register(pad, None, (folder, f"BharatCode Desktop's {channel} channel"), with_pack)
+    """Register spare-gpu in one channel's config; Desktop checks the server connects when it starts."""
+    where = bc_config.locate_config_dir() if channel == "stable" else \
+        (bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel")
+    return _register(pad, where, with_pack)
 
 
-def _report_cli_for_integration(pad: str):
-    status = cli_status()
-    if status.problem:
-        typer.echo(f"{pad}BharatCode's CLI isn't installed yet; spare-gpu is registered anyway, so it's there once it is:")
-        typer.echo(pad + status.problem.split("\n", 1)[-1].replace("\n", "\n" + pad))
-    else:
-        where = " ".join(status.command)
-        sign = {True: " and signed in", False: " but not signed in (run: bharatcode.cmd auth login)", None: ""}
-        typer.echo(f"{pad}BharatCode's CLI {status.version}{sign[status.signed_in]}: {where}")
-    return status
-
-
-def _register(pad: str, status, where: tuple[Path, str] | None = None, with_pack: bool = False) -> bool:
+def _register(pad: str, where: tuple[Path, str] | None = None, with_pack: bool = False) -> bool:
     """Register spare-gpu in BharatCode's config, saying what changed and how to undo it. When the
     file can't be edited safely, print the snippet to paste instead."""
     folder, how = where or bc_config.locate_config_dir()
@@ -281,12 +266,6 @@ def _register(pad: str, status, where: tuple[Path, str] | None = None, with_pack
             typer.echo(f"{pad}The file as it was before is saved as {backup}.")
         typer.echo(f"{pad}To undo: gtu integrate --uninstall" + (f" (or copy {backup.name} back)" if backup.exists() else ""))
     _install_commands(pad, folder)
-    if status is not None and not status.problem:
-        ok = bc_config.connected(path)
-        if ok:
-            typer.echo(f"{pad}BharatCode reports: spare-gpu connected.")
-        elif ok is False:
-            typer.echo(f"{pad}BharatCode doesn't list it as connected yet; `bharatcode.cmd mcp list` shows why.")
     return True
 
 
@@ -332,27 +311,22 @@ EXAMPLE_PHRASES = (
 )
 
 
-def _report_cli() -> None:
-    """One honest line (or a few) about BharatCode's CLI. Never fails `gtu check`: review
-    jobs work without it."""
-    status = cli_status()
-    if status.problem:
-        typer.echo(f"BharatCode CLI: not available. {status.problem}")
-    elif status.signed_in is False:
-        typer.echo(f"BharatCode CLI: installed ({status.version}) but not signed in. "
-                   "Run `bharatcode auth login`; tests and docs jobs need it.")
-    elif status.signed_in is None:
-        typer.echo(f"BharatCode CLI: installed ({status.version}); couldn't tell whether it's signed in "
-                   "(`bharatcode auth status` didn't answer).")
+def _report_desktop(pad: str = "") -> None:
+    """Which BharatCode Desktop builds have a config folder here. Never fails: review jobs work
+    without Desktop, given an API key."""
+    found = [c for c in bc_config.installed_channels() if bc_config.channel_config_dir(c).is_dir()]
+    if found:
+        typer.echo(f"{pad}BharatCode Desktop: found ({', '.join(found)}). Jobs run as Desktop sessions while it's open.")
     else:
-        typer.echo(f"BharatCode CLI: installed ({status.version}) and signed in; tests and docs jobs can run.")
+        typer.echo(f"{pad}BharatCode Desktop: no config folder found yet. Install it from bharatcode.ai and open it "
+                   "once; spare-gpu is registered anyway, so it's there once Desktop is.")
 
 
 @app.command()
 def check() -> None:
-    """Check your setup: BharatCode's CLI, your API key, and that the key works (one
+    """Check your setup: BharatCode Desktop, your API key, and that the key works (one
     1-token request)."""
-    _report_cli()
+    _report_desktop()
     try:
         found = find_api_key()
     except ApiKeyMissing as exc:
@@ -650,11 +624,10 @@ def start(
             _fail(str(exc))
         # spare-gpu runs inside BharatCode Desktop: every job is a Desktop session, on Desktop's own
         # server and sign-in, so no API key of its own is needed. Outside Desktop, review jobs can
-        # still use the API with a key; tests and docs jobs wait until Desktop runs them. (An agent
-        # command named in GTU_BHARATCODE_CMD is used instead, for tests and debugging only.)
-        client, worker, cli_missing = None, None, None
+        # still use the API with a key; tests and docs jobs wait until Desktop runs them.
+        client, worker, desktop_missing = None, None, None
         try:
-            worker = desktop.DesktopAgent(desktop.discover(), timeout=job_config.cli_timeout)
+            worker = desktop.DesktopAgent(desktop.discover(), timeout=job_config.agent_timeout)
             log(f"Running jobs through BharatCode Desktop ({worker.conn.url}); no API key needed.")
         except desktop.DesktopNotFound as exc:
             if os.environ.get(desktop.PASSWORD_ENV):  # started from Desktop, yet its server wasn't found
@@ -666,10 +639,7 @@ def start(
                                           on_retry=lambda message: log(f"  {message}"))
             except ApiKeyMissing as exc:
                 _fail(_no_key(exc))
-            if os.environ.get(CMD_ENV):
-                worker = BharatCodeCli(timeout=job_config.cli_timeout)
-            else:
-                cli_missing = desktop.DESKTOP_NEEDED
+            desktop_missing = desktop.DESKTOP_NEEDED
         config = GateConfig.from_env()
         if quiet_readings is not None:
             config.quiet_needed = quiet_readings
@@ -686,9 +656,9 @@ def start(
 
         try:
             scheduler = Scheduler(
-                store, gate, client, cli=worker,
+                store, gate, client, agent=worker,
                 budgets=Budgets.from_env(), config=job_config, log=log, ignore_gate=not wait,
-                should_stop=lambda: runstate.stop_requested(folder), cli_missing=cli_missing, route=route,
+                should_stop=lambda: runstate.stop_requested(folder), desktop_missing=desktop_missing, route=route,
             )
             steps = scheduler.run(max_steps=max_steps)
         except AuthError:
@@ -789,7 +759,7 @@ def mcp(
     folder: Path = typer.Option(None, "--dir", help="Project folder to serve. Default: the current folder."),
     with_pack: bool = typer.Option(False, "--pack", help="Also serve the command pack's tools (set by `gtu integrate --pack`)."),
 ) -> None:
-    """Run spare-gpu's MCP server over stdio, so an agent (BharatCode's CLI) can queue and check
+    """Run spare-gpu's MCP server over stdio, so an agent in BharatCode Desktop can queue and check
     jobs. Started by the agent, not by hand; see the README for the config snippet."""
     from .mcp_server import serve
 

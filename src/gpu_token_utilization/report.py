@@ -20,7 +20,8 @@ from .budget import IST, Budgets
 from .store import FINAL_STATUSES, Job, Store
 
 CHAT = "/chat/completions"
-CLI = "bharatcode-cli"
+# How agent steps are logged: "bharatcode-desktop", and in stores written by earlier versions "bharatcode-cli".
+AGENT_STEPS = ("bharatcode-desktop", "bharatcode-cli")
 
 
 @dataclass
@@ -30,7 +31,7 @@ class JobReport:
     finished: datetime | None
     tokens: int
     api_requests: int
-    cli_steps: int
+    agent_steps: int
     files: list[tuple[str, str]] = field(default_factory=list)  # (A/M/D, path) on the branch
     tests_kept: int | None = None
     tests_dropped: int | None = None
@@ -81,7 +82,7 @@ def build_job(store: Store, job: Job) -> JobReport:
         finished=max(finished) if finished and job.status in FINAL_STATUSES else None,
         tokens=sum(r["total_tokens"] or 0 for r in rows),
         api_requests=sum(1 for r in rows if r["endpoint"] == CHAT),
-        cli_steps=sum(1 for r in rows if r["endpoint"] == CLI),
+        agent_steps=sum(1 for r in rows if r["endpoint"] in AGENT_STEPS),
     )
     for r in rows:
         if r["status_code"] in (429, 503):
@@ -116,7 +117,7 @@ def _span(d: timedelta | None) -> str:
 
 def _waits(ms: list[int]) -> str:
     if not ms:
-        return "not reported (BharatCode CLI requests don't expose it)"
+        return "not reported (Desktop sessions don't expose it)"
     s = sorted(ms)
     return f"median {statistics.median(s) / 1000:.1f} s, max {s[-1] / 1000:.1f} s over {len(s)} request(s)"
 
@@ -140,7 +141,7 @@ def job_markdown(r: JobReport) -> str:
     lines = [f"# spare-gpu report: {j.kind} `{j.target}` (job `{j.id}`)", "",
              f"- Status: **{j.status}**",
              f"- Ran: {_local(r.started)} to {_local(r.finished)} ({_span(r.duration)}, including waiting for capacity)",
-             f"- Tokens: {r.tokens:,} ({r.api_requests} API request(s), {r.cli_steps} BharatCode CLI step(s))"]
+             f"- Tokens: {r.tokens:,} ({r.api_requests} API request(s), {r.agent_steps} Desktop session step(s))"]
     if r.tests_kept is not None:
         lines.append(f"- Tests: kept {r.tests_kept} passing, discarded {r.tests_dropped} failing")
     if r.reverted:
@@ -180,7 +181,7 @@ def summary_markdown(reports: list[JobReport], store: Store, budgets: Budgets, n
     night = store.tokens_since(budgets.night_began(now).isoformat())
     out += ["", f"**Tokens:** {total:,} across these jobs; {night:,} of {budgets.per_night:,} tonight's budget used.", ""]
 
-    merged = JobReport(job=reports[0].job, started=None, finished=None, tokens=total, api_requests=0, cli_steps=0)
+    merged = JobReport(job=reports[0].job, started=None, finished=None, tokens=total, api_requests=0, agent_steps=0)
     for r in reports:
         merged.queue_depths += r.queue_depths
         merged.queue_waits_ms += r.queue_waits_ms

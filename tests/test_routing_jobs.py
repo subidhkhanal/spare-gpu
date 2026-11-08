@@ -35,8 +35,8 @@ def plans(used, verify_outputs, refuse=()):
     outputs = iter(verify_outputs)
 
     def write(ctx):
-        used.append(waits.model_id(ctx.cli.model))
-        if waits.model_id(ctx.cli.model) in refuse:
+        used.append(waits.model_id(ctx.agent.model))
+        if waits.model_id(ctx.agent.model) in refuse:
             raise BharatCodeError(f"BharatCode Desktop failed: {REFUSAL}")
         return "wrote tests"
 
@@ -47,7 +47,7 @@ def plans(used, verify_outputs, refuse=()):
 
 
 def run(store, make_gate, job_plans, route=None):
-    return Scheduler(store, make_gate(probe=False), None, plans=job_plans, cli=Worker(), isolate=False,
+    return Scheduler(store, make_gate(probe=False), None, plans=job_plans, agent=Worker(), isolate=False,
                      ignore_gate=True, route=route).run()
 
 

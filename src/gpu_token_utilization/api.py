@@ -107,9 +107,8 @@ def find_api_key() -> tuple[str, str] | None:
 
 
 def env_without_key(**extra: str) -> dict[str, str]:
-    """The environment for subprocesses we start (model-written tests, the BharatCode CLI and
-    the commands it runs), minus our API key: none of them need it, and none should see it.
-    The BharatCode CLI signs in with `bharatcode auth login`, not this variable."""
+    """The environment for subprocesses we start (model-written tests and the commands we run),
+    minus our API key: none of them need it, and none should see it."""
     env = {k: v for k, v in os.environ.items() if k.upper() != API_KEY_ENV}
     env.update(extra)
     return env

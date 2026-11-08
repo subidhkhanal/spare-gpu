@@ -1,18 +1,16 @@
 """What a job's BharatCode session may do: everything is denied first, then only reading and
 searching its copy, editing when the job writes, and the listed commands. The user's own MCP
-servers are switched off inside the job, and their config overrides in the environment don't
-reach it. (The private copy's opencode.json and the Desktop session's ruleset say the same.)"""
+servers and spare-gpu's own are switched off inside the job. (The private copy's opencode.json
+and the Desktop session's ruleset say the same.)"""
 
 import json
-import sys
 
 import pytest
 
 from gpu_token_utilization import bc_config
-from gpu_token_utilization.agent_cli import JOB_ENV_DROPPED, BharatCodeCli, job_env, permission_config
+from gpu_token_utilization.agent import permission_config
 from gpu_token_utilization.desktop import DesktopAgent, session_rules
-
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
+from gpu_token_utilization.fakedesktop import FakeDesktop
 GITHUB = {"type": "local", "command": ["gh-mcp", "serve"], "environment": {"GITHUB_TOKEN": "secret-token"}}
 EXA = {"type": "remote", "url": "https://mcp.exa.ai/mcp", "headers": {"Authorization": "Bearer secret-token"}}
 
@@ -33,13 +31,10 @@ def user_config(tmp_path, monkeypatch):
     return write
 
 
-@pytest.fixture
-def recorded(tmp_path, monkeypatch):
-    """What the fake CLI saw: its arguments, the opencode.json next to it, and its environment."""
-    scenario, record = tmp_path / "scenario.json", tmp_path / "calls.jsonl"
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
-    scenario.write_text(json.dumps({"record": str(record)}))
-    return lambda: json.loads(record.read_text().splitlines()[0])
+def config_seen(desktop):
+    """The opencode.json the job's session ran under, as the fake Desktop found it."""
+    (session,) = desktop.sessions.values()
+    return session["config"]
 
 
 # --- the permission block -------------------------------------------------------------------
@@ -58,6 +53,24 @@ def test_everything_is_denied_first_then_only_what_a_job_needs():
 def test_a_read_only_job_can_neither_edit_nor_run_anything():
     perm = permission_config(edit=False, commands=(), mcp_servers={})["permission"]
     assert perm["*"] == "deny" and perm["edit"] == "deny" and perm["bash"] == "deny"
+
+
+def test_no_commands_means_no_shell_at_all():
+    perm = permission_config(edit=True, commands=(), mcp_servers={})["permission"]
+    assert perm["bash"] == "deny" and perm["edit"] == "allow"
+    assert permission_config(edit=False, commands=(), mcp_servers={})["permission"]["edit"] == "deny"
+
+
+def test_nothing_in_a_job_may_ask_since_nobody_answers():
+    # seen 5 Nov: a job's session waited 10+ minutes on a prompt to read the main repo's .git/config
+    perm = permission_config(edit=True, commands=("python -m pytest",), mcp_servers={})["permission"]
+    for name in ("external_directory", "doom_loop", "question"):
+        assert perm[name] == "deny"
+    assert perm["skill"] == "deny"  # and with it the skill list, ~3.5k tokens a step
+    rules = session_rules(edit=True, commands=("python -m pytest",))
+    assert all(rule["action"] in ("allow", "deny") for rule in rules)
+    read = [(r["pattern"], r["action"]) for r in rules if r["permission"] == "read"]
+    assert read == [("*", "allow"), ("*.env", "deny"), ("*.env.*", "deny"), ("*.env.example", "allow")]  # last wins
 
 
 def test_desktop_session_rules_start_with_the_global_deny():
@@ -81,15 +94,15 @@ def test_the_users_servers_are_read_from_every_channel_and_a_broken_file_is_skip
     assert servers["github"] == GITHUB and servers["exa"] == EXA  # the stable channel wins a clash
 
 
-def test_no_config_means_no_servers_and_nothing_is_started_to_find_out(user_config, monkeypatch):
-    monkeypatch.delenv("GTU_BHARATCODE_CMD")  # a CLI start would fail loudly here
+def test_no_config_means_no_servers(user_config):
     assert bc_config.user_mcp_servers() == {}
 
 
-def test_jobs_switch_the_users_other_servers_off_without_repeating_their_secrets(tmp_path, recorded, user_config):
+def test_jobs_switch_the_users_other_servers_off_without_repeating_their_secrets(tmp_path, user_config):
     user_config({"mcp": {"github": GITHUB, "exa": EXA}})
-    BharatCodeCli(command=FAKE_CLI).run(tmp_path, "x")
-    mcp = recorded()["config"]["mcp"]
+    desktop = FakeDesktop()
+    desktop.agent().run(tmp_path, "x")
+    mcp = config_seen(desktop)["mcp"]
     assert mcp["github"] == {"type": "local", "command": ["gh-mcp", "serve"], "enabled": False}
     assert mcp["exa"] == {"type": "remote", "url": "https://mcp.exa.ai/mcp", "enabled": False}
     assert mcp["spare-gpu"]["enabled"] is False
@@ -97,11 +110,12 @@ def test_jobs_switch_the_users_other_servers_off_without_repeating_their_secrets
     assert not (tmp_path / "opencode.json").exists()  # and the file is gone afterwards
 
 
-def test_servers_given_explicitly_are_used_instead_and_survive_a_model_switch(tmp_path, recorded, user_config):
+def test_servers_given_explicitly_are_used_instead_and_survive_a_model_switch(tmp_path, user_config):
     user_config({"mcp": {"github": GITHUB}})  # not read: the caller said which servers there are
-    cli = BharatCodeCli(command=FAKE_CLI, mcp_servers={"linear": {"type": "remote", "url": "https://x"}})
-    cli.with_model("bharatcode/qwen-3.8-27b").run(tmp_path, "x")
-    mcp = recorded()["config"]["mcp"]
+    desktop = FakeDesktop()
+    agent = desktop.agent(mcp_servers={"linear": {"type": "remote", "url": "https://x"}})
+    agent.with_model("bharatcode/qwen-3.8-27b").run(tmp_path, "x")
+    mcp = config_seen(desktop)["mcp"]
     assert set(mcp) == {"linear", "spare-gpu"} and mcp["linear"]["enabled"] is False
 
 
@@ -111,12 +125,6 @@ def test_a_desktop_agent_keeps_the_servers_through_a_model_switch():
     assert DesktopAgent(conn=object()).mcp_servers is None  # the default: read the user's config
 
 
-# --- the environment ------------------------------------------------------------------------
-
-def test_a_config_override_in_the_environment_never_reaches_a_job(tmp_path, recorded, user_config, monkeypatch):
-    for name in JOB_ENV_DROPPED:
-        monkeypatch.setenv(name, "something the user set for their own sessions")
-    assert not any(name in job_env() for name in JOB_ENV_DROPPED)
-    assert job_env()["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
-    BharatCodeCli(command=FAKE_CLI).run(tmp_path, "x")
-    assert all(value is None for value in recorded()["config_env"].values())
+def test_jobs_switch_spare_gpus_own_mcp_server_off():
+    # measured: its tool schemas add ~2.3k tokens to every step, and a job shouldn't queue jobs
+    assert permission_config(edit=True, commands=(), mcp_servers={})["mcp"]["spare-gpu"]["enabled"] is False

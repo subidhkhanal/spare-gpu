@@ -20,7 +20,7 @@ security reviewer, read-only), `/simplify` and `/verify-app`.
 carefully: the heavy tier gets a few short calls per command; the standard tier gets the parallel
 work; helpers and tools are hidden from every other agent, so a normal chat pays nothing for the
 pack (measured: __ tokens per step added, budget 1,500). Every command reports the model per
-phase, tokens per model from `bharatcode stats`, and the queue time saved.
+phase, the exact tokens per model from Desktop's own session record, and the queue time saved.
 
 **Numbers.** (fill in from research/*/results.md)
 - /deep-research: __% of references resolve; __% of sampled claims supported; coverage within __ points of DeepSeek-only.

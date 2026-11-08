@@ -1,73 +1,75 @@
-"""Reading `bharatcode stats --models` for pack_cost and the benchmarks: the MODEL USAGE box is
-parsed with BharatCode's own rounding, and a missing CLI or stats command gives None."""
+"""Tokens per model from BharatCode Desktop's own session database, for pack_cost and the
+benchmarks: exact, from the replies since a moment, optionally one project's only; the channel
+that started us picks the database; nothing is ever written to it."""
 
 import sqlite3
-import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from gpu_token_utilization import stats
 
-from conftest import STATS
+from conftest import desktop_db
 
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
-
-
-def test_the_model_usage_box_is_parsed_with_its_rounding():
-    figures = stats.parse_stats(STATS)
-    assert set(figures) == {"bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b"}
-    deepseek = figures["bharatcode/deepseek-v4.1-flash"]
-    assert deepseek["messages"] == 12 and deepseek["input"] == 120_500 and deepseek["cache_read"] == 40_000
-    assert deepseek["tokens"] == 120_500 + 8_200 + 40_000
-    assert stats.parse_stats("no model usage section at all") == {}
-    assert stats._stats_number("1.2M") == 1_200_000 and stats._stats_number("$0.0012") == 0.0012
+QWEN, DEEPSEEK = "bharatcode/qwen-3.8-27b", "bharatcode/deepseek-v4.1-flash"
+START = datetime(2026, 11, 7, 18, 0, tzinfo=timezone.utc)
+MS = int(START.timestamp() * 1000)
 
 
-def test_usage_comes_from_the_cli_or_is_none(monkeypatch):
-    assert stats.usage(7, command=FAKE_CLI) is None  # the fake has no stats command
-    echo = [sys.executable, "-c", "import sys; print('\\x1b[32mTotal tokens: 12,345\\x1b[0m'); print('qwen: 9,000')"]
-    assert stats.usage(7, command=echo) == "Total tokens: 12,345\nqwen: 9,000"
-    assert stats.model_usage(7, command=FAKE_CLI) is None
-    monkeypatch.delenv("GTU_BHARATCODE_CMD")
-    monkeypatch.setattr("gpu_token_utilization.agent_cli.shutil.which", lambda name: None)
-    assert stats.usage(7) is None  # no CLI at all
+def tokens(inp, out, read=0, write=0, reasoning=0):
+    return {"input": inp, "output": out, "reasoning": reasoning, "cache": {"read": read, "write": write},
+            "total": inp + out + read + write + reasoning}
 
 
-def desktop_env(tmp_path, channel_folder):
-    data = tmp_path / "local" / "BharatCode Beta" / "Data"
-    data.mkdir(parents=True)
-    db = sqlite3.connect(data / "bharatcode.db")
-    db.execute("create table message (id text)")
-    db.execute("insert into message values ('msg_1')")
-    db.commit()
-    db.close()
-    return {"XDG_STATE_HOME": str(tmp_path / "roaming" / channel_folder), "LOCALAPPDATA": str(tmp_path / "local")}, data / "bharatcode.db"
+def test_tokens_are_summed_per_model_from_the_replies_since_the_start(tmp_path):
+    project, other = str(tmp_path / "project"), str(tmp_path / "other")
+    db = desktop_db(tmp_path / "bharatcode.db", [
+        (project, MS - 60_000, QWEN, tokens(999, 9)),  # before the start: not counted
+        (project, MS + 1_000, QWEN, tokens(500, 40, read=8000)),
+        (project, MS + 2_000, QWEN, tokens(300, 20, reasoning=5)),
+        (project, MS + 3_000, DEEPSEEK, tokens(180, 769, read=25600)),
+        (other, MS + 4_000, QWEN, tokens(7000, 70)),  # another project
+    ])
+    mine = stats.tokens_since(START, Path(project), db=db)
+    assert set(mine) == {QWEN, DEEPSEEK}
+    assert mine[QWEN] == {"messages": 2, "input": 800, "output": 60, "reasoning": 5, "cache_read": 8000,
+                          "cache_write": 0, "tokens": 8865}
+    assert mine[DEEPSEEK]["tokens"] == 26549  # exact: no rounding to a hundred
+    everyone = stats.tokens_since(START, db=db)
+    assert everyone[QWEN]["messages"] == 3 and everyone[QWEN]["input"] == 7800
 
 
-def test_the_desktop_channel_that_started_us_names_its_session_database(tmp_path):
-    env, db = desktop_env(tmp_path, "ai.bharatcode.desktop.beta")
-    assert stats.desktop_db(env) == db
-    assert stats.desktop_db({**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop")}) is None  # stable: the CLI's own
-    assert stats.desktop_db({**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop.dev")}) is None  # no Dev data here
-    assert stats.desktop_db({**env, stats.DB_ENV: "C:\\chosen.db"}) is None  # already chosen
-    assert stats.desktop_db({"LOCALAPPDATA": env["LOCALAPPDATA"]}) is None  # not started by Desktop
+def test_the_project_folder_matches_however_desktop_spells_it(tmp_path):
+    folder = tmp_path / "Spare-Check"
+    db = desktop_db(tmp_path / "bharatcode.db", [(str(folder).replace("\\", "/"), MS + 1, QWEN, tokens(10, 1))])
+    assert stats.tokens_since(START, folder, db=db)[QWEN]["messages"] == 1
 
 
-def test_inside_beta_the_cli_reads_a_snapshot_of_betas_sessions_never_the_live_file(tmp_path, monkeypatch):
-    env, db = desktop_env(tmp_path, "ai.bharatcode.desktop.beta")
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
+def test_the_channel_that_started_us_names_the_database(tmp_path):
+    local = tmp_path / "local"
+    for name in ("BharatCode", "BharatCode Beta"):
+        desktop_db(local / name / "Data" / "bharatcode.db", [])
+    env = {"LOCALAPPDATA": str(local)}
+    beta = {**env, "XDG_STATE_HOME": str(tmp_path / "roaming" / "ai.bharatcode.desktop.beta")}
+    assert stats.channel(beta) == "beta" and stats.session_db(beta) == local / "BharatCode Beta" / "Data" / "bharatcode.db"
+    assert stats.channel(env) == "stable" and stats.session_db(env) == local / "BharatCode" / "Data" / "bharatcode.db"
+    dev = {**env, "XDG_STATE_HOME": str(tmp_path / "ai.bharatcode.desktop.dev")}
+    assert stats.channel(dev) == "dev" and stats.session_db(dev) is None  # no Dev data on this machine
+    chosen = desktop_db(tmp_path / "copy.db", [])
+    assert stats.session_db({**beta, stats.DB_ENV: str(chosen)}) == chosen
+
+
+def test_no_database_means_no_figures_never_a_guess(tmp_path):
+    assert stats.tokens_since(START, db=None) is None  # conftest points LOCALAPPDATA at an empty folder
+    broken = tmp_path / "broken.db"
+    broken.write_bytes(b"not a database")
+    assert stats.tokens_since(START, db=broken) is None
+
+
+def test_the_database_is_only_read(tmp_path):
+    db = desktop_db(tmp_path / "bharatcode.db", [(str(tmp_path), MS + 1, QWEN, tokens(10, 1))])
     before = db.read_bytes()
-    show = [sys.executable, "-c", "import os, sqlite3; p = os.environ['OPENCODE_DB']; "
-            "print(p); print(sqlite3.connect(p).execute('select id from message').fetchone()[0])"]
-    path, row = stats.usage(1, command=show).splitlines()
-    assert Path(path) != db and Path(path).name == "bharatcode.db" and row == "msg_1"  # the copy holds Beta's sessions
-    assert not Path(path).exists() and db.read_bytes() == before  # the copy is gone; the live file untouched
-
-
-def test_escape_sequences_dates_and_paths_do_not_break_the_parsing():
-    noisy = "\x1b[2K\x1b[?25l2026/10/30-2026/11/06\n~/.config/bharatcode\n" + STATS + "┌──┐\n│ TOOL USAGE │\n│ bharatcode/x │\n│   Messages 99 │\n"
-    import re
-    cleaned = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", noisy)  # what usage() strips
-    figures = stats.parse_stats(cleaned)
-    assert set(figures) == {"bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b"}  # no phantom date, path or tool-box model
-    assert figures["bharatcode/qwen-3.8-27b"]["messages"] == 30
+    stats.tokens_since(START, tmp_path, db=db)
+    assert db.read_bytes() == before
+    conn = sqlite3.connect(db)
+    assert conn.execute("select count(*) from message").fetchone()[0] == 2
+    conn.close()

@@ -9,7 +9,7 @@ from gpu_token_utilization.store import RequestLog, StoreError
 
 
 def step(store, job, prompt, output, sent_at=None):
-    store.log_request(RequestLog(endpoint="bharatcode-cli", attempt=1, status_code=None, prompt_tokens=prompt,
+    store.log_request(RequestLog(endpoint="bharatcode-desktop", attempt=1, status_code=None, prompt_tokens=prompt,
                                  completion_tokens=output, total_tokens=prompt + output, job_id=job.id,
                                  sent_at=sent_at))
 

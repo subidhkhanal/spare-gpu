@@ -12,7 +12,7 @@ Setup: `pip install -e .` from this checkout (or the installer), `gtu integrate`
 | 2 | The user's MCP servers are not started for the job | Have at least one MCP server in your config (e.g. GitHub from the marketplace). Run check 1 again and watch Desktop's MCP status (and Task Manager for the server's process) while the job runs. | The server is not started for the job's session; it still works in your own chat afterwards. | |
 | 3 | A docs job cannot run commands | `gtu add docs src`, `gtu start`, open the session. | bash is absent from the tool list; the job finishes without asking anything. | |
 | 4 | Nothing asks | While a job runs, nothing in Desktop waits for an answer (no permission prompt). | The job runs to the end unattended. | |
-| 5 | `gtu run-when-free "bharatcode run x"` is refused | Run it in a terminal. | Refused with "doesn't start BharatCode's CLI"; `gtu list` shows no command. | |
+| 5 | `gtu run-when-free "bharatcode run x"` is refused | Run it in a terminal. | Refused with "doesn't start BharatCode itself"; `gtu list` shows no command. | |
 | 6 | `gtu run-when-free "npm run deploy"` is refused, `"npm run build"` accepted | Run both in a Node project. | The first is refused with "isn't on the list"; the second is queued and runs when capacity is free. | |
 | 7 | Build output is not copied | In a plain folder (not a git repo) with a `dist/` and a `node_modules/`, `gtu add review .` then `gtu start`. Look in `.gtu/worktrees/<job>/` while it runs. | No `dist/` or `node_modules/` in the copy. | |
 | 8 | A big plain folder gets the note | In a plain folder with more than 200 MB of files outside skipped folders, `gtu add review .`. | `gtu add` prints `Note: ... isn't a git repo ...`; the job's runner log repeats it. | |

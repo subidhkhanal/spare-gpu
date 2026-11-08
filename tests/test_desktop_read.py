@@ -1,7 +1,7 @@
-"""DesktopAgent reads a session's messages the way BharatCodeCli reads the CLI's events: every
-text part counts, so a review's body isn't lost behind a closing remark."""
+"""DesktopAgent reads a session's messages: every text part counts, so a review's body isn't lost
+behind a closing remark."""
 
-from gpu_token_utilization.agent_cli import CliResult
+from gpu_token_utilization.agent import AgentResult
 from gpu_token_utilization.desktop import DesktopAgent
 
 
@@ -10,7 +10,7 @@ def message(parts, completed=True):
 
 
 def test_every_text_part_is_kept_in_order():
-    result = CliResult(exit_code=None, text="")
+    result = AgentResult(exit_code=None, text="")
     seen: set[str] = set()
     steps = []
     done = DesktopAgent._read([
@@ -27,5 +27,5 @@ def test_every_text_part_is_kept_in_order():
 
 
 def test_an_unfinished_message_is_not_done_yet():
-    result = CliResult(exit_code=None, text="")
+    result = AgentResult(exit_code=None, text="")
     assert DesktopAgent._read([message([{"type": "text", "text": "working"}], completed=False)], set(), result, lambda s: None) is False

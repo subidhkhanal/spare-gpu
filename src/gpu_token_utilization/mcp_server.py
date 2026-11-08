@@ -1,4 +1,4 @@
-"""MCP server: spare-gpu as tools an agent can call (BharatCode's CLI, or any MCP client).
+"""MCP server: spare-gpu as tools an agent in BharatCode Desktop (or any MCP client) can call.
 
 Started with `gtu mcp`, over stdio. Five tools, each shaped around a task the user wants done
 rather than around our internal functions. Selection accuracy drops as tool count grows and when
@@ -232,51 +232,42 @@ class SpareTools:
             lines.append(f"- {role}: start `{agent}` ({choice.reason})")
         return "\n".join(lines)
 
-    # --- the pack's cost figures: a usage snapshot at spare_waits, the delta at pack_cost -----------
+    # --- the pack's cost figures: the time of spare_waits, then Desktop's own counts since ----------
 
     def _usage_file(self) -> Path:
         return self._root() / ".gtu" / "pack-usage.json"
 
     def _snapshot_usage(self) -> None:
-        figures = stats.model_usage(days=1)
-        if figures is None:
-            return
         try:
             folder = self._usage_file().parent
             folder.mkdir(parents=True, exist_ok=True)
             marker = folder / ".gitignore"  # spare-gpu's own folder stays out of the user's repo, as the store keeps it
             if not marker.exists():
                 marker.write_text("*\n", encoding="utf-8")
-            self._usage_file().write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                                      "models": figures}), encoding="utf-8")
+            self._usage_file().write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds")}),
+                                          encoding="utf-8")
         except OSError:
             pass
 
     def pack_cost(self) -> str:
         try:
-            snapshot = json.loads(self._usage_file().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ("No usage snapshot: call spare_waits at the start of the command, then pack_cost at the end. "
+            started = datetime.fromisoformat(json.loads(self._usage_file().read_text(encoding="utf-8"))["at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return ("No start time: call spare_waits at the start of the command, then pack_cost at the end. "
                     "Say the token figures weren't available.")
-        now_figures = stats.model_usage(days=1)
-        if now_figures is None:
-            return ("BharatCode's CLI isn't available here, so there are no token figures; Desktop's session "
-                    "detail has them. Say so instead of estimating.")
-        started = datetime.fromisoformat(snapshot["at"])
+        figures = stats.tokens_since(started, self._root())
+        if figures is None:
+            return ("BharatCode Desktop's session data wasn't found on this machine, so there are no token figures. "
+                    "Say so instead of estimating.")
         minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
-        lines = [f"Tokens used on this machine since the spare_waits call {minutes:.0f} min ago, by model "
-                 "(from `bharatcode stats --models`, rounded by BharatCode to about a hundred tokens; every "
-                 "session on this machine in that time counts):"]
-        before = snapshot.get("models") or {}
-        for model, figures in now_figures.items():
-            earlier = before.get(model) or {}
-            delta = figures["tokens"] - earlier.get("tokens", 0.0)
-            messages = figures["messages"] - earlier.get("messages", 0.0)
-            if delta <= 0 and messages <= 0:
-                continue
-            lines.append(f"- {waits.name(model)}: +{delta:,.0f} tokens in {messages:.0f} message(s)")
+        lines = [f"Tokens used in this project's BharatCode Desktop sessions since the spare_waits call "
+                 f"{minutes:.0f} min ago, by model (exact, from Desktop's own record of every reply):"]
+        for model, used in sorted(figures.items()):
+            lines.append(f"- {waits.name(model)}: {used['tokens']:,} tokens in {used['messages']} message(s) "
+                         f"({used['input']:,} input, {used['output'] + used['reasoning']:,} output, "
+                         f"{used['cache_read']:,} read from cache)")
         if len(lines) == 1:
-            lines.append("- nothing new was recorded yet (BharatCode writes its stats when a session ends).")
+            lines.append("- no replies recorded yet.")
         return "\n".join(lines)
 
     def ask(self, question: str, your_model: str | None = None) -> str:
@@ -529,11 +520,10 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
 
         @server.tool(annotations=notes(True))
         def pack_cost() -> str:
-            """The tokens each model used on this machine since the spare_waits call that started the
-            pack command, from `bharatcode stats --models`: for the cost summary at the end of
-            /deep-research, /code-review, /security-review and /simplify. Rounded by BharatCode to
-            about a hundred tokens, and counting every session on this machine in that time. When it
-            has no figures, say so; never estimate them."""
+            """The tokens each model used in this project's Desktop sessions since the spare_waits
+            call that started the pack command, exact, from Desktop's own record of every reply: for
+            the cost summary at the end of /deep-research, /code-review, /security-review and
+            /simplify. When it has no figures, say so; never estimate them."""
             return tools.pack_cost()
 
     @server.tool(annotations=notes(False, world=True))

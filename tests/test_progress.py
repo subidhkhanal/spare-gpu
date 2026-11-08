@@ -1,14 +1,11 @@
 """Progress output: waiting for the gate or a retry must never look like a hang."""
 
-import json
-import sys
 from datetime import datetime, timezone
 
 import httpx
 import respx
 from typer.testing import CliRunner
 
-from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.api import BASE_URL
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.cli import app
@@ -21,7 +18,6 @@ from gpu_token_utilization.scheduler import Scheduler
 from conftest import KEY, git
 
 runner = CliRunner()
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
 
 
 def test_every_retry_wait_is_announced(fake, store):
@@ -69,17 +65,15 @@ def test_scheduler_narrates_the_gate_and_each_step(fake, store, client, make_gat
     assert logs[-1] == "Queue empty."
 
 
-def test_cli_steps_are_narrated_as_they_finish(git_repo, store, client, make_gate, fake, tmp_path, monkeypatch):
-    scenario = tmp_path / "scenario.json"
-    scenario.write_text(json.dumps({"steps": [{"tokens": 11500}, {"tokens": 300}]}))
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
+def test_session_steps_are_narrated_as_they_finish(git_repo, store, client, make_gate, fake, scenario):
+    desktop = scenario(steps=[{"tokens": 11500}, {"tokens": 300}])
     store.add_job("docs", "src/calc.py", str(git_repo))
     logs = []
-    Scheduler(store, make_gate(), client, cli=BharatCodeCli(command=FAKE_CLI, timeout=60), budgets=Budgets(),
+    Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=60), budgets=Budgets(),
               config=JobConfig(), sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
-    assert any("step 1 of 2 (write) started: BharatCode CLI is working on it (Qwen 3.8 27B)" in line for line in logs)
-    cli_lines = [line for line in logs if "BharatCode CLI finished a step" in line]
-    assert len(cli_lines) == 2 and "(11,500 tokens)" in cli_lines[0] and "(300 tokens)" in cli_lines[1]
+    assert any("step 1 of 2 (write) started: BharatCode Desktop is working on it (Qwen 3.8 27B)" in line for line in logs)
+    step_lines = [line for line in logs if "BharatCode Desktop finished a step" in line]
+    assert len(step_lines) == 2 and "(11,500 tokens)" in step_lines[0] and "(300 tokens)" in step_lines[1]
     assert any("step 2 of 2 (verify) started: running locally." in line for line in logs)
 
 

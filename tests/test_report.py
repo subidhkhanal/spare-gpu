@@ -1,6 +1,5 @@
 """`gtu report`: summary of what ran, its cost, its output and the capacity it met."""
 
-import json
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -8,7 +7,6 @@ import pytest
 from typer.testing import CliRunner
 
 from gpu_token_utilization import report as reporting
-from gpu_token_utilization.agent_cli import BharatCodeCli
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.cli import app
 from gpu_token_utilization.fakeapi import Reply
@@ -18,7 +16,6 @@ from gpu_token_utilization.scheduler import Scheduler
 from conftest import git
 
 runner = CliRunner()
-FAKE_CLI = [sys.executable, "-m", "gpu_token_utilization.fakecli"]
 IMPORT_SRC = "import pathlib, sys\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))\nfrom src.calc import add\n\n"
 TESTS = IMPORT_SRC + (
     "def test_adds():\n    assert add(2, 3) == 5\n\n\n"
@@ -28,18 +25,15 @@ TESTS = IMPORT_SRC + (
 
 
 @pytest.fixture
-def ran(git_repo, store, client, make_gate, fake, tmp_path, monkeypatch):
+def ran(git_repo, store, client, make_gate, fake, scenario):
     """A tests job and a review job, run to completion against the fakes."""
-    scenario = tmp_path / "scenario.json"
-    scenario.write_text(json.dumps({"steps": [{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": TESTS}},
-                                              {"tokens": 500}]}))
-    monkeypatch.setenv("GTU_FAKE_CLI_SCENARIO", str(scenario))
+    desktop = scenario(steps=[{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": TESTS}}, {"tokens": 500}])
     fake.usage_default.active = 1  # one of four slots busy: sends count as "into a free slot"
     fake.queue(Reply(content="## Likely bugs\nNothing found.", queue_wait_ms=4200,
                      prompt_tokens=300, completion_tokens=40))
     tests_job = store.add_job("tests", "src/calc.py", str(git_repo))
     review_job = store.add_job("review", "src/calc.py", str(git_repo))
-    Scheduler(store, make_gate(), client, cli=BharatCodeCli(command=FAKE_CLI, timeout=60), budgets=Budgets(),
+    Scheduler(store, make_gate(), client, agent=desktop.agent(timeout=60), budgets=Budgets(),
               config=JobConfig(test_command=(sys.executable, "-m", "pytest")), sleep=fake.clock.sleep,
               now=fake.clock.utcnow).run()
     return store.get_job(tests_job.id), store.get_job(review_job.id)
@@ -49,7 +43,7 @@ def test_job_report_counts_what_ran(ran, store):
     tests_job, review_job = ran
     t = reporting.build_job(store, tests_job)
     assert t.job.status == "done" and t.started and t.finished and t.duration >= timedelta(0)
-    assert t.tokens == 12000 and t.cli_steps == 2 and t.api_requests == 0
+    assert t.tokens == 12000 and t.agent_steps == 2 and t.api_requests == 0
     assert (t.tests_kept, t.tests_dropped) == (2, 1)
     assert t.files == [("A", "tests/test_gtu_calc.py")]
     assert t.queue_waits_ms == []  # the CLI doesn't expose it

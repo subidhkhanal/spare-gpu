@@ -44,7 +44,7 @@ ALLOWED = (
     "dotnet test", "dotnet build", "mvn test", "mvn verify", "gradle test", "gradlew test",
     *(f"make {target}" for target in SCRIPTS),
 )
-# BharatCode's own CLI is never started from here: a `bharatcode run` queued this way would work
+# BharatCode's own `bharatcode` command is never started from here: agent work queued this way would work
 # in the user's real checkout, with their full config and none of a job's permissions. Agent
 # work goes through jobs (spare_delegate in a chat, `gtu add` in a terminal), which run in a
 # private copy under a permission file. Refused by program name, so GTU_RUN_ALLOWED can't
@@ -112,7 +112,7 @@ def check_command(command: str) -> list[str]:
         raise FreeRunError(f"give the program by name (e.g. `pytest`), not a path like `{words[0]}`; "
                            "it's looked up on PATH")
     if _program(words[0]) in NEVER:
-        raise FreeRunError(f"spare-gpu doesn't start BharatCode's CLI from here: `{words[0]}` would work in your "
+        raise FreeRunError(f"spare-gpu doesn't start BharatCode itself from here: `{words[0]}` would work in your "
                            "real checkout with your full config. Hand agent work to a job instead (spare_delegate "
                            "in a chat, or `gtu add` in a terminal)")
     for prefix in allowed_prefixes():

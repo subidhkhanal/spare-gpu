@@ -11,18 +11,17 @@ from datetime import datetime
 from pathlib import Path
 
 from . import worktree
-from .agent_cli import CLI_KINDS, CliNotFound, resolve_command
 from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
 from .jobs import PLANS, JobConfig, numbered_listing
 from .store import Job, Store
 
-CLI_STEP_TOKENS = 11_500  # measured: mostly the CLI's own system prompt, sent on every step
-CLI_STEPS = {"tests": (3, 7), "docs": (3, 5)}  # read, edit, finish; tests may also run pytest
+AGENT_STEP_TOKENS = 11_500  # measured 31 Oct: mostly BharatCode's own system prompt, sent on every step
+AGENT_STEPS = {"tests": (3, 7), "docs": (3, 5)}  # read, edit, finish; tests may also run pytest
 STEP_DOING = {
-    ("tests", "write"): "BharatCode CLI writes new test files",
+    ("tests", "write"): "a Desktop session writes new test files",
     ("tests", "verify"): "run them here, keep only passing tests, commit",
-    ("docs", "write"): "BharatCode CLI adds docstrings and README text",
+    ("docs", "write"): "a Desktop session adds docstrings and README text",
     ("docs", "verify"): "keep only additive doc changes, commit",
     ("review", "review"): "one request; report saved as gtu-review-<id>.md",
 }
@@ -74,10 +73,10 @@ def estimate(store: Store, job: Job, step: str, config: JobConfig) -> StepPlan:
     if job.kind == "review":
         prompt = listing_chars // 3 + 500
         return StepPlan(step, doing, prompt + 300, prompt + config.review_max_tokens, "estimate from the code size")
-    low_steps, high_steps = CLI_STEPS.get(job.kind, (3, 5))
-    per_step = CLI_STEP_TOKENS + code_tokens
+    low_steps, high_steps = AGENT_STEPS.get(job.kind, (3, 5))
+    per_step = AGENT_STEP_TOKENS + code_tokens
     return StepPlan(step, doing, low_steps * per_step, high_steps * per_step,
-                    f"estimate: {low_steps}-{high_steps} CLI steps of ~{_rough(per_step)} tokens")
+                    f"estimate: {low_steps}-{high_steps} session steps of ~{_rough(per_step)} tokens")
 
 
 def plan_jobs(store: Store, budgets: Budgets, config: JobConfig, now: datetime) -> list[JobPlan]:
@@ -106,11 +105,6 @@ def _problems(job: Job) -> list[str]:
             worktree.ensure_clean(Path(job.repo))
         except worktree.GitError as exc:
             problems.append(str(exc).splitlines()[0])
-    if job.kind in CLI_KINDS:
-        try:
-            resolve_command()
-        except CliNotFound as exc:
-            problems.append(str(exc))
     return problems
 
 
@@ -160,5 +154,5 @@ def describe(store: Store, budgets: Budgets, config: JobConfig, now: datetime, i
     if not key_found:
         out.append("PROBLEM: no BharatCode API key found (run `gtu setkey`); a run outside BharatCode Desktop would "
                    "stop at once (inside Desktop no key is needed).")
-    out.append("Estimates are rough: BharatCode CLI steps vary with how much the model reads and retries.")
+    out.append("Estimates are rough: session steps vary with how much the model reads and retries.")
     return "\n".join(out)
