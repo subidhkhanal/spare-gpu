@@ -39,6 +39,12 @@ VARIANT_SUFFIX = "-standard"
 SHARED_TOOLS = ("pack_cost",)  # pack-only tools every lead uses
 # Files an earlier version installed and this one no longer has: removed on install and uninstall.
 RETIRED = (("command", "context-report"), ("agent", "context-lead"))
+# Memory across chats: a short file every agent reads at the start of each request (Desktop's
+# `instructions` config, resolved from the project folder up), plus a hand-off file one chat
+# writes and the next reads. The memory file costs its size on every step, hence the cap.
+MEMORY_FILE = ".gtu/memory.md"
+HANDOFF_FILE = ".gtu/handoff.md"
+MEMORY_MAX_CHARS = 4_000  # about a thousand tokens on every step in that project
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,8 @@ COMPONENTS: dict[str, Component] = {
     "simplify": Component("simplify", "/simplify", ("simplify",), ("simplify-lead", "simplify-finder"), SHARED_TOOLS),
     # Needs the Playwright MCP from BharatCode's marketplace (server name "playwright"); the pack adds no server for it.
     "verify": Component("verify", "/verify-app", ("verify-app",), ("verify-lead", "verify-driver"), SHARED_TOOLS),
+    # No agents of its own: the commands run in the user's current agent, which has the chat's history.
+    "memory": Component("memory", "/remember, /handoff and /pickup", ("remember", "handoff", "pickup")),
 }
 
 
@@ -251,6 +259,9 @@ def config(components, models: Models, source: Path = PACK_DIR) -> dict:
         doc["permission"] = permission
     if mcp:
         doc["mcp"] = mcp
+    memory = [c for c in components if c.name == "memory"]
+    if memory and markdown_files(memory, source):  # only when its command files exist to be installed
+        doc["instructions"] = [MEMORY_FILE]  # a relative glob: Desktop looks for it from the project folder up
     return doc
 
 
@@ -292,4 +303,6 @@ def describe(doc: dict) -> str:
         parts.append(f"{len(tools)} pack-only tool(s) hidden from them too")
     if doc.get("mcp"):
         parts.append("MCP: " + ", ".join(doc["mcp"]) + " (its tools only for the pack's agents)")
+    if doc.get("instructions"):
+        parts.append(f"{doc['instructions'][0]} read by every agent")
     return "; ".join(parts) or "nothing yet"

@@ -130,13 +130,14 @@ def run(folder: Path, how: str = "") -> list[Finding]:
         if len(configured) >= 2 and (waits.model_id(models.heavy), waits.model_id(models.standard)) != \
                 (waits.model_id(configured[0]), waits.model_id(configured[1])):
             found.append(Finding(WARN, f"GTU_MODELS says {configured[0]},{configured[1]} but the files carry other ids; run `gtu integrate --pack`"))
-    elif components:
+    elif any(c.agents for c in components):
         found.append(Finding(WARN, "couldn't read the model ids from the installed agent files"))
 
-    # the settings file says what the installed set needs
-    if components and models:
-        expected = config(components, models)
-        problems = [key for key in ("small_model", "agent", "mcp") if expected.get(key) != doc.get(key)]
+    # the settings file says what the installed set needs (the model keys only when the ids are known)
+    if components:
+        expected = config(components, models or Models("bharatcode/h", "bharatcode/s"))
+        keys = ("mcp", "instructions") + (("small_model", "agent") if models else ())
+        problems = [key for key in keys if expected.get(key) != doc.get(key)]
         actual_permission = doc.get("permission") or {}
         for key, value in (expected.get("permission") or {}).items():  # extra denies are fine; missing ones aren't
             if key == "task":

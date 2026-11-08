@@ -270,6 +270,28 @@ def check_settings(report: Report, root: Path) -> None:
                      + f" (routing_policy.json plus {root / '.gtu' / router.SWITCH_SAFE_FILE})")
 
 
+def check_memory(report: Report, root: Path, folder: Path) -> None:
+    """The project's memory file: read by every agent on every request when the pack's memory
+    component is installed, so its size is a per-step cost."""
+    memory = root / pack.MEMORY_FILE
+    installed = folder.is_dir() and pack_installed(folder) and "memory" in check.installed_components(folder)
+    if not memory.is_file():
+        if installed:
+            report.add(PASS, "no project memory yet; /remember writes .gtu/memory.md")
+        return
+    text = memory.read_text(encoding="utf-8", errors="replace")
+    size, lines = len(text), len(text.splitlines())
+    cost = f"about {size // 4:,} tokens on every step in this project"
+    if not installed:
+        report.add(WARN, f"project memory .gtu/memory.md exists but the pack's memory component isn't installed, so no agent "
+                         "reads it; `gtu integrate --pack --only memory` (or the whole pack) turns it on")
+    elif size > pack.MEMORY_MAX_CHARS:
+        report.add(WARN, f"project memory .gtu/memory.md is {size:,} characters ({lines} lines), over the {pack.MEMORY_MAX_CHARS:,} cap: "
+                         f"{cost}. Trim it (/remember with no note shows it)")
+    else:
+        report.add(PASS, f"project memory .gtu/memory.md: {lines} lines, {size:,} characters ({cost})")
+
+
 # --- live checks ---------------------------------------------------------------------------------
 
 def expected_pack(folder: Path) -> tuple[list[str], list[str], dict]:
@@ -458,6 +480,7 @@ def run(cwd: Path, channel: str = "stable", live_mode: bool = False, write: bool
         check_server(report, command)
     root = check_project(report, Path(cwd))
     check_settings(report, root)
+    check_memory(report, root, folder)
     if live_mode:
         live(report, folder, research, make_agent)
         if write and research is not None and report.filled:
@@ -467,5 +490,5 @@ def run(cwd: Path, channel: str = "stable", live_mode: bool = False, write: bool
     return report
 
 
-MANUAL_LEFT = ("pack-install 1, 3 to 7, 9 and 10, and safety-fixes 1 to 4 and 6 to 12 need you at Desktop; "
-               "each command's own research/<command>/manual-check.md too")
+MANUAL_LEFT = ("pack-install 1, 3 to 7, 9 and 10, safety-fixes 1 to 4 and 6 to 12, and memory 1 to 7 need you at "
+               "Desktop; each command's own research/<command>/manual-check.md too")

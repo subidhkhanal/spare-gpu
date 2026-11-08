@@ -53,7 +53,10 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
         for command in component.commands:
             if ("command", command) not in files:
                 continue
-            lead = parse(files[("command", command)])[0]["agent"]
+            lead = parse(files[("command", command)])[0].get("agent")
+            if lead is None:  # memory's commands run in the user's own agent, which has the chat's history
+                assert component.name == "memory" and not component.agents, command
+                continue
             assert ("agent", lead) in files, f"{command}: its agent {lead} is in the pack"
             data, _ = parse(files[("agent", lead)])
             assert data["mode"] == "primary"  # depth 0: the only place a task may start more tasks

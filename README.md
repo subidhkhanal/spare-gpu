@@ -113,6 +113,9 @@ This adds bigger commands. In each one, DeepSeek plans and checks, and several Q
 | `/deep-research <question> [--depth quick\|standard\|deep]` | Writes a report with sources into `research/<topic>/`. Helpers search research papers (OpenAlex, Crossref, arXiv) and the web (through Exa, no key needed; your searches go to Exa). Every source is checked against the paper registries, and fake or wrong ones are removed. |
 | `/simplify [file or folder]` | Suggests safe cleanups that don't change behaviour. They are kept only if your tests still pass. |
 | `/verify-app <url> <what to check>` | Checks a running app in a real browser. Needs the Playwright add-on from Desktop's marketplace. |
+| `/remember <note>` | Adds a note to `.gtu/memory.md`, which every chat in this project reads. `/remember` alone shows it. Keep it short: it costs tokens on every step. |
+| `/handoff` | Saves where this chat stopped (goal, what's done, next steps, files involved) to `.gtu/handoff.md`. |
+| `/pickup` | In a new chat: reads the hand-off and the memory, says what changed since, and waits for you. |
 
 Each command ends with a cost summary: which model did what, and the exact tokens used in your project's Desktop chats.
 

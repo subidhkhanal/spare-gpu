@@ -34,7 +34,8 @@ KEYS: dict[str, tuple[str, str]] = {
     "switch_safe": ("GTU_SWITCH_SAFE", "job kinds that may move to the faster model, on top of routing_policy.json"),
 }
 
-IGNORE = "*\n!.gitignore\n!settings.json\n"  # .gtu/.gitignore: the folder stays out of git, the settings don't
+IGNORE = "*\n!.gitignore\n!settings.json\n!memory.md\n"  # .gtu/.gitignore: only settings and memory are for git
+OURS = ("*", "*\n!.gitignore\n!settings.json")  # earlier contents of ours, upgraded in place
 
 
 class SettingsError(ValueError):
@@ -188,7 +189,7 @@ def ensure_ignore(folder: Path) -> None:
     ours (just "*") is upgraded; a file the user wrote is left alone."""
     folder.mkdir(parents=True, exist_ok=True)
     marker = folder / ".gitignore"
-    if not marker.exists() or marker.read_text(encoding="utf-8", errors="replace").strip() == "*":
+    if not marker.exists() or marker.read_text(encoding="utf-8", errors="replace").strip() in OURS:
         marker.write_text(IGNORE, encoding="utf-8")
 
 
