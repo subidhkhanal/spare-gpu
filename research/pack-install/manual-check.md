@@ -3,8 +3,8 @@
 These checks need BharatCode Desktop on Windows, so they are run by hand. Record the outcome of
 each in the last column (date, pass/fail, what you saw). Nothing here was run by the implementer.
 
-`gtu doctor --live` (run from this checkout, with BharatCode's CLI installed) decides rows 1, 2, 6 and 7
-from what the CLI reports Desktop sees, and row 8 once it has run both with and without the pack; it
+`gtu doctor --live` (run from this checkout, in BharatCode Desktop's terminal) decides row 2 from the
+config files, and row 8 once it has run both with and without the pack; it
 writes its verdicts into the Result column itself, dated. The other rows need you at Desktop.
 
 Setup: `pip install -e .` from this checkout, then `gtu integrate --pack`, then fully close and
@@ -17,7 +17,7 @@ reopen BharatCode Desktop. `gtu integrate --pack --uninstall` undoes it.
 | 3 | Split really used: titles | Start a new chat on DeepSeek, send one message, wait for the title. Then the session's model breakdown in Desktop. | The title request ran on Qwen 3.8 27B (`small_model`). | |
 | 4 | Split really used: explore | In a chat on DeepSeek ask: "use the explore subagent to find where config files are loaded". | The explore child session shows Qwen 3.8 27B as its model. | |
 | 5 | Model picker doesn't override agent models | With the pack installed, pick Qwen in Desktop's model picker, then run a pack command whose lead is on DeepSeek (once /deep-research exists). | The lead's session runs on the model its agent file names, not the picker's. If the picker wins, record it: the plan's assumption is wrong and the lead must say its model another way. | |
-| 6 | Helpers hidden from normal sessions | In a plain `build` chat, send any message, then open the request (Desktop's session detail, or `bharatcode debug` of the system prompt) and look at the task tool's list of agent types. | None of the pack's helper agents (research-scout, research-writer, research-checker, review-finder, ...) is listed; `general` and `explore` still are. | |
+| 6 | Helpers hidden from normal sessions | In a plain `build` chat, send any message, then open the request (Desktop's session detail) and look at the task tool's list of agent types. | None of the pack's helper agents (research-scout, research-writer, research-checker, review-finder, ...) is listed; `general` and `explore` still are. | |
 | 7 | Pack-only MCP tools hidden from normal sessions | Same request as 6: look at the tool list. | No `spare-gpu_scholar_search`, `spare-gpu_verify_refs`, `spare-gpu_security_filter` or `spare-gpu_pack_cost` tool is in the request (the five /auto tools are). | |
 | 8 | Overhead within budget, measured | `python scripts/measure_overhead.py <project> <empty> empty-mcp > before.jsonl` with the pack uninstalled; `gtu integrate --pack`, restart Desktop, measure again into after.jsonl; `python scripts/check_overhead_budget.py before.jsonl after.jsonl` (see research/token-overhead.md for the method). | The pack adds at most 1,500 tokens per step to a normal session: the script writes research/pack-install/overhead.json with `added` at most 1,500 and exits 0, and `pytest tests/test_overhead_budget.py` passes. Commit the JSON. | |
 | 9 | Exa remote MCP keyless | With the research component installed, open Desktop's MCP list. | `exa` connects without a key and one web search works from a chat that may use it. If it needs a key, record the error: the fallback is the `OPENCODE_ENABLE_EXA` route. | |

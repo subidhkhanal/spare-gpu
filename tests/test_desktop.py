@@ -195,7 +195,7 @@ def wired_ask(fake, git_repo, tmp_path, monkeypatch):
     real = desktop.DesktopAgent
     monkeypatch.setattr(desktop, "DesktopAgent",
                         lambda conn, **kw: real(conn, transport=fake.transport(), sleep=lambda s: None, **kw))
-    return SpareTools(git_repo, launch=lambda repo: 4242, http=wait_figures)
+    return SpareTools(git_repo, http=wait_figures)
 
 
 def test_a_question_goes_to_the_faster_model_and_the_answer_comes_back(fake, git_repo, tmp_path, monkeypatch):
@@ -250,32 +250,6 @@ def test_a_review_job_runs_as_a_desktop_session_without_a_client(fake, tmp_path,
     report = (repo / f"gtu-review-{job.id}.md").read_text()
     assert "divides by zero" in report
     assert store.request_summary(job.id)["total_tokens"] == 900  # counted against the budget like any step
-
-
-def delegating_tools(git_repo, launched):
-    """spare_delegate with the wait figures faked and the runner launch recorded."""
-    from test_routing_jobs import wait_figures
-
-    from gpu_token_utilization import waits
-    from gpu_token_utilization.mcp_server import SpareTools
-
-    waits._cache.clear()
-    return SpareTools(git_repo, launch=lambda repo: launched.append(repo) or 4242, http=wait_figures)
-
-
-def test_delegating_inside_desktop_starts_the_runner_without_an_api_key(git_repo, monkeypatch):
-    monkeypatch.setattr(desktop, "discover", lambda **kw: Connection(URL, "opencode", PASSWORD))
-    monkeypatch.delenv(desktop.URL_ENV, raising=False)
-    launched = []
-    text = delegating_tools(git_repo, launched).delegate("review", "src")
-    assert launched and "BharatCode Desktop session" in text and "API key" not in text
-    assert desktop.os.environ[desktop.URL_ENV] == URL  # handed on to the detached runner
-
-
-def test_delegating_outside_desktop_still_needs_a_key(git_repo):
-    launched = []
-    text = delegating_tools(git_repo, launched).delegate("review", "src")
-    assert not launched and "no BharatCode API key" in text
 
 
 def test_gtu_start_inside_desktop_needs_no_api_key(tmp_path, monkeypatch):

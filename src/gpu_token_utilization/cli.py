@@ -688,11 +688,11 @@ def mcp(
 @app.command()
 def doctor(
     channel: str = typer.Option("stable", "--channel", help="Which BharatCode's config to check: stable, beta, dev or local."),
-    live: bool = typer.Option(False, "--live", help="Also ask BharatCode's CLI what Desktop really sees and run one tiny "
+    live: bool = typer.Option(False, "--live", help="Also run one tiny request as a BharatCode Desktop session "
                                                    "request (one short model call) to measure the per-step context."),
     no_write: bool = typer.Option(False, "--no-write", help="With --live: don't write results into research/*/manual-check.md."),
 ) -> None:
-    """Check the whole install and say what to fix: spare-gpu, git, BharatCode's CLI and config, the MCP
+    """Check the whole install and say what to fix: spare-gpu, git, BharatCode Desktop's config, the MCP
     entry (and that the server really starts), the pack, this project's jobs and settings. Exit code 1 on a FAIL."""
     from . import doctor as doctoring
 
@@ -705,7 +705,7 @@ def doctor(
     if live:
         typer.echo(f"Still manual: {doctoring.MANUAL_LEFT}.")
     else:
-        typer.echo("Add --live to check what Desktop really sees (needs BharatCode's CLI; one short model call).")
+        typer.echo("Add --live, from BharatCode Desktop's terminal, to measure a real session (one short model call).")
     if report.verdict == doctoring.FAIL:
         raise typer.Exit(1)
 

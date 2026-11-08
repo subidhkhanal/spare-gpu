@@ -245,13 +245,22 @@ class DesktopAgent:
         finally:
             config.unlink(missing_ok=True)
 
-    def run_agent(self, workdir: Path, agent: str | None, prompt: str, *, token_budget: int | None = None,
+    def run_agent(self, workdir: Path, agent: str | None, prompt: str, *, model: str | None = None,
+                  token_budget: int | None = None,
                   on_step: Callable[[AgentStep], None] = lambda step: None) -> AgentResult:
         """One of Desktop's agents (a pack lead for the benchmarks; None: Desktop's default agent)
-        on a prompt, as a session in `workdir`. The agent keeps its own model and permissions:
-        nothing of a job's applies."""
-        return self._session(Path(workdir), prompt, {}, {"agent": agent} if agent else {}, token_budget, on_step,
-                             lambda: False)
+        on a prompt, as a session in `workdir`. The agent keeps its own permissions, and its own
+        model unless `model` pins one: nothing of a job's applies."""
+        extra = ({"agent": agent} if agent else {}) | ({"model": _model_ref(model)} if model else {})
+        return self._session(Path(workdir), prompt, {}, extra, token_budget, on_step, lambda: False)
+
+    def server_version(self) -> str | None:
+        """The version Desktop's server reports, or None."""
+        try:
+            with self.conn.client(timeout=10.0, transport=self._transport) as http:
+                return http.get(HEALTH).json().get("version")
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
 
     def _session(self, workdir: Path, prompt: str, session_extra: dict, prompt_extra: dict, token_budget,
                  on_step, should_stop) -> AgentResult:

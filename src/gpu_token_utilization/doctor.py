@@ -4,10 +4,12 @@ Without `--live` it starts nothing of BharatCode's and changes nothing: it reads
 state, BharatCode's config folder, the project's .gtu folder, and starts spare-gpu's own MCP
 server once, the way Desktop would, to see that it answers.
 
-With `--live` it also asks BharatCode's CLI what Desktop really sees (`bharatcode debug config`,
-`bharatcode debug agent build`), runs one tiny real request in an empty folder to measure the
-per-step context (the pack's overhead budget), and writes the outcome into the manual-check
-tables under research/ that these checks decide. The live part costs one short model call.
+With `--live` (run from BharatCode Desktop's terminal: it talks to Desktop's own server) it also
+runs one tiny real request as a Desktop session in an empty folder to measure the per-step
+context (the pack's overhead budget), checks that a job's copy leaves build output out and that
+your own config file holds none of the pack's settings, and writes the outcome into the
+manual-check tables under research/ that these checks decide. The live part costs one short
+model call. Which tools and agents Desktop actually shows a chat is checked by hand.
 """
 
 from __future__ import annotations
@@ -25,15 +27,16 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from . import __version__, agent_cli, bc_config, pack, router, runstate, waits, worktree
-from .api import ApiKeyMissing, env_without_key, find_api_key
+from . import __version__, bc_config, desktop, pack, router, runstate, waits, worktree
+from .agent import DEFAULT_MODEL
+from .api import ApiKeyMissing, find_api_key
 from .jobs import JobConfig
 from .pack import check
 from .pack.check import FAIL, PASS, WARN, Finding
 from .store import DB_ENV, DEFAULT_DB, FINAL_STATUSES, Store
 
 PROMPT = "Reply with the single word OK."
-MODEL = agent_cli.DEFAULT_MODEL  # the tiny request is pinned to one model: tokens differ per tokenizer
+MODEL = DEFAULT_MODEL  # the tiny request is pinned to one model: tokens differ per tokenizer
 BUDGET = 1_500  # tokens the pack may add to a normal session's step (plan §7)
 SPARE_TOOLS = ("spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask")
 RESEARCH = Path(__file__).resolve().parents[2] / "research"
@@ -79,17 +82,6 @@ def check_tools(report: Report) -> None:
                              "fail. Enable it once (as administrator): New-ItemProperty -Path "
                              "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem' -Name LongPathsEnabled -Value 1 "
                              "-PropertyType DWord -Force")
-
-
-def check_cli(report: Report, status: agent_cli.CliStatus) -> None:
-    if status.problem:
-        report.add(WARN, "BharatCode's CLI isn't available. Desktop runs jobs without it; the CLI is needed for "
-                         "`gtu doctor --live` and for the token figures of `bharatcode stats`. " + status.problem.splitlines()[0])
-    elif status.signed_in is False:
-        report.add(WARN, f"BharatCode's CLI {status.version} is installed but not signed in: run `bharatcode auth login`")
-    else:
-        report.add(PASS, f"BharatCode's CLI {status.version}" + (" is installed and signed in" if status.signed_in else
-                                                                   " is installed (couldn't tell whether it's signed in)"))
 
 
 def _registered_command(folder: Path) -> tuple[list[str] | None, Finding]:
@@ -277,21 +269,6 @@ def check_settings(report: Report, root: Path) -> None:
 
 # --- live checks ---------------------------------------------------------------------------------
 
-def _json_from(text: str) -> dict | None:
-    start = text.find("{")
-    if start < 0:
-        return None
-    try:
-        return json.loads(text[start:])
-    except ValueError:
-        return None
-
-
-def _cli(command: list[str], args: list[str], cwd: Path, timeout: float = 300.0) -> subprocess.CompletedProcess:
-    return subprocess.run([*command, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout, stdin=subprocess.DEVNULL, env=env_without_key(NO_COLOR="1"))
-
-
 def expected_pack(folder: Path) -> tuple[list[str], list[str], dict]:
     """(helper agents, pack-only tool names, the pack's settings) for the installed components."""
     names = check.installed_components(folder)
@@ -304,42 +281,16 @@ def expected_pack(folder: Path) -> tuple[list[str], list[str], dict]:
     return pack.helpers(components), tools, doc
 
 
-def live_config(report: Report, folder: Path, command: list[str], scratch: Path) -> None:
-    proc = _cli(command, ["debug", "config"], scratch)
-    merged = _json_from(proc.stdout)
-    if merged is None:
-        report.add(FAIL, "live: `bharatcode debug config` printed no JSON (Desktop may reject the config): "
-                         + (proc.stderr.strip().splitlines() or ["no output"])[-1])
-        return
-    entry = (merged.get("mcp") or {}).get(bc_config.SERVER_NAME) or {}
-    if not entry:
-        report.add(FAIL, "live: Desktop's merged config has no spare-gpu MCP entry; run `gtu integrate`")
-    else:
-        report.add(PASS, "live: Desktop's merged config carries spare-gpu's MCP entry")
+def check_own_file(report: Report, folder: Path) -> None:
+    """With the pack installed, your own config file should hold none of the pack's settings: the
+    pack keeps them in a file of its own (manual-check pack-install row 2)."""
     if not pack_installed(folder):
         return
-    report.filled[("pack-install", 1)] = f"PASS (gtu doctor --live {date.today()}): the CLI loaded the config with the pack's file and no error"
     try:
-        helpers, tools, doc = expected_pack(folder)
+        _, _, doc = expected_pack(folder)
     except ValueError as exc:
         report.add(FAIL, f"live: the pack's settings file doesn't parse ({exc}); run `gtu integrate --pack`")
         return
-    permission = merged.get("permission") or {}
-    task = permission.get("task") if isinstance(permission.get("task"), dict) else {}
-    loose_helpers = [h for h in helpers if task.get(h) != "deny"]
-    loose_tools = [t for t in tools if permission.get(t) != "deny"]
-    if loose_helpers or loose_tools:
-        report.add(FAIL, "live: in Desktop's merged config these are not denied for other agents: "
-                         + ", ".join(loose_helpers + loose_tools) + "; run `gtu integrate --pack` and check "
-                         "opencode.jsonc doesn't override permission")
-        report.filled[("pack-install", 6)] = f"FAIL (gtu doctor --live {date.today()}): not denied: {', '.join(loose_helpers + loose_tools)}"
-    else:
-        report.add(PASS, f"live: Desktop's merged config denies the pack's {len(helpers)} helpers and {len(tools)} tools to every other agent")
-        report.filled[("pack-install", 6)] = (f"PASS (gtu doctor --live {date.today()}): permission.task denies all "
-                                              f"{len(helpers)} helpers in the merged config Desktop uses for the task tool's list")
-    if doc.get("small_model") and merged.get("small_model") != doc.get("small_model"):
-        report.add(WARN, f"live: small_model is {merged.get('small_model')} in the merged config, not the pack's "
-                         f"{doc.get('small_model')}; something later in the load order overrides it")
     user_file = bc_config.config_file(folder)
     try:
         user_doc = bc_config.parse_jsonc(user_file.read_text(encoding="utf-8-sig"))
@@ -360,77 +311,20 @@ def live_config(report: Report, folder: Path, command: list[str], scratch: Path)
         report.filled[("pack-install", 2)] = f"PASS (gtu doctor {date.today()}): {user_file.name} holds none of the pack's settings"
 
 
-def live_agent(report: Report, folder: Path, command: list[str], scratch: Path) -> None:
-    proc = _cli(command, ["debug", "agent", "build"], scratch)
-    agent = _json_from(proc.stdout)
-    if agent is None or not isinstance(agent.get("tools"), dict):
-        report.add(FAIL, "live: `bharatcode debug agent build` printed no tool list: "
-                         + (proc.stderr.strip().splitlines() or ["no output"])[-1])
-        return
-    tools = agent["tools"]
-    spare = [f"{pack.SERVER}_{t}" for t in SPARE_TOOLS]
-    seen = [t for t in spare if tools.get(t)]
-    if len(seen) == len(spare):
-        report.add(PASS, "live: a plain chat sees spare-gpu's five tools")
-    else:
-        report.add(WARN, f"live: a plain chat sees {len(seen)} of spare-gpu's five tools; the MCP server may not have "
-                         "connected (`bharatcode mcp list` shows why)")
-    if not pack_installed(folder):
-        return
-    try:
-        _, pack_tools, _ = expected_pack(folder)
-    except ValueError:
-        return  # reported by live_config
-    visible = [t for t in pack_tools if tools.get(t)]
-    if visible:
-        report.add(FAIL, f"live: a plain chat can see the pack-only tools {', '.join(visible)}; they cost tokens on every "
-                         "step. Run `gtu integrate --pack`")
-        report.filled[("pack-install", 7)] = f"FAIL (gtu doctor --live {date.today()}): visible: {', '.join(visible)}"
-    elif not seen:
-        report.add(WARN, "live: the tool list shows none of spare-gpu's tools, so it can't show whether the pack's are "
-                         "hidden; fix the MCP connection and run the doctor again")
-    else:
-        report.add(PASS, f"live: none of the pack's {len(pack_tools)} tools is in a plain chat's tool list")
-        report.filled[("pack-install", 7)] = (f"PASS (gtu doctor --live {date.today()}): `debug agent build` lists none of "
-                                              f"{', '.join(pack_tools)}; {len(seen)} of the five /auto tools present")
-    leads = [n for c in pack.select(",".join(check.installed_components(folder)) or None) for n in c.agents if n.endswith("-lead")] \
-        if check.installed_components(folder) else []
-    if leads:
-        lead = _json_from(_cli(command, ["debug", "agent", leads[0]], scratch).stdout) or {}
-        own = [t for t in pack_tools if (lead.get("tools") or {}).get(t)]
-        report.add(PASS if own else WARN, f"live: the {leads[0]} agent sees {len(own)} of the pack's tools"
-                                          + ("" if own else " (none: is spare-gpu's server started with --pack?)"))
-
-
-def context_tokens(stdout: str) -> tuple[int | None, str]:
-    """The first step's context (input plus cache) from `bharatcode run --format json`, and the reply."""
-    first, reply = None, ""
-    for line in stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        part = event.get("part") or {}
-        if event.get("type") == "step_finish" and first is None:
-            t = part.get("tokens") or {}
-            first = (t.get("input") or 0) + ((t.get("cache") or {}).get("read") or 0) + ((t.get("cache") or {}).get("write") or 0)
-        elif event.get("type") == "text":
-            reply += part.get("text") or ""
-    return first, reply.strip()
-
-
-def live_run(report: Report, folder: Path, command: list[str], scratch: Path, research: Path | None,
+def live_run(report: Report, folder: Path, agent: desktop.DesktopAgent, scratch: Path, research: Path | None,
              version: str | None) -> None:
-    """One tiny real request: proves a session runs end to end and measures its per-step context."""
-    try:
-        proc = _cli(command, ["run", "--dir", str(scratch), "-m", MODEL, "--format", "json", PROMPT], scratch)
-    except subprocess.TimeoutExpired:
+    """One tiny real request as a Desktop session: proves a session runs end to end and measures
+    its per-step context (input plus cache read and write of the first step)."""
+    result = agent.run_agent(scratch, None, PROMPT, model=MODEL)
+    if result.stopped == "timeout":
         report.add(FAIL, "live: the tiny request didn't finish within 5 minutes; BharatCode may be down or queued")
         return
-    tokens, reply = context_tokens(proc.stdout)
+    first = result.steps[0] if result.steps else None
+    tokens = (first.input_tokens + first.cache_read_tokens + first.cache_write_tokens) if first else 0
+    reply = result.text.strip()
     if not tokens:
-        report.add(FAIL, "live: the tiny request produced no step or reported no token usage (exit code {}): {}".format(
-            proc.returncode, (proc.stderr.strip().splitlines() or proc.stdout.strip().splitlines() or ["no output"])[-1]))
+        report.add(FAIL, "live: the tiny request produced no step or reported no token usage: "
+                         + (result.error or "no error given"))
         return
     with_pack = pack_installed(folder)
     state = "with" if with_pack else "without"
@@ -441,7 +335,7 @@ def live_run(report: Report, folder: Path, command: list[str], scratch: Path, re
         return
     runs = research / "pack-install" / "overhead-runs.jsonl"
     entry = {"date": date.today().isoformat(), "variant": "empty-mcp", "pack_installed": with_pack,
-             "context_tokens": tokens, "model": MODEL, "cli_version": version}
+             "context_tokens": tokens, "model": MODEL, "desktop_version": version}
     with open(runs, "a", encoding="utf-8", newline="") as fh:
         fh.write(json.dumps(entry) + "\n")
     latest: dict[bool, dict] = {}
@@ -453,13 +347,13 @@ def live_run(report: Report, folder: Path, command: list[str], scratch: Path, re
         except ValueError:
             report.add(WARN, f"live: {runs.name} line {n} isn't JSON and was skipped")
             continue
-        # Only runs on the same model and CLI version are comparable: tokenizers and system prompts differ.
+        # Only runs on the same model and Desktop version are comparable: tokenizers and system prompts differ.
         if isinstance(r, dict) and isinstance(r.get("context_tokens"), int) and r.get("model") == MODEL \
-                and r.get("cli_version") == version:
+                and r.get("desktop_version") == version:
             latest[bool(r.get("pack_installed"))] = r
     if True in latest and False in latest:
         a, b = latest[False]["context_tokens"], latest[True]["context_tokens"]
-        result = {"date": date.today().isoformat(), "variant": "empty-mcp", "model": MODEL, "cli_version": version,
+        result = {"date": date.today().isoformat(), "variant": "empty-mcp", "model": MODEL, "desktop_version": version,
                   "without_pack": a, "with_pack": b, "added": b - a, "budget": BUDGET, "within_budget": b - a <= BUDGET,
                   "measured": {"without_pack": latest[False]["date"], "with_pack": latest[True]["date"]}}
         (research / "pack-install" / "overhead.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8",
@@ -473,7 +367,7 @@ def live_run(report: Report, folder: Path, command: list[str], scratch: Path, re
     else:
         other = "uninstalled (`gtu integrate --pack --uninstall`)" if with_pack else "installed (`gtu integrate --pack`)"
         report.add(WARN, f"live: measured {tokens:,} tokens {state} the pack; run `gtu doctor --live` once more with the "
-                         f"pack {other}, on the same BharatCode CLI version, to measure the difference")
+                         f"pack {other}, on the same BharatCode Desktop version, to measure the difference")
         report.filled[("pack-install", 8)] = (f"PARTIAL (gtu doctor --live {date.today()}): {tokens:,} tokens per step "
                                               f"{state} the pack on {waits.name(MODEL)}; the other state is still to measure")
 
@@ -498,21 +392,19 @@ def live_copy(report: Report) -> None:
         report.filled[("safety-fixes", 5)] = f"FAIL (gtu doctor --live {date.today()}): copied {', '.join(copied)}"
 
 
-def live(report: Report, folder: Path, status: agent_cli.CliStatus, research: Path | None) -> None:
-    live_copy(report)  # needs no CLI: this machine's file system and git
-    if status.problem or not status.command:
-        report.add(FAIL, "live checks need BharatCode's CLI, which isn't available; the static checks above still hold")
+def live(report: Report, folder: Path, research: Path | None,
+         make_agent: Callable[[], desktop.DesktopAgent] | None = None) -> None:
+    live_copy(report)  # needs no Desktop: this machine's file system and git
+    check_own_file(report, folder)
+    try:
+        agent = make_agent() if make_agent else desktop.DesktopAgent(desktop.discover(), timeout=300.0)
+    except desktop.DesktopNotFound as exc:
+        report.add(FAIL, f"live: the measurement runs as a BharatCode Desktop session, and Desktop wasn't found ({exc}); "
+                         "run `gtu doctor --live` from Desktop's terminal. The checks above still hold")
         return
-    command = status.command
     with tempfile.TemporaryDirectory(prefix="spare-gpu-doctor-") as scratch:
-        root = Path(scratch)
-        for step in (live_config, live_agent):
-            try:
-                step(report, folder, command, root)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                report.add(FAIL, f"live: {step.__name__.replace('live_', 'bharatcode debug ')} failed: {exc}")
         try:
-            live_run(report, folder, command, root, research, status.version)
+            live_run(report, folder, agent, Path(scratch), research, agent.server_version())
         except (OSError, ValueError, KeyError) as exc:
             report.add(FAIL, f"live: the tiny request or its record failed: {type(exc).__name__}: {exc}")
 
@@ -549,28 +441,22 @@ def fill_manual_checks(research: Path, filled: dict[tuple[str, int], str]) -> li
 # --- the whole thing -----------------------------------------------------------------------------
 
 def run(cwd: Path, channel: str = "stable", live_mode: bool = False, write: bool = True,
-        cli_status: Callable[[], agent_cli.CliStatus] = agent_cli.cli_status,
-        research: Path | None = None) -> Report:
+        research: Path | None = None, make_agent: Callable[[], desktop.DesktopAgent] | None = None) -> Report:
     report = Report()
     research = research or research_dir()
     check_tools(report)
-    status = cli_status()
-    check_cli(report, status)
     if channel == "stable":
         folder, how = bc_config.locate_config_dir()
     else:
-        folder, how = bc_config.channel_config_dir(channel, ask_cli=False), f"BharatCode Desktop's {channel} channel"
+        folder, how = bc_config.channel_config_dir(channel), f"BharatCode Desktop's {channel} channel"
     command = check_config(report, folder, how)
     if folder.is_dir():
         check_pack(report, folder, how, command)
         check_server(report, command)
     root = check_project(report, Path(cwd))
     check_settings(report, root)
-    if live_mode and channel != "stable":
-        report.add(FAIL, "live checks go through BharatCode's CLI, which reads only the stable channel's config folder; "
-                         f"run `gtu doctor --live` without --channel (the {channel} build is checked at Desktop by hand)")
-    elif live_mode:
-        live(report, folder, status, research)
+    if live_mode:
+        live(report, folder, research, make_agent)
         if write and research is not None and report.filled:
             written = fill_manual_checks(research, report.filled)
             if written:
@@ -578,5 +464,5 @@ def run(cwd: Path, channel: str = "stable", live_mode: bool = False, write: bool
     return report
 
 
-MANUAL_LEFT = ("pack-install 3, 4, 5, 9 and 10, and safety-fixes 1 to 4 and 6 to 12 need you at Desktop; "
+MANUAL_LEFT = ("pack-install 1, 3 to 7, 9 and 10, and safety-fixes 1 to 4 and 6 to 12 need you at Desktop; "
                "each command's own research/<command>/manual-check.md too")
