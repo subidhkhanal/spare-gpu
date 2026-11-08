@@ -1,48 +1,56 @@
-**Type `/auto` in BharatCode Desktop and your task runs on whichever model will start it sooner, DeepSeek or Qwen, so you don't sit in a queue.**
+# spare-gpu
 
-## What it does
+**Less waiting in BharatCode Desktop.** Type `/auto` before your request, and spare-gpu runs it on whichever model can start it sooner, DeepSeek or Qwen.
 
-- **Picks the faster model.** If your model is busy, spare-gpu runs the task on the other one when that starts it sooner. Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek.
-- **One command: `/auto`.** Type `/auto` and what you want: a question, tests, docs or a code review. The reply says which model it used and how much waiting that saved.
-- **Does the chores where you can watch.** Tests, docs, reviews and fixes run right away as their own Desktop session, named "spare-gpu: ...", in a private copy of your project. Open it to watch; the chat tells you how it went when it's done.
-- **Keeps only good work.** Generated tests are kept only if they pass, and docs jobs may not change code. The files a job edited are copied to `spare-gpu/<date>_<time>/` in your project. Your own files are never touched: open the folder and copy over what you want.
-- **Keeps you in control of tokens.** Every job has a token budget, and a job that crashes resumes where it stopped.
+## The problem it solves
 
-## Set up
+BharatCode Desktop gives you two models: **DeepSeek** (stronger) and **Qwen** (faster to get). At busy times, one of them has a queue of several minutes while the other is free. Normally you sit in that queue.
 
-With BharatCode Desktop installed and signed in, paste this into PowerShell:
+spare-gpu checks BharatCode's live queues for you. When the other model would start sooner, and it's good enough for the task, your work goes there instead.
 
-```powershell
-irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
-```
+## What it does for you
 
-Then fully close BharatCode Desktop and open it again. That's all: no API key needed.
+- **Answers questions sooner** on whichever model is free.
+- **Writes tests, docs and code reviews** for your project. Each job runs as its own Desktop chat that you can open and watch.
+- **Never touches your files.** Each job works on a private copy of your project. The files it changed are put in a `spare-gpu/<date>_<time>/` folder, and you copy over what you want.
+- **Keeps only good work.** Generated tests are kept only if they pass. Docs jobs may add documentation but not change code.
+- **Tells you what it did:** which model it used, how much waiting that saved, and the tokens it used.
 
-The installer ([install.ps1](install.ps1)) installs Python and git with winget if they're missing, installs spare-gpu into its own folder (`%LOCALAPPDATA%\spare-gpu`), connects it to BharatCode Desktop, adds `/auto` and adds the `gtu` command. It installs the newest tagged release and prints the version it installed; set `$env:SPARE_GPU_VERSION = '0.1.0'` first to pin one, or `$env:SPARE_GPU_REPO = 'owner/name'` to install from a fork. Run the same line again to update. (Until the first release is published it installs the development version from `master`, and says so.)
+## Install
 
-To remove it: `gtu integrate --uninstall`, then delete `%LOCALAPPDATA%\spare-gpu`.
+You need Windows and BharatCode Desktop, installed and signed in.
 
-Prefer to do it by hand? With Python 3.11+ and git installed: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate`.
+1. Open **PowerShell** and paste:
+   ```powershell
+   irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
+   ```
+2. Fully close BharatCode Desktop (also from the taskbar tray) and open it again.
 
-## `/auto` mode
+That's it. No API key is needed. The installer adds Python and git if they're missing, installs spare-gpu in `%LOCALAPPDATA%\spare-gpu`, and connects it to Desktop. Run the same line again to update.
 
-### Turn it on
+<details>
+<summary>Installer options and manual install</summary>
 
-The installer adds `/auto` to BharatCode Desktop. After installing, fully close Desktop and open it again, then open a chat in your project and type `/`: `/auto` is in the command list. If you installed spare-gpu before `/auto` existed, run the install line again to update.
+- Pin a version: `$env:SPARE_GPU_VERSION = '0.1.0'` before the install line.
+- Install from another copy of the repository: `$env:SPARE_GPU_REPO = 'owner/name'`.
+- Until the first release is published, it installs the latest code from `master` and says so.
+- By hand, with Python 3.11+ and git: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate`.
 
-### Use it
+</details>
 
-Type `/auto` and then what you want, in plain words:
+## Use it
+
+Open a chat in your project and type `/auto` followed by what you want:
 
 | You type | What happens |
 |---|---|
-| `/auto what does a race condition mean?` | Answers the question right in the chat, on the faster model |
-| `/auto write tests for src/payments.py` | Writes tests now, in a session you can watch, and keeps only the ones that pass |
-| `/auto write docs for src/utils.py` | Adds docstrings and README text, without changing code |
+| `/auto what does a race condition mean?` | Answers in the chat, on the faster model |
+| `/auto write tests for src/payments.py` | Writes tests and keeps only the ones that pass |
+| `/auto write docs for src/utils.py` | Adds docstrings and README text without changing code |
 | `/auto review src/router.py` | Writes a code review |
 | `/auto` | Shows how long each model would wait right now |
 
-For example, on 5 Nov DeepSeek had a 3-minute queue while Qwen had a free slot:
+Example from 5 Nov, when DeepSeek had a 3-minute queue:
 
 ```
 /auto what is the name of the latest mac chip
@@ -50,93 +58,102 @@ For example, on 5 Nov DeepSeek had a 3-minute queue while Qwen had a free slot:
   (Answered by Qwen 3.8 27B: saves about 2m 43s of waiting over DeepSeek V4.1 Flash, and its lane has a free slot.)
 ```
 
-### How it picks the model
+You can also just ask in plain words, without `/auto`:
 
-`/auto` starts from DeepSeek V4.1 Flash, the stronger model, and checks BharatCode's live queues each time:
+| You say | What happens |
+|---|---|
+| "write tests for src/pay.py on whichever model is free" | Runs it on the model that starts sooner |
+| "how long is DeepSeek's queue?" | Shows each model's current wait |
+| "is my tests job done?" | Shows queued, running and finished jobs |
+| "what did spare-gpu do today?" | Lists finished jobs, their files and tokens |
+| "cancel the docs job" | Cancels it within a few seconds |
 
-| Right now | Questions and docs run on | Tests and reviews run on |
-|---|---|---|
-| DeepSeek free | DeepSeek | DeepSeek |
-| DeepSeek queued, Qwen free | **Qwen** | DeepSeek (Qwen isn't measured as good enough yet) |
-| Qwen queued, DeepSeek free | DeepSeek | DeepSeek |
+## Where results go
 
-It only switches when that saves at least 20 seconds and the other model has a free slot, so switched work never lands in a queue. If your plan doesn't include DeepSeek, everything runs on Qwen.
-
-Questions aren't measured: a quick answer from whichever model is free is the point of `/auto`, so they go to the faster model by design, and the reply names the model that answered. Job types move only after measurement: docs were measured as good on Qwen; tests and reviews weren't shown to be, so they stay on DeepSeek.
-
-### Turn it off
-
-`gtu integrate --uninstall` removes `/auto` and spare-gpu. If you edited your copy of `/auto` (`command/auto.md` in Desktop's config folder), it's left as it is.
-
-## The pack
-
-`gtu integrate --pack` adds a pack of commands for BharatCode Desktop that split each job between the two models: DeepSeek plans, judges and verifies; Qwen does the many quick, parallel, self-contained steps. It uses only BharatCode's own extension points (Markdown commands and agents, spare-gpu's MCP tools, and a config file of the pack's own next to yours, which is never edited). Components, chosen with `--only`: `split` (titles and the explore subagent run on Qwen), `research` (`/deep-research`), `review` (`/code-review`), `security` (`/security-review`), `simplify` (`/simplify`) and `verify` (`/verify-app`, needs the marketplace's Playwright). `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added. Model ids are read from bharatcode.ai's model list at install time. Every command ends with a cost summary: the model per phase, the helper runs, the exact tokens per model in the project's Desktop sessions (read from Desktop's own record of each reply), and the queue time saved as estimated from live waits; none claims a number it didn't measure. The checker and the verifiers also ship as a standard-model variant: each lead starts the variant `spare_waits` names, and the router moves a role down to Qwen only once the benchmarks mark it switch-safe in `routing_policy.json` (until then every such role is listed as unmeasured and stays on DeepSeek). The pack's helper agents and tools are hidden from every other agent, so a normal chat pays nothing for them. What the pack reuses and under which licence is in `src/gpu_token_utilization/pack/ATTRIBUTION.md`; `pack/capability.json` is the same pack in BharatCode's marketplace format, for a later proposal. For BharatCode; not affiliated with BharatCode or Anthropic.
-
-`gtu doctor` checks the whole install and names the fix for each problem: spare-gpu, git and Windows long paths; the config folder, the MCP entry and that the registered command exists and the server really starts; the `/auto` command; the pack (every check of `gtu pack-check`: the settings file, every command and agent file, the model ids, helpers and tools hidden, conflicts with your own settings); and this project's jobs (a run file left by a crash, a pending stop, leftover copies, paused jobs), its test command and routing. It changes nothing. `gtu doctor --live`, run from BharatCode Desktop's terminal, also runs one tiny real request as a Desktop session in an empty folder to measure the context sent per step, checks that your own config file holds none of the pack's settings, and writes those outcomes into the Result column of `research/pack-install/manual-check.md` and `research/safety-fixes/manual-check.md` in a checkout. Run it once with the pack installed and once without, and it records the pack's per-step overhead in `research/pack-install/overhead.json`, which `tests/test_overhead_budget.py` holds to the 1,500-token budget. The live part costs one short model call. The checks only you can do at Desktop, and the benchmarks each command must pass before it stops being experimental, stay in `research/<command>/manual-check.md` and `benchmark.md`.
-
-### `/deep-research` (experimental until the benchmark in research/deep-research/ is run)
-
-`/deep-research <question> [--depth quick|standard|deep] [--sources web|papers|both]` writes a cited research report into `research/<slug>/` in your project. A lead on DeepSeek plans the sub-questions and starts one scout per sub-question on Qwen, all at once; scouts search the open paper registries (OpenAlex, Crossref, arXiv, through spare-gpu's `scholar_search` tool) and the web (Exa's hosted MCP, keyless; your queries go to Exa) and write notes with exact quotes and ids. A writer on Qwen drafts the report one section per call; a checker on DeepSeek marks unsupported claims and runs `verify_refs`, which drops every reference the registries don't have or whose title and authors don't match. The lead's reply names the model used per phase, the helper runs, and the queue time saved as estimated from live waits. Scouts have no shell and can write only their own notes file; everything they read is treated as data. Google Scholar isn't used.
-
-### `/code-review` (experimental until the benchmark in research/code-review/ is run)
-
-`/code-review [low|medium|high|deep] [commit or branch] [--fix]` reviews your uncommitted changes (or a commit or branch). A lead on DeepSeek slices the diff by concern (correctness, edge cases, error handling, concurrency, API misuse, tests) and starts one finder per slice on Qwen, all at once; the finders report candidates with a failure scenario each; a verifier on DeepSeek re-reads the code for every candidate and keeps only those with concrete evidence, ranked by severity. Effort sets the number of finders (2, 4, 6, or 6 twice with a refuting verifier pass). With `--fix`, the kept findings go to a `fix` job that runs right away as a Desktop session you can watch: it applies them in a private copy, runs your test command, and keeps the changes only if it passes (a fix may not change existing tests); the result lands in `spare-gpu/<date>_<time>/`. Finders and the verifier have no shell beyond git's read-only commands and can't edit files. BharatCode's own `/review` is one pass by one model; this runs locally before you push, on your own quota. Nazar reviews pull requests on GitHub; this is for the changes still on your machine.
-
-### `/security-review` (experimental until the benchmark in research/security-review/ is run)
-
-`/security-review [commit or branch] [deep]` is a read-only security review of your uncommitted changes (or a commit or branch): five finders on Qwen, one per vulnerability class (injection and input validation; authentication and authorisation; crypto and secrets; code execution and XSS; data exposure), report candidates; a rule-based filter (`security_filter`, a re-implementation of the false-positive rules in Anthropic's MIT-licensed claude-code-security-review, see `pack/ATTRIBUTION.md`) drops the known low-signal patterns; a verifier on DeepSeek follows each remaining attack path, applies the method's precedents, and scores 1 to 10; only 8 and above are reported. Nothing in it runs exploit code or writes a file.
-
-### `/simplify` (experimental until the benchmark in research/simplify/ is run)
-
-`/simplify [file or folder]` (nothing means the files in your uncommitted diff) has finders on Qwen propose reuse, simplification and efficiency cleanups with no behaviour change; a lead on DeepSeek accepts the safe ones and hands them to a `fix` job, which applies them in a private copy on DeepSeek, runs your test command, and keeps them only if it passes. The result is one set of changed files in `spare-gpu/<date>_<time>/` to accept or ignore.
-
-**Overhead budget.** With the pack installed, a normal session must carry at most 1,500 extra tokens per step. By construction it carries none (tests/test_overhead_budget.py); the measured proof is recorded with scripts/check_overhead_budget.py once run on Windows (research/pack-install/manual-check.md, check 8).
-
-### `/verify-app` (stretch; experimental)
-
-`/verify-app <url> <what to check>` checks a running app in a real browser. It needs the Playwright capability from BharatCode's marketplace. A lead on DeepSeek turns the request into small checks, starts one driver per check on Qwen, all at once, and the drivers work the browser through the Playwright tools and write down exactly what they did and saw; the lead judges each check from those notes, quoting the evidence, and says "unclear" rather than guessing. Drivers can't run commands, change code, or enter real credentials. The lead doesn't start servers: with no URL it says how the app is usually started and stops.
-
-## What you get
-
-A job's result lands in your project when it's done, and the chat says where. Ask "is my job done?" at any time to see what ran.
+When a job finishes, the chat tells you where its files are:
 
 ```
 your-project/
 └── spare-gpu/
     └── 2026-11-05_12-38-50/      ← when the job finished
-        ├── README.md             ← only the files the job edited
+        ├── README.md             ← only the files the job changed
         └── src/
             └── mathx.py
 ```
 
-## Or just ask
+That folder is ignored by git, so it never shows up as a change.
 
-You don't have to type `/auto`. spare-gpu also understands plain requests in any Desktop chat, and picks the faster model the same way, starting from your chat's model:
+## How it picks the model
 
-| You say | What happens |
+It starts from DeepSeek, the stronger model, and switches only when that saves at least 20 seconds and the other model has a free slot:
+
+| Right now | Questions and docs run on | Tests and reviews run on |
+|---|---|---|
+| DeepSeek free | DeepSeek | DeepSeek |
+| DeepSeek queued, Qwen free | **Qwen** | DeepSeek |
+| Qwen queued, DeepSeek free | DeepSeek | DeepSeek |
+
+Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek. Questions aren't measured: a quick answer is the point, and the reply always names the model that answered. If your plan has only Qwen, everything runs on Qwen.
+
+The measurement is a small evaluation, 3 tasks per job type: see [research/eval/](research/eval/).
+
+## Extra commands (optional)
+
+```powershell
+gtu integrate --pack
+```
+
+This adds bigger commands. In each one, DeepSeek plans and checks, and several Qwen helpers do the many small steps at the same time. All of them are **experimental** until their benchmark in `research/<command>/` has been run.
+
+| Command | What it does |
 |---|---|
-| "write tests for src/pay.py on whichever model is free" | Hands it to the model that starts sooner |
-| "run tests for src/payments" | Runs it now; the result lands in `spare-gpu/` |
-| "how long is DeepSeek's queue?" | Shows each model's current wait |
-| "is my tests job done?" | Shows queued, running and finished jobs |
-| "what did spare-gpu do today?" | Finished jobs, where their files landed and the tokens used (`gtu report` in a terminal has the full summary) |
-| "cancel the docs job" | Cancels it |
+| `/code-review [low\|medium\|high\|deep] [commit or branch] [--fix]` | Reviews your uncommitted changes (or a commit or branch). Several helpers each look for one kind of bug; DeepSeek keeps only the findings with real evidence. With `--fix`, the fixes are applied in a private copy and kept only if your tests still pass. |
+| `/security-review [commit or branch] [deep]` | A read-only security review. Five helpers each look for one kind of problem (injection, login and access, secrets, code execution, data leaks). Known false alarms are dropped by fixed rules, and only high-confidence findings are reported. |
+| `/deep-research <question> [--depth quick\|standard\|deep]` | Writes a report with sources into `research/<topic>/`. Helpers search research papers (OpenAlex, Crossref, arXiv) and the web (through Exa, no key needed; your searches go to Exa). Every source is checked against the paper registries, and fake or wrong ones are removed. |
+| `/simplify [file or folder]` | Suggests safe cleanups that don't change behaviour. They are kept only if your tests still pass. |
+| `/verify-app <url> <what to check>` | Checks a running app in a real browser. Needs the Playwright add-on from Desktop's marketplace. |
 
-## Why it's useful
+Each command ends with a cost summary: which model did what, and the exact tokens used in your project's Desktop chats.
 
-- **Less waiting.** DeepSeek's queue can reach minutes at busy times, while Qwen often has a free slot, and the other way round. `/auto` sends your work to whichever is free, without you watching queues.
-- **No quality loss on delegated work.** Jobs only move to Qwen for job types where Qwen was measured to be just as good, and every result is checked before it's kept. Questions are the one unmeasured case: they go to the faster model by design, and the reply says which model answered.
-- **Nothing hidden.** Every job is a Desktop session you can open while it runs, its result is checked before it's kept, and it waits for you in the `spare-gpu/` folder.
-- **No surprises.** It never edits your files, never pushes, and only runs your test, build and lint commands.
+Good to know about the pack:
+- The pack's helpers and tools are hidden from your normal chats, so a normal chat doesn't pay for them (budget: at most 1,500 extra tokens per step).
+- Some helper roles also ship as a standard-model variant on Qwen. They are only used once a benchmark shows Qwen is good enough for them; until then they stay on DeepSeek.
+- `--only research,review` installs only some commands. `--lite` is for a Qwen-only plan.
+- Remove it with `gtu integrate --pack --uninstall`. That removes exactly what the pack added; your own settings file is never edited.
+
+## Check your install
+
+```powershell
+gtu doctor
+```
+
+Checks everything (spare-gpu, git, Desktop's settings, the pack, this project's jobs) and tells you how to fix each problem. It changes nothing.
+
+`gtu doctor --live`, run from **Desktop's terminal**, also sends one tiny request to measure the pack's token cost. Run it once with the pack and once without.
+
+## Safety
+
+- Your files are never changed. Jobs work on a private copy.
+- It never pushes and never commits to your project.
+- Jobs may only read, edit their copy, and run your test command. No web access, no other commands, and your other MCP servers are switched off inside a job.
+- Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
 
 ## Good to know
 
-- Windows only, and jobs run while BharatCode Desktop is open.
-- `/auto`'s own handoff, a single short request, always runs on Qwen. If Qwen is packed, that one request waits briefly before your task moves to DeepSeek.
-- Works in any project folder: a git repo or not, even with unsaved changes. Each job starts from a private copy of your files as they are, and when it finishes only the `spare-gpu/<date>_<time>/` folder is left: no branches or history in your project. That folder ignores itself in git, so it never shows up as a change.
-- Needs git installed on your PC (the installer adds it), since spare-gpu uses it to manage each job's private copy. Your project doesn't need to use git.
-- Dependency, cache and build-output folders (`node_modules`, `venv`, `dist`, `build`, `target`, `.next`, `.gradle`, `out`, `coverage` and the like) aren't copied into a job's copy, unless your repo tracks them. If your project isn't a git repo and its copy would be over 200 MB, queueing a job says so, and the job's log repeats it.
-- Which job types may move to Qwen comes from a small evaluation (3 tasks per type); see [research/eval/](research/eval/). Questions aren't part of it.
-- More detail and the measurements behind it: [research/](research/).
+- Windows only. Jobs run while BharatCode Desktop is open.
+- Works in any project folder, with or without git, even with unsaved changes.
+- Each job has a token budget (`GTU_JOB_TOKEN_BUDGET`). A stopped job continues where it left off with `gtu start`.
+- `gtu stop` pauses a running job; it never kills anything.
+- Measurements and details: [research/](research/).
 
-MIT licence, see [LICENSE](LICENSE). An independent project for the BharatCode Build League, not affiliated with BharatCode.
+## Remove
+
+```powershell
+gtu integrate --uninstall
+```
+
+Then delete the `%LOCALAPPDATA%\spare-gpu` folder.
+
+---
+
+MIT licence, see [LICENSE](LICENSE). Credits for code reused from other projects: [ATTRIBUTION.md](src/gpu_token_utilization/pack/ATTRIBUTION.md). An independent project for the BharatCode Build League, not affiliated with BharatCode.
