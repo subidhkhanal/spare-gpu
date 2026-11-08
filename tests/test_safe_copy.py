@@ -2,13 +2,12 @@
 files that hold credentials, even when git tracks them; .gtu/copy-exclude and .gtu/copy-include are
 the project's own say; and key-shaped strings never reach the model."""
 
-import json
 import sys
 
 import pytest
 
 from gpu_token_utilization import jobs, redact, worktree
-from gpu_token_utilization.fakeapi import Reply
+from gpu_token_utilization.fakedesktop import Step
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.scheduler import Scheduler
 
@@ -113,17 +112,18 @@ def test_the_review_listing_skips_the_same_files(repo):
 
 
 @pytest.fixture
-def run_review(store, client, fake, desktop_fake):
-    """A review job against the fakes; returns the job, its steps, the listing the model was sent, the log."""
+def run_review(store, clock, desktop_fake):
+    """A review job against the fake Desktop; returns the job, its steps, the prompt the session was sent, the log."""
     def run(repo, target):
-        fake.queue(Reply(content="## Likely bugs\nNothing found.\n\n## Risky code\nNothing found.\n\n## Suggestions\nNothing found."))
+        desktop_fake.steps = [Step(text="## Likely bugs\nNothing found.\n\n## Risky code\nNothing found.\n\n"
+                                        "## Suggestions\nNothing found.")]
         job = store.add_job("review", target, str(repo))
         logs = []
-        Scheduler(store, client, agent=desktop_fake.agent(timeout=60),
+        Scheduler(store, agent=desktop_fake.agent(timeout=60),
                   config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
-                  sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
-        sent = json.loads([r for r in fake.requests if r.url.path.endswith("/chat/completions")][-1].content)
-        return store.get_job(job.id), store.steps(job.id), sent["messages"][1]["content"], logs
+                  sleep=clock.sleep, now=clock.utcnow, log=logs.append).run_job(job.id)
+        (session,) = desktop_fake.sessions.values()
+        return store.get_job(job.id), store.steps(job.id), session["prompt"]["parts"][0]["text"], logs
 
     return run
 

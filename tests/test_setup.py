@@ -1,7 +1,7 @@
-"""`gtu setup` and `gtu integrate`: registering the MCP server in BharatCode's config without breaking it."""
+"""`gtu integrate`, the one command you type: registering the MCP server in BharatCode's config without breaking it."""
 
 import json
-import sys
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -94,7 +94,7 @@ def test_existing_config_file_names_are_found_and_bharatcode_json_is_not_used(tm
     assert bc_config.config_file(tmp_path).name == "opencode.json"
 
 
-# --- gtu setup -------------------------------------------------------------------------------
+# --- gtu integrate ---------------------------------------------------------------------------
 
 @pytest.fixture
 def config_dir(tmp_path, monkeypatch):
@@ -104,49 +104,6 @@ def config_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(folder))
     return folder
 
-
-def test_setup_with_a_key_registers_and_confirms_the_connection(config_dir, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    result = cli.invoke(app, ["setup"])
-    out = result.output
-    assert result.exit_code == 0, out
-    assert "1/3" in out and "Found in the BHARATCODE_API_KEY environment variable" in out
-    assert "2/3  BharatCode Desktop" in out and "BharatCode Desktop: found (stable)" in out
-    assert "Added the \"spare-gpu\" entry" in out
-    assert "queue tests for src/utils tonight" in out
-    assert entry_in(config_dir / "opencode.jsonc")["command"][-1] == "mcp"
-    again = cli.invoke(app, ["setup"])
-    assert again.exit_code == 0 and "already registered there; nothing changed" in again.output
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows Credential Manager")
-def test_setup_without_a_key_asks_for_it_once(config_dir):
-    from gpu_token_utilization import keystore
-
-    result = cli.invoke(app, ["setup", "--no-check"], input="bc_live_typed_in_setup\n")
-    assert result.exit_code == 0, result.output
-    assert keystore.load() == "bc_live_typed_in_setup" and "Added the \"spare-gpu\" entry" in result.output
-    assert "bc_live_typed_in_setup" not in result.output
-
-
-def test_setup_before_desktop_is_installed_still_registers(tmp_path, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    monkeypatch.setenv("APPDATA", str(tmp_path / "fresh"))  # no BharatCode folder yet
-    result = cli.invoke(app, ["setup"])
-    assert result.exit_code == 0, result.output
-    assert "no config folder found yet" in result.output
-    assert entry_in(tmp_path / "fresh" / "BharatCode" / "Config" / "opencode.jsonc") is not None
-
-
-def test_setup_remove(config_dir, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    cli.invoke(app, ["setup"])
-    result = cli.invoke(app, ["setup", "--remove"])
-    assert result.exit_code == 0 and "Removed spare-gpu" in result.output
-    assert entry_in(config_dir / "opencode.jsonc") is None
-
-
-# --- gtu integrate ---------------------------------------------------------------------------
 
 def test_integrate_says_what_it_found_changed_and_how_to_undo(config_dir):
     result = cli.invoke(app, ["integrate"])
@@ -174,7 +131,7 @@ def test_integrate_is_idempotent(config_dir):
 def test_integrate_uninstall(config_dir):
     cli.invoke(app, ["integrate"])
     result = cli.invoke(app, ["integrate", "--uninstall"])
-    assert result.exit_code == 0 and "Removed spare-gpu from" in result.output and "jobs and key are kept" in result.output
+    assert result.exit_code == 0 and "Removed spare-gpu from" in result.output and "your jobs are kept" in result.output
     assert entry_in(config_dir / "opencode.jsonc") is None
     again = cli.invoke(app, ["integrate", "--uninstall"])
     assert again.exit_code == 0 and "wasn't registered" in again.output
@@ -254,3 +211,15 @@ def test_integrate_uses_desktops_config_folder(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "BharatCode Desktop's config folder" in result.output
     assert entry_in(tmp_path / "BharatCode" / "Config" / "opencode.jsonc") is not None
+
+
+def test_the_help_lists_only_integrate_and_the_hidden_mcp_still_works():
+    result = cli.invoke(app, ["--help"])
+    assert result.exit_code == 0, result.output
+    # a command's name starts its row; its help's wrapped lines are indented under the description
+    listed = re.findall(r"^\W (\w[\w-]*) ", result.output.split("Commands")[1], re.M)
+    assert listed == ["integrate"], result.output
+    for gone in ("setup", "doctor", "pack-check", "init", "start", "list", "apply", "undo", "cost", "prompts"):
+        assert cli.invoke(app, [gone]).exit_code == 2  # no such command
+    mcp = cli.invoke(app, ["mcp", "--help"])
+    assert mcp.exit_code == 0 and "--dir" in mcp.output and "--pack" in mcp.output

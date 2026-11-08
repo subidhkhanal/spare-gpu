@@ -21,8 +21,16 @@ def test_the_installed_pack_adds_nothing_to_a_normal_request_by_construction():
     doc = pack.config(pack.select(None), MODELS)
     assert pack.pack_added_tokens(doc) == 0
     tools = {t for c in pack.COMPONENTS.values() for t in c.tools}
-    assert len(tools) == 6 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
+    assert len(tools) == 11 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
+    assert {"apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"} <= tools  # /apply ... /doctor's
     assert set(doc["permission"]["task"]) == set(pack.helpers(pack.COMPONENTS.values()))
+    assert "spare-helper" not in doc["permission"]["task"]  # a hidden primary agent: never in the subagent list
+
+
+def test_spare_helpers_tools_would_cost_tokens_if_one_were_not_denied():
+    doc = pack.config(pack.select(None), MODELS)
+    doc["permission"].pop("spare-gpu_doctor_check")
+    assert pack.pack_added_tokens(doc) == pack.TOKENS_PER_MCP_TOOL
     assert doc["mcp"] and all(doc["permission"][f"{server}_*"] == "deny" for server in doc["mcp"])  # e.g. Exa's search
 
 

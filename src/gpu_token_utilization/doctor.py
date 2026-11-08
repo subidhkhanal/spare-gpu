@@ -1,11 +1,11 @@
-"""`gtu doctor`: one diagnosis of the whole install, each problem with its fix.
+"""/doctor: one diagnosis of the whole install, each problem with its fix.
 
-Without `--live` it starts nothing of BharatCode's and changes nothing: it reads spare-gpu's own
-state, BharatCode's config folder, the project's .gtu folder, and starts spare-gpu's own MCP
-server once, the way Desktop would, to see that it answers.
+Plain, it starts nothing of BharatCode's and changes nothing: it reads spare-gpu's own state,
+BharatCode's config folder, the project's .gtu folder, and starts spare-gpu's own MCP server once,
+the way Desktop would, to see that it answers.
 
-With `--live` (run from BharatCode Desktop's terminal: it talks to Desktop's own server) it also
-runs one tiny real request as a Desktop session in an empty folder to measure the per-step
+`/doctor live` (it talks to Desktop's own server, so it runs from a Desktop chat) also runs one
+tiny real request as a Desktop session in an empty folder to measure the per-step
 context (the pack's overhead budget), checks that a job's copy leaves build output out and that
 your own config file holds none of the pack's settings, and writes the outcome into the
 manual-check tables under research/ that these checks decide. The live part costs one short
@@ -29,7 +29,6 @@ from typing import Callable
 
 from . import __version__, bc_config, desktop, pack, router, runstate, settings, waits, worktree
 from .agent import DEFAULT_MODEL
-from .api import ApiKeyMissing, find_api_key
 from .budget import Budgets
 from .jobs import JobConfig
 from .pack import check
@@ -138,8 +137,9 @@ def pack_installed(folder: Path) -> bool:
 
 def check_pack(report: Report, folder: Path, how: str, command: list[str] | None) -> None:
     if not pack_installed(folder):
-        report.add(PASS, "the command pack isn't installed (optional): `gtu integrate --pack` adds /deep-research, "
-                         "/code-review, /security-review, /simplify and /verify-app")
+        report.add(WARN, "the command pack isn't installed, so only /auto is there: `gtu integrate --pack` adds /apply, "
+                         "/undo, /cost, /prompts, /doctor, /code-review, /security-review, /deep-research, /simplify, "
+                         "/verify-app and the memory commands")
         if command and bc_config.PACK_FLAG in command:
             report.add(WARN, "spare-gpu's MCP server starts with --pack although the pack's settings file is gone; "
                              "run `gtu integrate` (or `gtu integrate --pack` to put the pack back)")
@@ -200,7 +200,7 @@ def check_project(report: Report, cwd: Path) -> Path:
         kind = ("plain folder (a copy is made for each job; no git history needed)" if shutil.which("git")
                 else "folder; without git, whether it's a repo can't be told")
     report.add(PASS, f"project: {root} ({kind})")
-    # The same store the gtu commands and the MCP server open from here: GTU_DB, else <project>/.gtu/gtu.db.
+    # The same store the MCP server opens from here: GTU_DB, else <project>/.gtu/gtu.db.
     db = Store.default_path(Path(cwd)).resolve()
     folder = db.parent
     if not db.is_file():
@@ -222,18 +222,16 @@ def check_project(report: Report, cwd: Path) -> Path:
     if pid and alive:
         report.add(PASS, f"a job is running now (process {pid})")
     elif pid:
-        report.add(WARN, f"a run file is left from process {pid}, which is gone (a crash or a killed terminal); "
-                         "`gtu stop` tidies it and pauses any job left running")
-    if runstate.stop_requested(folder) and not (pid and alive):
-        report.add(WARN, "a stop request is pending with nothing running; the next job would stop at once. "
-                         f"Delete {folder / runstate.STOP_FILE} or run `gtu stop`")
+        report.add(WARN, f"a run file is left from process {pid}, which is gone (Desktop closed or crashed during a "
+                         "job); the next job handed over here tidies it and pauses any job left running")
     running = [j.id for j in jobs if j.status == "running"] if not (pid and alive) else []
     if running:
-        report.add(WARN, f"job(s) marked running with no runner: {', '.join(running)}; `gtu stop` pauses them so "
-                         "`gtu start` can resume")
+        report.add(WARN, f"job(s) marked running with nothing running them: {', '.join(running)}; the next job "
+                         "handed over here pauses them")
     paused = [j.id for j in jobs if j.status == "paused"]
     if paused:
-        report.add(PASS, f"paused job(s) {', '.join(paused)}: `gtu start` resumes them")
+        report.add(PASS, f"job(s) that stopped before finishing (token budget or a stop): {', '.join(paused)}; "
+                         "ask for the task again to run it afresh")
     copies = folder / "worktrees"
     orphans = [p.name for p in copies.iterdir() if p.is_dir() and (p.name not in ids or ids[p.name].status in FINAL_STATUSES)] \
         if copies.is_dir() else []
@@ -251,19 +249,11 @@ def check_settings(report: Report, root: Path) -> None:
         report.add(FAIL, f"job settings: {exc}")
     else:
         overridden = [key for key, (env, _) in settings.KEYS.items() if os.environ.get(env)]
-        where = (f"settings file {found.path}" if found.present else "defaults (no settings file; `gtu init` writes one)")
+        where = (f"settings file {found.path}" if found.present
+                 else f"defaults (no settings file; {settings.SETTINGS_NAME} in the project's .gtu folder changes them)")
         report.add(PASS, f"job settings from {where}: test command {' '.join(config.test_command)!r}, "
                          f"{budgets.per_job:,} tokens per job"
                          + (f"; overridden by the environment: {', '.join(overridden)}" if overridden else ""))
-    try:
-        found = find_api_key()
-    except ApiKeyMissing as exc:
-        found = None
-        report.add(WARN, f"API key: {exc} (only needed to run jobs from a terminal outside Desktop)")
-    if found:
-        report.add(PASS, f"API key: found in {found[1]} (only needed outside Desktop)")
-    elif not any(f.text.startswith("API key") for f in report.findings):
-        report.add(PASS, "no API key set, which is fine inside Desktop; `gtu setkey` adds one for runs from a terminal")
     policy = router.load_policy(root / ".gtu")
     safe = sorted(k for k, v in (policy.get("types") or {}).items() if v == "switch-safe")
     report.add(PASS, "job types that may move to the faster model: " + (", ".join(safe) or "none")
@@ -331,9 +321,9 @@ def check_own_file(report: Report, folder: Path) -> None:
     if leaked:
         report.add(WARN, f"live: your own config file {user_file.name} carries the pack's settings ({', '.join(leaked)}); "
                          "the pack keeps its own file, so these can go")
-        report.filled[("pack-install", 2)] = f"FAIL (gtu doctor {date.today()}): {user_file.name} holds the pack's {', '.join(leaked)}"
+        report.filled[("pack-install", 2)] = f"FAIL (/doctor {date.today()}): {user_file.name} holds the pack's {', '.join(leaked)}"
     else:
-        report.filled[("pack-install", 2)] = f"PASS (gtu doctor {date.today()}): {user_file.name} holds none of the pack's settings"
+        report.filled[("pack-install", 2)] = f"PASS (/doctor {date.today()}): {user_file.name} holds none of the pack's settings"
 
 
 def live_run(report: Report, folder: Path, agent: desktop.DesktopAgent, scratch: Path, research: Path | None,
@@ -387,13 +377,13 @@ def live_run(report: Report, folder: Path, agent: desktop.DesktopAgent, scratch:
         report.add(status, f"live: the pack adds {b - a:,} tokens per step on {waits.name(MODEL)} ({a:,} without, measured "
                            f"{latest[False]['date']}; {b:,} with, measured {latest[True]['date']}; budget {BUDGET:,}); "
                            "written to research/pack-install/overhead.json")
-        report.filled[("pack-install", 8)] = (f"{status} (gtu doctor --live {date.today()}): added {b - a:,} tokens per step "
+        report.filled[("pack-install", 8)] = (f"{status} (/doctor live {date.today()}): added {b - a:,} tokens per step "
                                               f"on {waits.name(MODEL)}, budget {BUDGET:,}")
     else:
         other = "uninstalled (`gtu integrate --pack --uninstall`)" if with_pack else "installed (`gtu integrate --pack`)"
-        report.add(WARN, f"live: measured {tokens:,} tokens {state} the pack; run `gtu doctor --live` once more with the "
+        report.add(WARN, f"live: measured {tokens:,} tokens {state} the pack; run /doctor live once more with the "
                          f"pack {other}, on the same BharatCode Desktop version, to measure the difference")
-        report.filled[("pack-install", 8)] = (f"PARTIAL (gtu doctor --live {date.today()}): {tokens:,} tokens per step "
+        report.filled[("pack-install", 8)] = (f"PARTIAL (/doctor live {date.today()}): {tokens:,} tokens per step "
                                               f"{state} the pack on {waits.name(MODEL)}; the other state is still to measure")
 
 
@@ -411,10 +401,10 @@ def live_copy(report: Report) -> None:
             return
     if copied == ["src/a.py"]:
         report.add(PASS, "a job's copy leaves dist/, build/ and node_modules/ out")
-        report.filled[("safety-fixes", 5)] = f"PASS (gtu doctor --live {date.today()}): only src/a.py was copied from a folder with dist/, build/ and node_modules/"
+        report.filled[("safety-fixes", 5)] = f"PASS (/doctor live {date.today()}): only src/a.py was copied from a folder with dist/, build/ and node_modules/"
     else:
         report.add(FAIL, f"a job's copy would include {', '.join(c for c in copied if c != 'src/a.py')}")
-        report.filled[("safety-fixes", 5)] = f"FAIL (gtu doctor --live {date.today()}): copied {', '.join(copied)}"
+        report.filled[("safety-fixes", 5)] = f"FAIL (/doctor live {date.today()}): copied {', '.join(copied)}"
 
 
 def live(report: Report, folder: Path, research: Path | None,
@@ -425,7 +415,7 @@ def live(report: Report, folder: Path, research: Path | None,
         agent = make_agent() if make_agent else desktop.DesktopAgent(desktop.discover(), timeout=300.0)
     except desktop.DesktopNotFound as exc:
         report.add(FAIL, f"live: the measurement runs as a BharatCode Desktop session, and Desktop wasn't found ({exc}); "
-                         "run `gtu doctor --live` from Desktop's terminal. The checks above still hold")
+                         "run /doctor live from a Desktop chat. The checks above still hold")
         return
     with tempfile.TemporaryDirectory(prefix="spare-gpu-doctor-") as scratch:
         try:

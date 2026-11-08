@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from gpu_token_utilization import worktree
-from gpu_token_utilization.fakeapi import Reply
 from gpu_token_utilization.jobs import JobConfig, numbered_listing
 from gpu_token_utilization.scheduler import Scheduler
 
@@ -33,15 +32,15 @@ def make_repo(root, files: dict[str, bytes], autocrlf="false"):
 
 
 @pytest.fixture
-def run_job(store, client, fake, scenario):
+def run_job(store, clock, scenario):
     def run(repo, kind, target, writes=None, review="## Likely bugs\nNothing found."):
-        desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}])
-        fake.queue(Reply(content=review))
+        # a review's answer is the session's closing text; the other kinds just end with "done"
+        desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}], text=review if kind == "review" else "done")
         job = store.add_job(kind, target, str(repo))
         logs = []
-        Scheduler(store, client, agent=desktop.agent(timeout=60),
+        Scheduler(store, agent=desktop.agent(timeout=60),
                   config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
-                  sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
+                  sleep=clock.sleep, now=clock.utcnow, log=logs.append).run_job(job.id)
         return store.get_job(job.id), store.steps(job.id), logs
 
     return run

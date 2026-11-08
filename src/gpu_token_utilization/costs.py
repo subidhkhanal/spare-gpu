@@ -1,4 +1,4 @@
-"""Token totals for spare-gpu's work (`gtu report`), from the request log.
+"""Token totals for spare-gpu's work, from the request log.
 
 Every request we send is logged, and so is every step a job's agent reports. Per-session detail
 (input, output, cached and reasoning tokens, and a breakdown by message type) is in BharatCode
@@ -83,7 +83,7 @@ def collect(store: Store, scope: str | None, now: datetime | None = None) -> tup
     return cost, label
 
 
-# --- `gtu cost`: a period's tokens from both sources ------------------------------------------------
+# --- /cost: a period's tokens from both sources ------------------------------------------------
 # BharatCode Desktop's own record of every reply has the tokens per model for every session on this
 # machine (spare-gpu's jobs are Desktop sessions too, so they are in there). spare-gpu's request log
 # has what each job cost and whether its check kept anything. Neither has the other's view.
@@ -170,7 +170,7 @@ NO_DATA = "BharatCode Desktop's session data wasn't found on this machine, so no
 
 def _no_replies(p: Period) -> str:
     return (f"BharatCode Desktop ({p.channel}) recorded no replies in this period; "
-            "`--channel` reads another Desktop build (stable, beta, dev or local).")
+            "`/cost beta` (or stable, dev, local) reads another Desktop build.")
 STATS_NOTE = "exact, from BharatCode Desktop's own record: every session on this machine"
 
 

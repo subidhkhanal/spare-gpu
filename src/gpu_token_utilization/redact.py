@@ -1,9 +1,8 @@
-"""Key-shaped strings: replaced before text leaves the machine, and refused in a commit.
+"""Key-shaped strings: replaced before text leaves the machine.
 
-A review job sends a listing of the user's code to the model, and the pre-commit hook (`gtu guard`)
-reads the changes about to be committed. Both use the patterns here. They match shapes, not
-known secrets: a match means "this looks like a credential", which is enough to keep it out of a
-prompt or a commit. A false positive costs one `git commit --no-verify`.
+A review job sends a listing of the user's code to the model; the patterns here are replaced in
+it first. They match shapes, not known secrets: a match means "this looks like a credential",
+which is enough to keep it out of a prompt.
 """
 
 from __future__ import annotations

@@ -2,14 +2,15 @@
 # Installed by spare-gpu (`gtu integrate --pack`); `gtu integrate --pack --uninstall` removes it. Edit freely:
 # once this line is gone, spare-gpu leaves the file alone.
 description: What today cost, tokens per model from Desktop's own record and what spare-gpu's jobs used and kept
+agent: spare-helper
 ---
-Period asked for, between the markers (empty means today):
+Command: /cost. The user's words after it, between the markers (empty means today):
 <<<$ARGUMENTS>>>
 
-Run `gtu cost --short` in this project with your shell tool; for a period other than today, add
-`--days N` (N days back, e.g. `--days 7` for a week). Run it here, in the project: it reads this
-project's jobs from its .gtu folder.
+Call the `cost_summary` tool once:
+- days: the period the words give, in days (`7`, "week" = 7, "month" = 30); 1 when they give none;
+- channel: a Desktop build the words name (stable, beta, dev or local), else leave it out;
+- short: false only if the words ask for the tables or the details.
 
-Relay those figures as they are, in plain words, in at most five lines. Don't estimate anything
-they don't show. If the command fails or `gtu` isn't found, say so and that `gtu cost` in a
-terminal in this project shows the same.
+Relay those figures as they are, in plain words, in at most five lines (the tables as they are
+when asked for). Don't estimate anything they don't show.

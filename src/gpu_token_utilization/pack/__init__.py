@@ -76,7 +76,10 @@ COMPONENTS: dict[str, Component] = {
     "verify": Component("verify", "/verify-app", ("verify-app",), ("verify-lead", "verify-driver"), SHARED_TOOLS),
     # No agents of its own: the commands run in the user's current agent, which has the chat's history.
     "memory": Component("memory", "/remember, /handoff and /pickup", ("remember", "handoff", "pickup")),
-    "cost": Component("cost", "/cost", ("cost",)),  # relays `gtu cost --short`; no agent, no tool
+    # spare-gpu's own chat commands: one small agent on the standard model calls the one tool each names.
+    "manage": Component("manage", "/apply, /undo, /cost, /prompts and /doctor",
+                        ("apply", "undo", "cost", "prompts", "doctor"), ("spare-helper",),
+                        ("apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check")),
 }
 
 

@@ -1,5 +1,4 @@
-"""Queueing and cancelling jobs: the code behind `gtu add` / `gtu cancel` and the matching MCP
-tools, so both front ends behave identically."""
+"""Queueing and cancelling jobs: what the MCP tools spare_delegate and spare_cancel_work do."""
 
 from __future__ import annotations
 
@@ -7,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import runstate, worktree
-from .jobs import COMMIT_TARGET, commit_sha, plan_file_problem
+from . import worktree
+from .jobs import plan_file_problem
 from .store import Job, Store, StoreError
 
 
@@ -23,10 +22,8 @@ class Outcome:
 
 
 def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target: str,
-              note: str | None = None, commit: str | None = None) -> Outcome:
+              note: str | None = None) -> Outcome:
     """Queue a job on `target` (relative to `base`, or absolute) in the project containing it (its git repo, if it's in one, else `base`).
-    With `commit` (HEAD, a branch, a short id; a target of commit:<id> means the same), a review of
-    that commit instead, stored with the target commit:<full id>; `target` is then ignored.
     The store is only opened (and so only created) once the request has passed every check;
     `open_store` gets the repo root."""
     try:
@@ -34,23 +31,18 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
         worktree.ensure_clean(repo)
     except worktree.GitError as exc:
         raise ActionError(str(exc)) from None
-    if commit is None:
-        commit = commit_sha(target)
-    if commit is not None:
-        stored = COMMIT_TARGET + _commit_to_review(repo, kind, commit)
-    else:
-        path = (Path(base) / target).resolve()
-        if not path.exists():
-            raise ActionError(f"{target} does not exist (looked in {base})")
-        try:
-            relative = path.relative_to(repo)
-        except ValueError:
-            raise ActionError(f"{target} is outside this repo ({repo})") from None
-        if kind == "implement":  # its target is the plan to carry out, not code to work on
-            problem = plan_file_problem(path, target)
-            if problem:
-                raise ActionError(problem)
-        stored = relative.as_posix() or "."
+    path = (Path(base) / target).resolve()
+    if not path.exists():
+        raise ActionError(f"{target} does not exist (looked in {base})")
+    try:
+        relative = path.relative_to(repo)
+    except ValueError:
+        raise ActionError(f"{target} is outside this repo ({repo})") from None
+    if kind == "implement":  # its target is the plan to carry out, not code to work on
+        problem = plan_file_problem(path, target)
+        if problem:
+            raise ActionError(problem)
+    stored = relative.as_posix() or "."
     try:
         with open_store(repo) as store:
             job = store.add_job(kind, stored, str(repo), note)
@@ -61,47 +53,6 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
     if size:
         notes.append(size)
     return Outcome(job, "\n".join(notes) or None)
-
-
-def _commit_to_review(repo: Path, kind: str, ref: str) -> str:
-    """The full id of the commit a review job will target, or why it can't."""
-    if kind != "review":
-        raise ActionError(f"only a review job can target a commit; a {kind} job needs a file or folder")
-    try:
-        sha = worktree.resolve_commit(repo, ref)
-    except worktree.GitError as exc:
-        raise ActionError(str(exc)) from None
-    if sha is None:
-        raise ActionError(f"no commit {ref!r} in {repo}. Give HEAD, a branch or a commit id, in a folder that is a git repo.")
-    return sha
-
-
-def stop_runner(store: Store, wait: float = 10.0) -> list[str]:
-    """Ask the running jobs to stop and wait up to `wait` seconds for it. Nothing is killed: the
-    runner notices between steps and every few seconds inside one, aborts the current Desktop
-    session and leaves the job paused, not failed. Returns what happened, line by line."""
-    folder = store.path.parent
-    lines = []
-    pid = runstate.running_pid(folder)
-    if pid is None:
-        runstate.clear(folder)
-        paused = runstate.tidy(store)  # e.g. after a crash: don't leave jobs marked running
-        return ["Nothing is running." + (f" Paused interrupted job(s): {', '.join(paused)}." if paused else "")]
-    runstate.request_stop(folder)
-    lines.append(f"Asked the running job (process {pid}) to stop...")
-    if runstate.wait_until_stopped(folder, wait):
-        lines.append("It stopped cleanly.")
-        runstate.clear(folder)
-        paused = runstate.tidy(store)
-    else:
-        lines.append(f"It hasn't stopped within {wait:g} s; it stops at its next check, within a few seconds of "
-                     "the current request finishing. The stop request stays in place.")
-        paused = []
-    held = [j.id for j in store.list_jobs(include_finished=False) if j.status == "paused"]
-    if paused or held:
-        lines.append(f"Paused job(s): {', '.join(sorted(set(paused + held)))}. "
-                     "Unfinished edits were discarded; finished steps are kept in each job's copy.")
-    return lines
 
 
 def cancel_job(store: Store, job_id: str) -> Outcome:

@@ -145,6 +145,10 @@ class RequestLog:
     usage_json: str | None = None
 
 
+IGNORE = "*\n!.gitignore\n!settings.json\n!memory.md\n"  # .gtu/.gitignore: only settings and memory are for git
+OLD_IGNORES = ("*", "*\n!.gitignore\n!settings.json")  # what earlier versions wrote, upgraded in place
+
+
 class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -152,10 +156,12 @@ class Store:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             # Keep spare-gpu's own folder out of whatever repo it is created in. Only that folder:
             # a GTU_DB pointing elsewhere must not git-ignore someone's whole directory.
+            # The project's settings and memory files are meant to be committed, so they stay out of it.
             marker = self.path.parent / ".gitignore"
-            if self.path.parent.name == ".gtu" and not marker.exists():
-                marker.write_text("*\n", encoding="utf-8")  # `gtu init` opens it up for settings.json
-        # Several processes share this file: `gtu start`, other gtu commands, and the MCP server.
+            if self.path.parent.name == ".gtu" and (
+                    not marker.exists() or marker.read_text(encoding="utf-8", errors="replace").strip() in OLD_IGNORES):
+                marker.write_text(IGNORE, encoding="utf-8")
+        # Several processes share this file: the MCP servers of every Desktop window open on the project.
         # Wait up to 30 s for another writer instead of failing at once, and use WAL so readers
         # never block the writer (or the other way round).
         self.conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S)

@@ -3,30 +3,31 @@
 import pytest
 
 from gpu_token_utilization import desktop, workers
-from gpu_token_utilization.api import ApiKeyMissing
 from gpu_token_utilization.jobs import JobConfig
 
-KEY = "bc_live_test_key_not_real"
 
-
-def test_inside_desktop_every_step_is_a_desktop_session_and_no_key_is_needed(store, monkeypatch):
+def test_inside_desktop_every_step_is_a_desktop_session(store, monkeypatch):
     monkeypatch.setattr(desktop, "discover", lambda: desktop.Connection("http://127.0.0.1:4321", "u", "p"))
     logs = []
     worker = workers.build(store, logs.append, JobConfig(agent_timeout=12.0))
-    assert worker.inside_desktop and worker.client is None and worker.desktop_missing is None
+    assert isinstance(worker, workers.Worker)
     assert isinstance(worker.agent, desktop.DesktopAgent) and worker.agent.timeout == 12.0
-    assert logs == ["Running jobs through BharatCode Desktop (http://127.0.0.1:4321); no API key needed."]
+    assert worker.agent.conn.url == "http://127.0.0.1:4321"
+    assert logs == ["Running jobs through BharatCode Desktop (http://127.0.0.1:4321)."]
     worker.close()
 
 
-def test_outside_desktop_without_a_key_says_how_to_set_one(store):
-    with pytest.raises(ApiKeyMissing):
+def test_outside_desktop_no_worker_is_built_and_the_reason_is_given(store):
+    logs = []
+    with pytest.raises(desktop.DesktopNotFound, match="wasn't started by BharatCode Desktop"):
+        workers.build(store, logs.append)  # no Desktop server password in this test's environment
+    assert logs == []
+
+
+def test_a_desktop_that_cannot_be_reached_is_not_found_either(store, monkeypatch):
+    def unreachable():
+        raise desktop.DesktopNotFound("couldn't reach BharatCode Desktop's server (tried http://127.0.0.1:1)")
+
+    monkeypatch.setattr(desktop, "discover", unreachable)
+    with pytest.raises(desktop.DesktopNotFound, match="couldn't reach"):
         workers.build(store, lambda line: None)
-
-
-def test_outside_desktop_with_a_key_reviews_run_on_the_api_and_the_rest_wait_for_desktop(store, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", KEY)
-    worker = workers.build(store, lambda line: None)
-    assert not worker.inside_desktop and worker.client is not None and worker.agent is None
-    assert worker.desktop_missing == desktop.DESKTOP_NEEDED
-    worker.close()

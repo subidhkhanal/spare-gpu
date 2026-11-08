@@ -1,6 +1,7 @@
-"""spare-gpu's MCP server: each of the five tools against fakes (BharatCode's API, live stats and
-history, and a worker whose steps finish at once), missing-store handling, the real protocol (in
-memory and over stdio, the way BharatCode Desktop runs it), and sharing the store between processes."""
+"""spare-gpu's MCP server: each of the five tools against fakes (BharatCode's live stats and
+history, and a worker whose steps finish at once), the pack's tools (/apply, /undo, /cost, /prompts,
+/doctor and the research and review helpers), missing-store handling, the real protocol (in memory and
+over stdio, the way BharatCode Desktop runs it), and sharing the store between processes."""
 
 import json
 import subprocess
@@ -12,17 +13,17 @@ import httpx
 import mcp
 import pytest
 
-from gpu_token_utilization import actions, runstate, waits, worktree
-from gpu_token_utilization.api import ApiKeyMissing
+from gpu_token_utilization import actions, desktop, runstate, waits, worktree
 from gpu_token_utilization.mcp_server import SpareTools, build_server, db_path
-from gpu_token_utilization.store import RequestLog, Store
+from gpu_token_utilization.store import IGNORE, RequestLog, Store
 
-from conftest import desktop_db, quick_plans, quick_tools
+from conftest import desktop_db, git, quick_plans, quick_tools
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
-PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "tally_findings", "pack_cost"}  # only for `gtu mcp --pack`
-REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # their jobs moved to `gtu` commands
-KEY = "bc_live_test_key_not_real"
+MANAGE_TOOLS = {"apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"}  # /apply ... /doctor
+PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "tally_findings",
+              "pack_cost"} | MANAGE_TOOLS  # only for `gtu mcp --pack`
+REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # tools that no longer exist
 
 
 @pytest.fixture(autouse=True)
@@ -37,10 +38,36 @@ def fresh_waits():
     waits._cache.clear()
 
 
+class LiveStats:
+    """BharatCode's live stats, faked: only Qwen's lane is listed (so DeepSeek has "no data"), and
+    there is no queue-waits endpoint. busy() fills Qwen's lane and queues work behind it."""
+
+    def __init__(self):
+        self.lane = {"active_requests": 1, "queued_requests": 0, "slot_capacity": 4, "available": True}
+
+    def busy(self):
+        self.lane = {"active_requests": 4, "queued_requests": 6, "slot_capacity": 4, "available": True}
+
+    def _handle(self, request):
+        from datetime import datetime, timezone
+
+        if request.url.path.endswith("/usage"):
+            return httpx.Response(200, json={"generated_at": datetime.now(timezone.utc).isoformat(),
+                                             "models": [{"id": "qwen-3.8-27b", "api": self.lane}]})
+        return httpx.Response(404)
+
+    def __call__(self) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(self._handle))
+
+
 @pytest.fixture
-def tools(git_repo, fake):
-    # wait figures from the fake: its live stats, and no queue-waits endpoint (so "no data")
-    return quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()))
+def live():
+    return LiveStats()
+
+
+@pytest.fixture
+def tools(git_repo, live):
+    return quick_tools(git_repo, live)
 
 
 def readable(text: str) -> bool:
@@ -48,7 +75,7 @@ def readable(text: str) -> bool:
 
 
 def queue(repo, kind, path, note=None):
-    """Queue a job the way `gtu add` does; the server itself only hands work over via spare_delegate."""
+    """Queue a job without running it; the server itself only hands work over via spare_delegate."""
     return actions.queue_job(lambda root: Store(db_path(root)), repo, kind, path, note).job
 
 
@@ -76,12 +103,12 @@ def test_delegate_runs_the_job_now_in_the_same_store_as_the_cli(tools, git_repo)
     assert runstate.running_pid(git_repo / ".gtu") is None  # the run file is cleared once it's done
 
 
-def test_delegate_reports_where_the_files_landed_and_narrates_progress(git_repo, fake):
+def test_delegate_reports_where_the_files_landed_and_narrates_progress(git_repo, live):
     def write(ctx):
         (ctx.workdir / "tests" / "test_new.py").parent.mkdir(exist_ok=True)
         (ctx.workdir / "tests" / "test_new.py").write_text("def test_ok():\n    assert True\n")
 
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(write))
+    tools = quick_tools(git_repo, live, plans=quick_plans(write))
     lines = []
     text = tools.delegate("tests", "src", progress=lines.append)
     assert text.startswith("Done: tests for src (job ") and "its edited files are in spare-gpu/" in text
@@ -92,38 +119,37 @@ def test_delegate_reports_where_the_files_landed_and_narrates_progress(git_repo,
     assert any("step 1 of 2 (write) started" in line for line in lines) and any("finished;" in line for line in lines)
 
 
-def test_delegate_without_desktop_or_a_key_leaves_the_job_queued_and_says_what_to_do(git_repo, fake):
+def test_delegate_without_desktop_cancels_the_job_and_says_why(git_repo, live):
     def no_worker(store, log, config):
-        raise ApiKeyMissing("no BharatCode API key found")
+        raise desktop.DesktopNotFound("BharatCode Desktop's server isn't running")
 
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), make_worker=no_worker)
+    tools = quick_tools(git_repo, live, make_worker=no_worker)
     text = tools.delegate("review", "src")
-    assert text.startswith("Queued, not started: review for src") and "gtu setup" in text
+    assert text.startswith("Not started: review for src") and "Desktop's server isn't running" in text
     with Store(db_path(git_repo)) as store:
-        assert store.list_jobs()[0].status == "queued"
+        assert store.list_jobs()[0].status == "cancelled"
 
 
-def test_delegate_while_another_run_is_going_leaves_the_job_for_that_run(tools, git_repo, monkeypatch):
-    monkeypatch.setattr(runstate, "running_pid", lambda folder: 99999)  # a `gtu start` in a terminal
+def test_delegate_while_another_window_runs_a_job_does_not_start(tools, git_repo, monkeypatch):
+    monkeypatch.setattr(runstate, "running_pid", lambda folder: 99999)  # another Desktop window's server
     text = tools.delegate("docs", "src")
-    assert text.startswith("Queued: docs for src") and "process 99999" in text
+    assert text.startswith("Not started: another BharatCode Desktop window") and "process 99999" in text
     with Store(db_path(git_repo)) as store:
-        assert store.list_jobs()[0].status == "queued"
+        assert store.list_jobs()[0].status == "cancelled"
 
 
-def test_a_cancelled_job_stops_and_says_so(git_repo, fake):
+def test_a_cancelled_job_stops_and_says_so(git_repo, live):
     def cancel_self(ctx):
         ctx.store.cancel_job(ctx.job.id)  # spare_cancel_work from another chat, mid-job
 
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(cancel_self))
+    tools = quick_tools(git_repo, live, plans=quick_plans(cancel_self))
     text = tools.delegate("docs", "src")
     assert text.startswith("Cancelled: docs for src") and "nothing was copied" in text
     assert not (git_repo / ".gtu" / "worktrees").exists() or not any((git_repo / ".gtu" / "worktrees").iterdir())
 
 
-def test_delegate_from_a_subfolder_resolves_the_repo_root(git_repo, fake):
-    http = lambda: httpx.Client(transport=fake.transport())
-    text = quick_tools(git_repo / "src", http).delegate("review", "src/calc.py")
+def test_delegate_from_a_subfolder_resolves_the_repo_root(git_repo, live):
+    text = quick_tools(git_repo / "src", live).delegate("review", "src/calc.py")
     assert "Done: review for src/calc.py" in text
     assert (git_repo / ".gtu" / "gtu.db").exists() and not (git_repo / "src" / ".gtu").exists()
 
@@ -140,24 +166,22 @@ def test_delegate_with_unsaved_changes(tools, git_repo):
     assert tools.delegate("review", "src").startswith("Done: review for src")
 
 
-def test_delegate_in_a_folder_that_is_not_a_git_repo(tmp_path, fake):
+def test_delegate_in_a_folder_that_is_not_a_git_repo(tmp_path, live):
     (tmp_path / "a.py").write_text("x = 1\n")
-    http = lambda: httpx.Client(transport=fake.transport())
-    text = quick_tools(tmp_path, http).delegate("review", ".")
+    text = quick_tools(tmp_path, live).delegate("review", ".")
     assert text.startswith("Done: review for ."), text
 
 
-def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, fake, monkeypatch):
+def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, live, monkeypatch):
     monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
     (tmp_path / "a.py").write_text("x = 1\n")
-    http = lambda: httpx.Client(transport=fake.transport())
-    text = quick_tools(tmp_path, http).delegate("review", ".")
+    text = quick_tools(tmp_path, live).delegate("review", ".")
     assert text.startswith("Done: review for .") and "isn't a git repo" in text
 
 
 # --- spare_work_status ------------------------------------------------------------------------
 
-def test_work_status_merges_queue_and_results(tools, git_repo, fake):
+def test_work_status_merges_queue_and_results(tools, git_repo):
     done = finished_review(git_repo)
     queue(git_repo, "docs", "src/calc.py")
     text = tools.work_status()
@@ -187,15 +211,15 @@ def test_cancel_work_jobs_and_unknown_ids(tools, git_repo):
 
 # --- spare_waits -------------------------------------------------------------------------------
 
-def test_waits_report_the_live_lane_and_say_when_they_cant_compare(tools, fake):
-    fake.usage_busy(1)
+def test_waits_report_the_live_lane_and_say_when_they_cant_compare(tools, live):
+    live.busy()
     text = tools.waits()
     assert readable(text) and "Qwen 3.8 27B: no free slot (4/4 busy, 6 queued)." in text
     assert "DeepSeek V4.1 Flash: no data right now." in text and "Not enough data to compare" in text
 
 
-def test_waits_need_no_store_and_create_none(git_repo, fake):
-    text = SpareTools(git_repo, http=lambda: httpx.Client(transport=fake.transport())).waits()
+def test_waits_need_no_store_and_create_none(git_repo, live):
+    text = SpareTools(git_repo, http=live).waits()
     assert readable(text) and not (git_repo / ".gtu").exists()
 
 
@@ -249,15 +273,23 @@ def test_the_packs_tools_exist_only_for_a_pack_server(tools, git_repo):
     assert "sources.json" in listed["verify_refs"].description and "DROP" in listed["verify_refs"].description
     assert listed["scholar_search"].input_schema["required"] == ["query"]
     assert "/security-review" in listed["security_filter"].description and listed["security_filter"].annotations.read_only_hint is True
+    assert not MANAGE_TOOLS & set(anyio.run(go, False)) and MANAGE_TOOLS <= set(listed)
+    for name, command in [("apply_result", "/apply"), ("undo_result", "/undo"), ("cost_summary", "/cost"),
+                          ("prompt_rules", "/prompts"), ("doctor_check", "/doctor")]:
+        assert listed[name].description.lstrip().startswith(command + ":"), name
+    assert listed["apply_result"].annotations.destructive_hint is True
+    assert listed["undo_result"].annotations.destructive_hint is True
+    assert listed["cost_summary"].annotations.read_only_hint is True
+    assert listed["prompt_rules"].annotations.read_only_hint is True
 
 
 def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_this_projects_tokens(
-        tools, git_repo, fake, monkeypatch, tmp_path):
+        tools, git_repo, live, monkeypatch, tmp_path):
     from datetime import datetime, timezone
 
     from gpu_token_utilization import stats
 
-    fake.usage_busy(1)
+    live.busy()
     plain = tools.waits()
     assert "Pack roles" not in plain  # a plain server says nothing about the pack
     text = tools.waits(roles=True)
@@ -265,7 +297,7 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_this_proje
     for role in ("research-checker", "review-verifier", "security-verifier"):
         assert f"- {role}: start `{role}` (" in text  # unmeasured roles stay on the heavy model
     assert (git_repo / ".gtu" / "pack-usage.json").is_file()
-    assert (git_repo / ".gtu" / ".gitignore").read_text(encoding="utf-8") == "*\n"  # never shows up as a change
+    assert (git_repo / ".gtu" / ".gitignore").read_text(encoding="utf-8") == IGNORE  # never shows up as a change
     assert "no token figures" in tools.pack_cost()  # no Desktop data on this machine: said, never estimated
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     qwen = {"input": 500, "output": 40, "reasoning": 0, "cache": {"read": 8000, "write": 0}, "total": 8540}
@@ -285,7 +317,7 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_this_proje
     assert "- review-verifier: start `" in routed and "- research-checker: start `research-checker` (" in routed
 
 
-def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_queued(git_repo, fake, monkeypatch):
+def test_a_role_marked_switch_safe_in_the_project_moves_when_the_heavy_model_is_queued(git_repo, monkeypatch):
     from test_routing_jobs import wait_figures  # DeepSeek queued about 2 minutes, Qwen idle
     from gpu_token_utilization import router
 
@@ -307,8 +339,8 @@ def test_pack_cost_without_a_start_time_or_desktop_data_says_so(tools, git_repo)
     assert "no token figures" in tools.pack_cost()  # conftest leaves no Desktop session data to read
 
 
-def test_security_filter_through_the_tool(git_repo, fake):
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()))
+def test_security_filter_through_the_tool(git_repo, live):
+    tools = quick_tools(git_repo, live)
     text = tools.security_filter(json.dumps([
         {"file": "app.py", "line": 1, "description": "SQL injection via the id parameter.", "confidence": 0.9},
         {"file": "app.py", "line": 2, "description": "Missing rate limiting on login.", "confidence": 0.9},
@@ -317,10 +349,10 @@ def test_security_filter_through_the_tool(git_repo, fake):
     assert tools.security_filter("nope").startswith("Couldn't read the candidates:")
 
 
-def test_scholar_search_and_verify_refs_through_the_tools(git_repo, fake):
+def test_scholar_search_and_verify_refs_through_the_tools(git_repo, live):
     from test_scholar import registries
 
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), scholar_http=registries)
+    tools = quick_tools(git_repo, live, scholar_http=registries)
     text = tools.scholar_search("attention is all you need")
     assert text.startswith("1. Attention Is All You Need (2017)") and "arxiv: 1706.03762" in text
     assert tools.scholar_search("attention", limit=2, sources="arxiv").count("found in: arxiv") == 2
@@ -362,7 +394,7 @@ def test_protocol_calls_return_plain_text(tools, git_repo):
 @pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode Desktop uses on Windows")
 def test_gtu_mcp_over_stdio_like_bharatcode_runs_it(git_repo):
     # A real `gtu mcp` subprocess: nothing but protocol may reach stdout, on Windows too.
-    # (A status call on a fresh repo needs no store, no key and no network.)
+    # (A status call on a fresh repo needs no store, no Desktop and no network.)
     params = mcp.StdioServerParameters(
         command=sys.executable,
         args=["-c", "from gpu_token_utilization.cli import app; app()", "mcp", "--dir", str(git_repo)],
@@ -456,7 +488,7 @@ def test_a_cancelled_job_stays_cancelled_when_the_runner_reports_late(store):
     assert store.set_status(job.id, "done").status == "cancelled"
 
 
-def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, fake, monkeypatch):
+def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, live, monkeypatch):
     """BharatCode Desktop resets its per-call timeout on every progress notification, so a job that
     takes minutes must keep them coming; here the heartbeat is made fast and the step slow."""
     from gpu_token_utilization import mcp_server
@@ -467,7 +499,7 @@ def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, fake, monkey
         import time
         time.sleep(0.3)
 
-    tools = quick_tools(git_repo, lambda: httpx.Client(transport=fake.transport()), plans=quick_plans(slow))
+    tools = quick_tools(git_repo, live, plans=quick_plans(slow))
     seen = []
 
     async def go():
@@ -480,3 +512,88 @@ def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, fake, monkey
     assert not result.is_error and result.content[0].text.startswith("Done: docs for src")
     assert len(seen) >= 2 and seen[-1][0] > seen[0][0]  # several heartbeats, counting up
     assert any("step 1 of 2 (write) started" in (message or "") for _, message in seen)  # carrying the latest line
+
+
+# --- what /apply, /undo, /cost, /prompts and /doctor call ---------------------------------------------
+
+def finished_result(repo):
+    """A finished docs job's result folder: it documented src/calc.py, its copy already removed."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from gpu_token_utilization import landing, ledger
+
+    copy = worktree.create(repo, "jobdocs1")
+    (copy / "src" / "calc.py").write_text(DOCUMENTED)
+    worktree.commit(copy, "job work")
+    folder = worktree.export(repo, "jobdocs1", None, datetime(2026, 11, 5, 14, 32, 7))
+    job = SimpleNamespace(id="jobdocs1", kind="docs", target="src", model="deepseek-v4.1-flash")
+    landing.write_records(folder, copy, job, base=None, ledger_doc=ledger.empty(), steps=[], tokens=100,
+                          exported_at=datetime(2026, 11, 5, 9, 2, 7, tzinfo=timezone.utc))
+    worktree.remove(repo, "jobdocs1")
+    return folder
+
+
+CALC = "def add(a, b):\n    return a + b\n"
+DOCUMENTED = 'def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n'
+
+
+def test_apply_result_copies_a_finished_jobs_files_in(tools, git_repo):
+    folder = finished_result(git_repo)
+    text = tools.apply_result()
+    assert readable(text) and "replaced: src/calc.py" in text
+    assert text.splitlines()[-1].startswith(f"Applied 1 file(s) from spare-gpu/{folder.name}")
+    assert text.endswith(f"/undo {folder.name}")
+    assert (git_repo / "src" / "calc.py").read_text() == DOCUMENTED and (folder / ".undo").is_dir()
+    assert tools.apply_result(folder.name).startswith("Didn't apply it:")  # already applied
+
+
+def test_undo_result_puts_the_project_back(tools, git_repo):
+    folder = finished_result(git_repo)
+    assert tools.undo_result().startswith("Didn't undo it:")  # nothing applied yet
+    tools.apply_result(folder.name)
+    text = tools.undo_result(folder.name)
+    assert readable(text) and "restored: src/calc.py" in text and text.endswith(f"/apply {folder.name}")
+    assert (git_repo / "src" / "calc.py").read_text() == CALC and not (folder / ".undo").exists()
+    assert git(git_repo, "status", "--porcelain") == ""
+
+
+def test_cost_summary_reports_desktops_figures_and_the_jobs(tools, git_repo, monkeypatch):
+    from gpu_token_utilization import stats
+
+    usage = {"bharatcode/qwen-3.8-27b": {"messages": 3, "input": 9_000, "output": 1_000, "reasoning": 0,
+                                         "cache_read": 0, "cache_write": 0, "tokens": 10_000}}
+    monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: usage)
+    monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: git_repo / "any.db")
+    finished_review(git_repo)
+    short = tools.cost_summary()
+    assert readable(short) and "\n" not in short and short.startswith("In the last 24 hours: By model (")
+    assert "Qwen 3.8 27B 10,000 tokens in 3 message(s)" in short and "1 job(s) ran (1 done)" in short
+    tables = tools.cost_summary(days=7, short=False)
+    assert tables.startswith("Cost for the last 7 days\n") and "Tokens per model" in tables
+
+
+def test_prompt_rules_proposes_rules_from_desktops_database(tools, monkeypatch, tmp_path):
+    from test_prompts import FakeDesktop as DesktopDb, _FixedDatetime
+    from gpu_token_utilization import prompts
+
+    (tmp_path / "Data").mkdir()
+    db = DesktopDb(tmp_path / "Data" / "bharatcode.db")
+    for session in ("s1", "s2", "s3"):
+        db.bash(session, "git status")
+    monkeypatch.setenv("GTU_BHARATCODE_DB", str(db.path))
+    monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(tmp_path / "Config"))
+    monkeypatch.setattr(prompts, "datetime", _FixedDatetime)
+    text = tools.prompt_rules()
+    assert readable(text) and '"git status *": "allow"' in text
+    assert str(tmp_path / "Config" / "opencode.jsonc") in text and not (tmp_path / "Config").exists()
+    db.close()
+
+
+def test_doctor_check_lists_the_findings_then_the_result(tools, git_repo):
+    lines = tools.doctor_check().splitlines()
+    assert len(lines) >= 3 and lines[-2].startswith("Result: ")
+    assert lines[-2].removeprefix("Result: ") in ("PASS", "WARN", "FAIL")
+    assert lines[-1].startswith("/doctor live")
+    assert lines[0].split(":", 1)[0] in ("PASS", "WARN", "FAIL"), lines
+    assert "unknown Desktop build 'nightly'" in tools.doctor_check(channel="nightly")

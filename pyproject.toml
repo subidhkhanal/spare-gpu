@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "spare-gpu"
 dynamic = ["version"]
-description = "/auto and a command pack for BharatCode Desktop: each task runs on whichever model starts it sooner, DeepSeek or Qwen. Questions answered in the chat; tests, docs, reviews and fixes run as Desktop sessions you can watch, in a private copy, into spare-gpu/<date>_<time>/."
+description = "Chat commands for BharatCode Desktop: coding jobs on a private copy, /apply and /undo, code and security review (also of GitHub pull requests), deep research, simplify, app checks, memory across chats, exact costs, fewer permission prompts and a health check, split between DeepSeek and Qwen."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["bharatcode", "llm", "code-review", "testing", "documentation", "scheduler", "cli"]
+keywords = ["bharatcode", "llm", "code-review", "testing", "documentation", "bharatcode-desktop", "mcp"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

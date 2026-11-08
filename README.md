@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="spare-gpu: less waiting in BharatCode Desktop" width="100%">
+<img src="docs/assets/hero.svg" alt="spare-gpu: chat commands that make BharatCode Desktop do more" width="100%">
 
 <br>
 
@@ -8,7 +8,7 @@
 <a href="https://github.com/subidhkhanal/spare-gpu/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/subidhkhanal/spare-gpu/test.yml?branch=master&amp;label=tests&amp;color=e1ba00&amp;labelColor=1c1410" alt="Tests"></a> <img src="https://img.shields.io/badge/platform-Windows-038fac?labelColor=1c1410" alt="Windows only"> <img src="https://img.shields.io/badge/python-3.11%2B-038fac?labelColor=1c1410" alt="Python 3.11+"> <img src="https://img.shields.io/badge/works%20in-BharatCode%20Desktop-ff6a35?labelColor=1c1410" alt="Works in BharatCode Desktop"> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5e5652?labelColor=1c1410" alt="MIT licensed"></a>
 </p>
 
-**[Install](#install)** · **[Overview](#overview)** · **[How it works](#how-it-works)** · **[Commands](#command-reference)** · **[FAQ](#faq)**
+**[Install](#install)** · **[Features](#features)** · **[Commands](#command-reference)** · **[Safety](#safety)** · **[FAQ](#faq)**
 
 </div>
 
@@ -16,14 +16,17 @@
 
 ## What this is
 
-A toolkit that plugs into **BharatCode Desktop** and makes it do more, faster:
+A set of **chat commands for BharatCode Desktop**. You install it once, then do everything by typing a `/command` in any Desktop chat:
 
-- **Less waiting.** When one model has a queue and the other is free, your work goes to the free one.
-- **Coding jobs you can trust.** Tests, docs, reviews and fixes run on a private copy of your project, and are kept only if they pass their checks.
-- **Bigger commands.** Code review, security review, deep research and more, split between the two models so each does what it's best at.
-- **Memory and cost.** Notes every chat knows, hand-offs between chats, and exact token figures.
+- **Get work done:** coding jobs (tests, docs, fixes, "make the tests pass", "carry out this plan") on a private copy of your project, kept only if they pass their checks.
+- **Check your code:** code review (also of GitHub pull requests), security review, safe simplifications, and app checks in a real browser.
+- **Research:** reports with sources that are checked to be real.
+- **Keep track:** project memory every chat knows, hand-offs between chats, exact token costs, fewer permission prompts, and a health check of the install.
+- **Wait less:** questions and some jobs go to whichever model starts sooner.
 
-Windows only. It works inside BharatCode Desktop with no API key and no extra account. Everything below is what the current build actually does.
+The work is split between Desktop's two models: **DeepSeek** plans and checks, and **Qwen** does the many quick steps, several at once.
+
+Windows only. It works inside BharatCode Desktop with no API key and no extra account. Everything below is what the current build does.
 
 > [!NOTE]
 > spare-gpu is an independent project for the BharatCode Build League. It is not affiliated with BharatCode.
@@ -31,23 +34,25 @@ Windows only. It works inside BharatCode Desktop with no API key and no extra ac
 ## Contents
 
 1. [Install](#install)
-2. [Overview](#overview)
-3. [Faster answers: `/auto`](#faster-answers-auto)
-4. [Coding jobs](#coding-jobs)
-5. [Results: apply and undo](#results-apply-and-undo)
-6. [Command pack](#command-pack)
-7. [Memory across chats](#memory-across-chats)
-8. [Cost](#cost)
-9. [Fewer permission prompts](#fewer-permission-prompts)
-10. [Git hooks](#git-hooks)
-11. [Settings](#settings)
-12. [Checking your install](#checking-your-install)
-13. [Safety](#safety)
-14. [Command reference](#command-reference)
-15. [Good to know](#good-to-know)
-16. [FAQ](#faq)
-17. [Where to look next](#where-to-look-next)
-18. [Remove](#remove)
+2. [Features](#features)
+3. [Coding jobs](#1-coding-jobs)
+4. [Apply and undo](#2-apply-and-undo-apply-undo)
+5. [Code review](#3-code-review-code-review)
+6. [Security review](#4-security-review-security-review)
+7. [Deep research](#5-deep-research-deep-research)
+8. [Simplify](#6-simplify-simplify)
+9. [App check](#7-app-check-verify-app)
+10. [Memory across chats](#8-memory-across-chats-remember-handoff-pickup)
+11. [Cost](#9-cost-cost)
+12. [Fewer permission prompts](#10-fewer-permission-prompts-prompts)
+13. [Health check](#11-health-check-doctor)
+14. [Faster answers](#12-faster-answers-auto)
+15. [Settings](#settings)
+16. [Safety](#safety)
+17. [Command reference](#command-reference)
+18. [FAQ](#faq)
+19. [Where to look next](#where-to-look-next)
+20. [Remove](#remove)
 
 ---
 
@@ -60,10 +65,9 @@ You need Windows and BharatCode Desktop, installed and signed in.
    irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
    ```
 2. Fully close BharatCode Desktop (also from the taskbar tray) and open it again.
-3. In each project you use it in, run `gtu init` once (see [Settings](#settings)).
-4. Optional: `gtu integrate --pack` adds the [command pack](#command-pack). Restart Desktop again after it.
+3. In any chat, type `/doctor` to check that everything is connected.
 
-The installer adds Python and git if they're missing, installs spare-gpu in `%LOCALAPPDATA%\spare-gpu`, and connects it to Desktop. Run the same line again to update.
+That's all. The installer adds Python and git if they're missing, installs spare-gpu in `%LOCALAPPDATA%\spare-gpu`, and runs `gtu integrate --pack`, the one terminal command spare-gpu has: it adds every chat command below to Desktop. Run the same line again to update.
 
 <details>
 <summary>Installer options and manual install</summary>
@@ -71,54 +75,229 @@ The installer adds Python and git if they're missing, installs spare-gpu in `%LO
 - Pin a version: `$env:SPARE_GPU_VERSION = '0.1.0'` before the install line.
 - Install from another copy of the repository: `$env:SPARE_GPU_REPO = 'owner/name'`.
 - Until the first release is published, it installs the latest code from `master` and says so.
-- By hand, with Python 3.11+ and git: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate`.
+- By hand, with Python 3.11+ and git: `pipx install git+https://github.com/subidhkhanal/spare-gpu`, then `gtu integrate --pack`.
+- `gtu integrate --pack --only review,memory` installs only some commands (the parts: `split`, `research`, `review`, `security`, `simplify`, `verify`, `memory`, `manage`). `--lite` is for a Qwen-only plan.
 
 </details>
 
 ---
 
-## Overview
+## Features
 
-| Feature | How you use it | What it does |
-|---|---|---|
-| [Faster answers](#faster-answers-auto) | `/auto <request>` | Runs it on whichever model starts sooner |
-| [Coding jobs](#coding-jobs) | `/auto write tests for src`, `gtu add` | Tests, docs, reviews, fixes, "make the tests pass", "implement a plan", each on a private copy |
-| [Apply and undo](#results-apply-and-undo) | `gtu apply`, `gtu undo` | Copies a job's result into your project, and takes it back |
-| [Command pack](#command-pack) | `/code-review`, `/security-review`, `/deep-research`, `/simplify`, `/verify-app` | Bigger tasks split between DeepSeek (plans, checks) and many Qwen helpers |
-| [Memory](#memory-across-chats) | `/remember`, `/handoff`, `/pickup` | Notes every chat knows, and passing work to a new chat |
-| [Cost](#cost) | `gtu cost`, `/cost` | Exact tokens per model, and what each job used |
-| [Fewer prompts](#fewer-permission-prompts) | `gtu prompts` | Suggests allow rules for commands you keep approving |
-| [Git hooks](#git-hooks) | `gtu hooks install` | Blocks commits with keys, reviews each commit |
-| [Settings](#settings) | `gtu init` | Saves how your tests run and other project settings |
-| [Checks](#checking-your-install) | `gtu doctor` | Finds problems in your install and says how to fix each |
+Twelve features, each a chat command. They are listed in the order a project usually meets them; none depends on another.
 
-### How it works
+| # | Feature | Type in a chat | What you get |
+|---|---|---|---|
+| 1 | [Coding jobs](#1-coding-jobs) | `/auto write tests for src` | Tests, docs, reviews, fixes, "make the tests pass", "implement a plan", on a private copy |
+| 2 | [Apply and undo](#2-apply-and-undo-apply-undo) | `/apply`, `/undo` | A job's files copied into your project, and taken back |
+| 3 | [Code review](#3-code-review-code-review) | `/code-review`, `/code-review 42` | Bugs with evidence in your changes, a commit, a branch or a pull request |
+| 4 | [Security review](#4-security-review-security-review) | `/security-review` | High-confidence security findings, false alarms dropped |
+| 5 | [Deep research](#5-deep-research-deep-research) | `/deep-research <question>` | A report whose every source is checked to exist |
+| 6 | [Simplify](#6-simplify-simplify) | `/simplify src` | Cleanups that keep behaviour, kept only if your tests pass |
+| 7 | [App check](#7-app-check-verify-app) | `/verify-app <url> <what>` | Your running app checked in a real browser |
+| 8 | [Memory](#8-memory-across-chats-remember-handoff-pickup) | `/remember`, `/handoff`, `/pickup` | Notes every chat knows; work passed to a new chat |
+| 9 | [Cost](#9-cost-cost) | `/cost` | Exact tokens per model, and what each job used |
+| 10 | [Fewer prompts](#10-fewer-permission-prompts-prompts) | `/prompts` | Allow rules for commands you keep approving |
+| 11 | [Health check](#11-health-check-doctor) | `/doctor` | Every problem in the install, with its fix |
+| 12 | [Faster answers](#12-faster-answers-auto) | `/auto <question>` | The answer from whichever model starts sooner |
 
-<img src="docs/assets/how-it-works.svg" alt="You ask in a Desktop chat; spare-gpu picks the model that starts sooner; the job runs as a Desktop session on a private copy; the result is checked; kept files land in spare-gpu/ for gtu apply" width="100%">
-
-1. **You ask** in any Desktop chat, with `/auto` or in plain words.
-2. **spare-gpu checks BharatCode's live queues** and picks the model that starts sooner, if it's good enough for the task.
-3. **The job runs as its own Desktop session** on a private copy of your project. You can open it and watch.
-4. **The result is checked:** tests must pass, docs may not change code. Anything that fails the check is dropped.
-5. **Kept files wait in `spare-gpu/<date>/`**, with a `RUN.md` and a `manifest.json`.
-6. **You decide:** copy what you want, or `gtu apply` (and `gtu undo` to take it back).
+The bigger commands (3 to 7) split the work: DeepSeek plans and judges, several Qwen helpers read or search at the same time, and each ends with a **cost summary** of which model did what and the exact tokens used. Add `--plan` to any of them (for example `/code-review --plan`) to see the plan, how many helpers it would start and on which model, without starting anything.
 
 ---
 
-## Faster answers: `/auto`
+## 1. Coding jobs
 
-BharatCode Desktop gives you two models: **DeepSeek** (stronger) and **Qwen** (faster to get). At busy times one of them has a queue of several minutes while the other is free. spare-gpu checks BharatCode's live queues and, when the other model would start sooner and is good enough for the task, sends your work there.
+A job is a piece of coding work that runs on its own as a Desktop chat named **"spare-gpu: …"**, which you can open and watch. Every job works on a **private copy** of your project, so your own files are never touched, and its result is checked before it is kept.
 
-Type `/auto` and what you want:
+| Job | Ask for it | What it does | Kept only if |
+|---|---|---|---|
+| `tests` | `/auto write tests for src` | Writes new test files | the new tests pass |
+| `docs` | `/auto write docs for src` | Adds docstrings and README text | no code changed |
+| `review` | `/auto review src` | Writes a code review | (nothing to check) |
+| `fix` | `/code-review --fix` | Applies review findings | your tests still pass |
+| `green` | `/auto make the tests pass` | Changes the code until the tests pass, up to 3 tries | the tests pass, existing tests untouched |
+| `implement` | `/auto implement docs/plan.md` | Carries out a Markdown plan | your tests still pass |
 
-| You type | What happens |
+Plain words work too: "fix the failing tests" runs a `green` job, "implement docs/plan.md" an `implement` job, "is my tests job done?" shows what's running and finished, and "cancel the docs job" stops one within a few seconds.
+
+<img src="docs/assets/coding-jobs.svg" alt="How a job runs: you ask in a Desktop chat; spare-gpu picks the model; the job runs as a Desktop session on a private copy; the result is checked; kept files land in spare-gpu/ for /apply" width="100%">
+
+- The job runs right away; the chat reply says **Done**, **Failed** or **Cancelled**, and where the files are.
+- spare-gpu finds how your tests run from `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` (see [Settings](#settings) to change it).
+- Each job has a token budget (200,000 by default); a job that reaches it stops instead of failing, and nothing of it is kept.
+
+---
+
+## 2. Apply and undo: `/apply`, `/undo`
+
+When a job finishes, the files it changed are copied to a dated folder in your project. Nothing else changes until you say so.
+
+```
+your-project/
+└── spare-gpu/
+    └── 2026-11-05_12-38-50/      ← when the job finished
+        ├── RUN.md                ← what the job did, step by step
+        ├── manifest.json         ← every file it changed, with checksums
+        └── src/
+            └── mathx.py          ← the changed files
+```
+
+| Type | What happens |
 |---|---|
-| `/auto what does a race condition mean?` | Answers in the chat, on the faster model |
-| `/auto write tests for src/payments.py` | Writes tests and keeps only the ones that pass |
-| `/auto write docs for src/utils.py` | Adds docstrings and README text without changing code |
-| `/auto review src/router.py` | Writes a code review |
-| `/auto make the tests pass` | Changes the code until your tests pass, in up to 3 tries. It never changes the tests. |
-| `/auto implement docs/plan.md` | Carries out the plan in that Markdown file, kept only if your tests still pass |
+| `/apply` | Copies the newest result into your project |
+| `/apply 2026-11-05_12-38-50` | Copies that older result instead |
+| `/apply --dry-run` | Says what would happen, writes nothing |
+| `/undo` | Takes the last apply back, exactly |
+
+- `/apply` only replaces a file you haven't changed since the job started. Otherwise it skips it and tells you (`/apply --force` replaces it anyway).
+- Your old version is saved first, so `/undo` restores everything exactly.
+- The `spare-gpu/` folder is ignored by git, so it never shows up as a change. You can also copy files from it by hand.
+
+---
+
+## 3. Code review: `/code-review`
+
+Several Qwen helpers each look for one kind of bug, at the same time; DeepSeek checks every finding against the code and keeps only those with real evidence.
+
+| Type | What it reviews |
+|---|---|
+| `/code-review` | Your uncommitted changes |
+| `/code-review HEAD~1` or `/code-review my-branch` | A commit, or a branch against the default branch |
+| `/code-review 42` | GitHub pull request 42 |
+| `/code-review high 42` | The same, more thoroughly (`low`, `medium`, `high` or `deep`; default `medium`) |
+
+- **`--fix`** hands the kept findings to a `fix` job: applied on a private copy and kept only if your tests still pass, then `/apply` brings them in.
+- **Pull requests** go through the GitHub CLI (`gh`, signed in with `gh auth login`). Your files and branch stay as they are: nothing is checked out. The review judges the code against what the PR says it does. It never comments unless you add `--post`; then it posts the findings as one PR comment and never approves or blocks.
+- **Fewer false findings:** before DeepSeek reads them, entries that try to give instructions instead of describing code are dropped, and duplicates are merged, noting how many helpers agreed.
+
+---
+
+## 4. Security review: `/security-review`
+
+A read-only security review. Five Qwen helpers each look for one kind of problem: injection, login and access, secrets, code execution, data leaks. Known false alarms are dropped by fixed rules, then DeepSeek verifies what's left.
+
+| Type | What it reviews |
+|---|---|
+| `/security-review` | Your uncommitted changes |
+| `/security-review my-branch` | A commit or a branch |
+| `/security-review deep` | The same, with a second verifier trying to refute each finding |
+
+- Only high-confidence findings are reported, each with the code path and a fix.
+- It never changes a file.
+
+---
+
+## 5. Deep research: `/deep-research`
+
+Writes a report with sources into `research/<topic>/`. Qwen scouts search research papers (OpenAlex, Crossref, arXiv) and the web at the same time; writers draft the sections; DeepSeek checks every source and removes fake or wrong ones.
+
+| Type | What you get |
+|---|---|
+| `/deep-research how do vector databases index embeddings?` | A standard report |
+| `/deep-research <question> --depth quick` | A short one, fewer sources |
+| `/deep-research <question> --depth deep` | A longer one, more sources |
+
+- Every reference is checked against the registries: its id must resolve and its title, authors and year must match.
+- Web search goes through Exa, with no key needed; your searches go to Exa.
+
+---
+
+## 6. Simplify: `/simplify`
+
+Finds cleanups that don't change behaviour (a helper that already exists used instead of a copy, a branch that can't be taken, work done twice), and applies the safe ones as a `fix` job, kept only if your tests still pass.
+
+| Type | What it looks at |
+|---|---|
+| `/simplify` | Your uncommitted changes |
+| `/simplify src/payments` | A file or folder |
+
+- Qwen helpers propose; DeepSeek accepts only changes with no risk to behaviour, and shows you the list first.
+- The result lands in `spare-gpu/` like any job: `/apply` it or leave it.
+
+---
+
+## 7. App check: `/verify-app`
+
+Checks a running app in a real browser: Qwen drivers click through each check you describe at the same time, and DeepSeek judges each one pass, fail or unclear, quoting what the page showed.
+
+| Type | What it does |
+|---|---|
+| `/verify-app http://localhost:3000 the login form accepts a valid user` | Checks that one flow |
+
+- Needs the Playwright add-on from Desktop's marketplace.
+- It only looks and clicks; it never changes your code.
+
+---
+
+## 8. Memory across chats: `/remember`, `/handoff`, `/pickup`
+
+Desktop forgets a chat when it ends. These keep what matters.
+
+| Type | What it does |
+|---|---|
+| `/remember <note>` | Adds a note to `.gtu/memory.md`. Every chat in this project reads it automatically. `/remember` alone shows it. |
+| `/handoff` | Saves where this chat stopped (goal, what's done, next steps, files involved) to `.gtu/handoff.md`. |
+| `/pickup` | In a new chat: reads the hand-off and the memory, says what changed since, and waits for you. |
+
+- Keep the memory short: every chat reads it on every step, so it costs tokens. `/doctor` shows how much, and `/remember` warns past 60 lines or 4,000 characters.
+- Commit `memory.md` to share it with your team; `handoff.md` stays private.
+
+---
+
+## 9. Cost: `/cost`
+
+Shows the **exact tokens per model** from Desktop's own record of every reply on this machine, then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three.
+
+| Type | What it shows |
+|---|---|
+| `/cost` | The last 24 hours |
+| `/cost 7 days` | The last week |
+| `/cost with tables` | The full tables instead of one paragraph |
+| `/cost beta` | Another Desktop build's record (`stable`, `beta`, `dev` or `local`) |
+
+- It reads the record of the Desktop you're typing in, unless you name another build.
+- Each of the bigger commands also reports its own run's tokens at the end.
+
+---
+
+## 10. Fewer permission prompts: `/prompts`
+
+Desktop asks before running a shell command, and "always allow" only remembers that exact text, so `git status` and `git status --short` each ask again.
+
+| Type | What it does |
+|---|---|
+| `/prompts` | Finds the read-only commands you approved in at least 3 chats in the last 30 days, and gives the allow rules to paste |
+| `/prompts 90` | Looks at the last 90 days |
+| `/prompts --min 2` | Needs only 2 chats |
+
+- It reads a private copy of Desktop's own history, and names the config file the snippet goes in.
+- It never edits your files and never suggests anything that writes, deletes, installs or pushes.
+
+---
+
+## 11. Health check: `/doctor`
+
+Checks everything (spare-gpu, git, Desktop's settings, the connection to spare-gpu, the command pack, project memory, this project's jobs and settings) and tells you how to fix each problem. It changes nothing.
+
+| Type | What it does |
+|---|---|
+| `/doctor` | The full check, in a few seconds |
+| `/doctor live` | Also sends one tiny request, to measure what the pack adds to each step |
+| `/doctor beta` | Checks another Desktop build's settings |
+
+- Every finding is PASS, WARN or FAIL, and each problem comes with its fix.
+- The pack is built to add nothing to your normal chats; `/doctor live` measures it.
+
+---
+
+## 12. Faster answers: `/auto`
+
+At busy times one of Desktop's two models has a queue of several minutes while the other is free. `/auto` checks BharatCode's live queues and, when the other model would start sooner and is good enough for the task, sends your work there. `/auto` is also how you ask for [coding jobs](#1-coding-jobs).
+
+| Type | What happens |
+|---|---|
+| `/auto what does a race condition mean?` | Answers in the chat, on the model that starts sooner |
+| `/auto write docs for src/utils.py` | Runs a docs job, on the model that starts sooner |
 | `/auto` | Shows how long each model would wait right now |
 
 Example from 5 Nov, when DeepSeek had a 3-minute queue:
@@ -128,18 +307,6 @@ Example from 5 Nov, when DeepSeek had a 3-minute queue:
 → Apple M5 (M5 Pro / M5 Max for pro Macs)
   (Answered by Qwen 3.8 27B: saves about 2m 43s of waiting over DeepSeek V4.1 Flash, and its lane has a free slot.)
 ```
-
-You can also ask in plain words, without `/auto`:
-
-| You say | What happens |
-|---|---|
-| "write tests for src/pay.py on whichever model is free" | Runs it on the model that starts sooner |
-| "fix the failing tests" | Runs a `green` job: changes the code until the tests pass |
-| "implement docs/plan.md" | Runs an `implement` job on that plan file |
-| "how long is DeepSeek's queue?" | Shows each model's current wait |
-| "is my tests job done?" | Shows queued, running and finished jobs |
-| "what did spare-gpu do today?" | Lists finished jobs, their files and tokens |
-| "cancel the docs job" | Cancels it within a few seconds |
 
 ### How it picks the model
 
@@ -153,221 +320,69 @@ It starts from DeepSeek and switches only when that saves at least 20 seconds an
 
 Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek. Questions aren't measured: a quick answer is the point, and the reply always names the model that answered. If your plan has only Qwen, everything runs on Qwen. The measurement is a small evaluation, 3 tasks per job type: see [research/eval/](research/eval/).
 
----
-
-## Coding jobs
-
-A job is a piece of coding work that runs on its own as a Desktop chat named **"spare-gpu: …"**. You can open it and watch. Every job works on a **private copy** of your project, so your own files are never touched.
-
-| Job | Ask for it | What it does | Kept only if |
-|---|---|---|---|
-| `tests` | `/auto write tests for src` | Writes new test files | the new tests pass |
-| `docs` | `/auto write docs for src` | Adds docstrings and README text | no code changed |
-| `review` | `/auto review src` | Writes a code review | (nothing to check) |
-| `fix` | `/code-review --fix` | Applies review findings | your tests still pass |
-| `green` | `/auto make the tests pass` | Changes the code until the tests pass, up to 3 tries | the tests pass, existing tests untouched |
-| `implement` | `/auto implement docs/plan.md` | Carries out a Markdown plan | your tests still pass |
-
-How a job runs:
-- **From a chat** (`/auto …` or plain words), it runs right away and the chat reply says **Done**, **Failed** or **Cancelled**, and where the files are.
-- **From a terminal:** `gtu add tests src` queues it, and `gtu start` runs the queue in front of you. Run these in **Desktop's terminal**: jobs that write code need Desktop.
-- `gtu stop` pauses a running job; it never kills anything. `gtu start` resumes it.
-- `gtu cancel <id>` (or "cancel the docs job" in a chat) cancels one.
-- Each job has a token budget (200,000 by default); a job that reaches it pauses instead of failing.
-
----
-
-## Results: apply and undo
-
-When a job finishes, the files it changed are copied to a dated folder in your project. Nothing else changes:
-
-```
-your-project/
-└── spare-gpu/
-    └── 2026-11-05_12-38-50/      ← when the job finished
-        ├── RUN.md                ← what the job did, step by step
-        ├── manifest.json         ← every file it changed, with checksums
-        └── src/
-            └── mathx.py          ← the changed files
-```
-
-The folder is ignored by git, so it never shows up as a change. Copy over what you want by hand, or:
-
-```powershell
-gtu apply          # copy the newest result into your project
-gtu undo           # take it back
-```
-
-- `gtu apply` only replaces a file you haven't changed since the job started. Otherwise it skips it and tells you (`--force` replaces it anyway).
-- Your old version is saved first, so `gtu undo` restores everything exactly.
-- `--dry-run` shows what would happen without writing anything. To pick an older result, name its folder: `gtu apply 2026-11-05_12-38-50`.
-
----
-
-## Command pack
-
-```powershell
-gtu integrate --pack
-```
-
-Adds bigger commands to Desktop. In each one, DeepSeek plans and checks, and several Qwen helpers do the many small steps at the same time. They are **experimental** until their benchmark in `research/<command>/` has been run.
-
-| Command | What it does |
-|---|---|
-| `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post]` | Reviews your uncommitted changes (or a commit, a branch or a GitHub pull request such as `/code-review 42`). Several helpers each look for one kind of bug; DeepSeek keeps only the findings with real evidence. With `--fix`, the fixes run as a `fix` job. |
-| `/security-review [commit or branch] [deep]` | A read-only security review. Five helpers each look for one kind of problem (injection, login and access, secrets, code execution, data leaks). Known false alarms are dropped by fixed rules; only high-confidence findings are reported. |
-| `/deep-research <question> [--depth quick\|standard\|deep]` | Writes a report with sources into `research/<topic>/`. Helpers search research papers (OpenAlex, Crossref, arXiv) and the web (through Exa, no key needed; your searches go to Exa). Every source is checked, and fake or wrong ones are removed. |
-| `/simplify [file or folder]` | Suggests safe cleanups that don't change behaviour, kept only if your tests still pass. |
-| `/verify-app <url> <what to check>` | Checks a running app in a real browser. Needs the Playwright add-on from Desktop's marketplace. |
-
-Every command ends with a **cost summary**: which model did what, and the exact tokens used in this project.
-
-- **Preview first:** add `--plan` (for example `/code-review --plan`). It shows its plan, how many helpers it would start and on which model, then stops.
-- **Pull requests:** `/code-review 42` reviews pull request 42 through the GitHub CLI (`gh`, signed in with `gh auth login`). Your files and branch stay as they are: nothing is checked out. The review judges the code against what the PR says it does. It never comments unless you add `--post`; then it posts the findings as one PR comment and never approves or blocks.
-- **No runaway helpers:** every helper has a step limit (30 for a helper, 60 for a lead).
-- **Fewer false findings:** in `/code-review` and `/security-review`, findings are checked before DeepSeek reads them. Entries that try to give instructions instead of describing code are dropped, and duplicates are merged, noting how many helpers agreed.
-- **Free when unused:** the pack's helpers and tools are hidden from your normal chats, so a normal chat pays nothing for them (budget: at most 1,500 extra tokens per step).
-- Some helper roles also ship as a standard-model variant on Qwen. They are only used once a benchmark shows Qwen is good enough for them; until then they stay on DeepSeek.
-- `--only research,review` installs only some commands. `--lite` is for a Qwen-only plan. `gtu integrate --pack --uninstall` removes exactly what the pack added.
-
----
-
-## Memory across chats
-
-Desktop forgets a chat when it ends. These commands (part of the pack) keep what matters:
-
-| Command | What it does |
-|---|---|
-| `/remember <note>` | Adds a note to `.gtu/memory.md`. Every chat in this project reads it automatically. `/remember` alone shows it. |
-| `/handoff` | Saves where this chat stopped (goal, what's done, next steps, files involved) to `.gtu/handoff.md`. |
-| `/pickup` | In a new chat: reads the hand-off and the memory, says what changed since, and waits for you. |
-
-Keep the memory short: every chat reads it on every step, so it costs tokens. `gtu doctor` shows how much, and `/remember` warns past 60 lines or 4,000 characters. Commit `memory.md` to share it; `handoff.md` stays private.
-
----
-
-## Cost
-
-```powershell
-gtu cost            # the last 24 hours
-gtu cost --days 7   # the last week
-```
-
-Shows the **exact tokens per model** from Desktop's own record (every chat on this machine), then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three.
-
-- `--short` gives one paragraph. `/cost` in a chat shows the same.
-- In an ordinary terminal it reads the regular Desktop's record; add `--channel beta` (or `dev`, `local`) for another build.
-- Each pack command also reports its own run's tokens at the end.
-
----
-
-## Fewer permission prompts
-
-Desktop asks before running a shell command, and "always allow" only remembers that exact text, so `git status` and `git status --short` each ask again.
-
-```powershell
-gtu prompts
-```
-
-Reads a private copy of Desktop's own history and finds the read-only commands you keep approving, like `git status`, `ls` or `pytest`, used in at least 3 chats in the last 30 days. It prints a snippet to paste into your `opencode.jsonc`. It never edits your files and never suggests anything that writes, deletes, installs or pushes. Options: `--days`, `--min` (chats needed), `--channel beta|dev|local`.
-
----
-
-## Git hooks
-
-```powershell
-gtu hooks install
-```
-
-Adds two helpers to this project's git:
-- **Before each commit:** stops the commit if it adds something that looks like a key or password, or changes a tool or instruction folder (`.opencode/tool`, `.opencode/plugin`, `.claude`, `.agents`). It names the file and line. `git commit --no-verify` skips the check once. You can also run the check by hand: `gtu guard`.
-- **After each commit:** queues a code review of that commit. Run it with `gtu start`. To review any commit by hand: `gtu add review --commit <id>`.
-
-Hooks you already have are never overwritten: it prints the one line to add instead. `gtu hooks install --uninstall` removes only spare-gpu's hooks.
+In the bigger commands, some DeepSeek roles also ship as a standard-model variant on Qwen. They are only used once a benchmark shows Qwen is good enough for them; until then they stay on DeepSeek.
 
 ---
 
 ## Settings
 
-`gtu init` saves your project's settings in `.gtu/settings.json`. It looks at `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` to find how your tests run. Commit this file; the rest of `.gtu` stays out of git. Without it, spare-gpu assumes `python -m pytest`.
+Jobs work without any settings. To change how they run, write `.gtu/settings.json` in your project; commit it, the rest of `.gtu` stays out of git. For one run, an environment variable overrides a setting.
+
+```json
+{ "test_command": "npm test", "job_token_budget": 300000 }
+```
 
 | Setting | Override for one run | What it sets |
 |---|---|---|
-| `test_command` | `GTU_TEST_COMMAND` | How your tests run. Tests and fixes are kept only if this passes. |
+| `test_command` | `GTU_TEST_COMMAND` | How your tests run (found from your project's files when not set). Tests and fixes are kept only if this passes. |
 | `allowed_commands` | `GTU_ALLOWED_COMMANDS` | Commands a job may run (must include the test command) |
 | `test_timeout` | `GTU_TEST_TIMEOUT` | Seconds one test run may take |
 | `agent_timeout` | `GTU_AGENT_TIMEOUT` | Seconds one job's Desktop session may take |
-| `job_token_budget` | `GTU_JOB_TOKEN_BUDGET` | Tokens one job may use before it pauses |
+| `job_token_budget` | `GTU_JOB_TOKEN_BUDGET` | Tokens one job may use before it stops |
 | `preferred_model` | `GTU_PREFERRED_MODEL` | The model jobs start from |
 | `switch_safe` | `GTU_SWITCH_SAFE` | Extra job types allowed to move to the faster model |
 | `green_rounds` | `GTU_GREEN_ROUNDS` | Tries a "make the tests pass" job gets, 1 to 10 (default 3) |
 
----
-
-## Checking your install
-
-```powershell
-gtu doctor
-```
-
-Checks everything (spare-gpu, git, Desktop's settings, the MCP connection, the pack, project memory, this project's jobs and settings) and tells you how to fix each problem. It changes nothing.
-
-- `gtu doctor --live`, run from **Desktop's terminal**, also sends one tiny request to measure the pack's token cost. Run it once with the pack and once without.
-- `gtu pack-check` checks only the pack's files.
-- `gtu waits` shows each model's queue right now.
+`/doctor` shows the settings in force and says what's wrong with a broken file.
 
 ---
 
 ## Safety
 
-- Your files are never changed. Jobs work on a private copy, and results wait in `spare-gpu/` until you apply them.
-- It never pushes and never commits to your project.
+- Your files are never changed. Jobs work on a private copy, and results wait in `spare-gpu/` until you `/apply` them.
+- It never pushes and never commits to your project. `/code-review --post` is the only thing that writes anywhere else, and only when you ask: one comment on that pull request.
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, no permission pop-ups, and your other MCP servers are switched off inside a job.
 - Some files are never copied into a job, even if git tracks them: tool and instruction folders that Desktop would run or obey (`.opencode`, `.claude`, `.agents`, `.cursor`), Desktop's own config files, and credential files (`.env`, `*.pem`, `*.key`, `id_rsa*` and similar). To leave out more, list patterns in `.gtu/copy-exclude`, one per line.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
 - Before code is sent for review, anything that looks like a key or password is replaced with `[redacted]`.
+- The commands' helpers and tools are hidden from your normal chats, so they add nothing to them (a test holds this to a budget of 1,500 tokens per step), and every helper has a step limit (30 for a helper, 60 for a lead).
 
 ---
 
 ## Command reference
 
-**In Desktop chats**
+**In any Desktop chat**
 
-| Command | Section |
+| Command | Feature |
 |---|---|
-| `/auto <request>` | [Faster answers](#faster-answers-auto) |
-| `/code-review`, `/security-review`, `/deep-research`, `/simplify`, `/verify-app` | [Command pack](#command-pack) |
-| `/remember`, `/handoff`, `/pickup` | [Memory](#memory-across-chats) |
-| `/cost` | [Cost](#cost) |
+| `/auto <task or question>` | [Coding jobs](#1-coding-jobs), [Faster answers](#12-faster-answers-auto) |
+| `/apply [result] [--dry-run] [--force]`, `/undo [result]` | [Apply and undo](#2-apply-and-undo-apply-undo) |
+| `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post] [--plan]` | [Code review](#3-code-review-code-review) |
+| `/security-review [commit or branch] [deep] [--plan]` | [Security review](#4-security-review-security-review) |
+| `/deep-research <question> [--depth quick\|standard\|deep] [--plan]` | [Deep research](#5-deep-research-deep-research) |
+| `/simplify [file or folder] [--plan]` | [Simplify](#6-simplify-simplify) |
+| `/verify-app <url> <what to check> [--plan]` | [App check](#7-app-check-verify-app) |
+| `/remember [note]`, `/handoff`, `/pickup` | [Memory](#8-memory-across-chats-remember-handoff-pickup) |
+| `/cost [days] [build]` | [Cost](#9-cost-cost) |
+| `/prompts [days] [--min N]` | [Fewer prompts](#10-fewer-permission-prompts-prompts) |
+| `/doctor [live] [build]` | [Health check](#11-health-check-doctor) |
 
-**In a terminal**
+**In a terminal** (only to install or remove)
 
 | Command | What it does |
 |---|---|
-| `gtu setup` | One-step setup: API key (only needed outside Desktop) and the Desktop connection |
-| `gtu integrate [--pack]` | Connects spare-gpu to Desktop; `--pack` adds the command pack. `--uninstall` removes it. |
-| `gtu init` | Saves this project's settings |
-| `gtu add <job> <path>` | Queues a job (`tests`, `docs`, `review`, `fix`, `green`, `implement`) |
-| `gtu start` / `gtu stop` | Runs the queue in front of you / pauses it |
-| `gtu list` / `gtu status <id>` | Shows queued jobs / one job in detail |
-| `gtu cancel <id>` | Cancels a job |
-| `gtu apply` / `gtu undo` | Applies a result / takes it back |
-| `gtu report` | Summary of what ran, tokens and results |
-| `gtu cost` | What a period cost |
-| `gtu waits` | Each model's wait right now |
-| `gtu prompts` | Suggests allow rules |
-| `gtu hooks install` / `gtu guard` | Git hooks / the pre-commit check on its own |
-| `gtu doctor` / `gtu pack-check` | Checks the install / the pack |
-| `gtu check` / `gtu setkey` / `gtu demo` | Checks the API key / saves it / one quick review to see it work |
-
----
-
-## Good to know
-
-- Windows only. Jobs run while BharatCode Desktop is open.
-- Works in any project folder, with or without git, even with unsaved changes. Each job copies your files as they are.
-- Outside Desktop, only review jobs can run, and they need a BharatCode API key (`gtu setkey`).
-- Measurements and details: [research/](research/).
+| `gtu integrate --pack` | Adds every chat command to Desktop (the installer runs it). Safe to run again. |
+| `gtu integrate --uninstall` | Removes spare-gpu from Desktop |
 
 ---
 
@@ -376,25 +391,25 @@ Checks everything (spare-gpu, git, Desktop's settings, the MCP connection, the p
 <details>
 <summary>Does it change my files?</summary>
 
-No. Every job works on a private copy. The files a job changed wait in `spare-gpu/<date>_<time>/` until you copy them yourself or run `gtu apply`, and `gtu undo` takes that back.
+No. Every job works on a private copy. The files a job changed wait in `spare-gpu/<date>_<time>/` until you copy them yourself or type `/apply`, and `/undo` takes that back.
 </details>
 
 <details>
 <summary>Will a cheaper model make my work worse?</summary>
 
-Only two kinds of work move to Qwen. Docs jobs: Qwen was measured to be just as good at them. Questions: these go to the faster model by design. Tests, reviews and the other jobs stay on DeepSeek. In the command pack, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work. Every job's result is also checked before it's kept, and each reply names the model that answered.
+Only two kinds of work move to Qwen to save waiting. Docs jobs: Qwen was measured to be just as good at them. Questions: these go to the faster model by design. Tests, reviews and the other jobs stay on DeepSeek. In the bigger commands, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work. Every job's result is also checked before it's kept, and each reply names the model that answered.
 </details>
 
 <details>
-<summary>Do I need an API key?</summary>
+<summary>Do I need an API key or a terminal?</summary>
 
-Not inside BharatCode Desktop: spare-gpu uses Desktop's own sign-in. A key (`gtu setkey`) is only needed to run review jobs from an ordinary terminal outside Desktop.
+No API key: spare-gpu uses Desktop's own sign-in. The terminal is only for installing (the one PowerShell line) and removing; everything else is a chat command.
 </details>
 
 <details>
-<summary>Does the command pack slow down my normal chats?</summary>
+<summary>Do the commands slow down my normal chats?</summary>
 
-No. The pack's helpers and tools are hidden from normal chats, so they add nothing to each step (a test holds this to a 1,500-token budget). Only the memory file is read by every chat, and `gtu doctor` shows its size.
+No. Their helpers and tools are hidden from normal chats, so they add nothing to each step (a test holds this to a 1,500-token budget). Only the memory file is read by every chat, and `/doctor` shows its size.
 </details>
 
 <details>
@@ -406,7 +421,7 @@ It is built and tested for BharatCode Desktop on Windows: paths, line endings, t
 <details>
 <summary>Does it work offline?</summary>
 
-No. Jobs and questions run on BharatCode's models. The tools that only read your machine, like `gtu cost`, `gtu prompts` and `gtu doctor`, work without a connection.
+No. Jobs, reviews and questions run on BharatCode's models. The commands that only read your machine, like `/cost`, `/prompts`, `/doctor`, `/apply` and `/undo`, work without a connection, but they still run in a Desktop chat.
 </details>
 
 ---
@@ -417,9 +432,9 @@ No. Jobs and questions run on BharatCode's models. The tools that only read your
 |---|---|
 | Check an install step by step on a clean PC | [docs/install-checklist.md](docs/install-checklist.md) |
 | Cut a release | [docs/releasing.md](docs/releasing.md) |
-| See the measurements behind the routing and the pack | [research/](research/) |
+| See the measurements behind the routing and the commands | [research/](research/) |
 | See which job types may move to Qwen, and why | [research/eval/](research/eval/) |
-| Check each pack command by hand | `research/<command>/manual-check.md` |
+| Check each command by hand | `research/<command>/manual-check.md` |
 | See what code is reused, and under which licence | [ATTRIBUTION.md](src/gpu_token_utilization/pack/ATTRIBUTION.md) |
 
 ## Remove

@@ -1,4 +1,4 @@
-"""Runs queued jobs one step at a time, in front of the user.
+"""Runs a job one step at a time, in front of the user, as BharatCode Desktop sessions.
 
 Each job works on its own private copy of the project (worktree.py); the user's files
 are never modified. Progress is saved after every step: the step is saved in the copy's
@@ -7,9 +7,9 @@ spare-gpu/<date>_<time>/ and its copy is deleted. A step left 'running' by a kil
 finished, so on restart its partial edits are discarded and it runs again; finished
 steps never do.
 
-Work starts at once. When BharatCode answers busy, the step waits a little and is tried again,
-waiting longer each time it happens in a row. The token budget per job pauses a job when
-reached; it never fails it.
+Work starts at once. When a Desktop session doesn't finish in time, the step waits a little and is
+tried again, waiting longer each time it happens in a row. The token budget per job stops a job
+when reached; it never fails it.
 """
 
 from __future__ import annotations
@@ -22,11 +22,10 @@ from pathlib import Path
 from typing import Callable
 
 from . import landing, ledger, router, waits, worktree
-from .agent import AGENT_KINDS, AgentStep
-from .desktop import DesktopAgent, DesktopNotFound
+from .agent import AgentStep, BharatCodeError, BusyError, ChatResult, Usage
+from .desktop import DESKTOP_NEEDED, DesktopAgent, DesktopNotFound
 from .router import Choice
 from .budget import BudgetExceeded, Budgets
-from .client import AuthError, BharatCodeClient, BharatCodeError, BusyError, ChatResult, Usage
 from .jobs import PLANS, JobConfig
 from .runstate import StopRequested
 from .store import FINAL_STATUSES, Job, RequestLog, Store
@@ -42,7 +41,6 @@ class StepContext:
     step_id: int
     step_name: str
     store: Store
-    client: BharatCodeClient | None  # None inside BharatCode Desktop: no API key, requests go through Desktop
     workdir: Path  # the job's worktree (or the repo itself when isolation is off, in tests)
     state_dir: Path  # per-job scratch space outside the worktree (.gtu/jobs/<id>), never committed
     config: JobConfig
@@ -51,24 +49,16 @@ class StepContext:
     should_stop: Callable[[], bool] = lambda: False
     log: Callable[[str], None] = lambda message: None
 
-    def chat(self, messages: list[dict], **kwargs) -> ChatResult:
-        if self.client is None:  # inside BharatCode Desktop: no API key, ask through a Desktop session
-            return self._ask_desktop(messages, kwargs.get("max_tokens"))
-        if self.job.model:  # the model the router chose for this job
-            kwargs.setdefault("model", waits.model_id(self.job.model))
-        self.log("  Sending request to BharatCode...")
-        result = self.client.chat(messages, job_id=self.job.id, step_id=self.step_id, **kwargs)
-        waited = f", {result.queue_wait_ms / 1000:.1f} s of it in BharatCode's queue" if result.queue_wait_ms else ""
-        self.log(f"  Answer received in {result.elapsed_ms / 1000:.1f} s ({result.usage.total_tokens:,} tokens{waited}).")
-        return result
-
-    def _ask_desktop(self, messages: list[dict], max_tokens: int | None) -> ChatResult:
+    def chat(self, messages: list[dict]) -> ChatResult:
+        """One answer, as a read-only Desktop session (the review job's step)."""
+        if self.agent is None:
+            raise DesktopNotFound(DESKTOP_NEEDED)
         self.log("  Asking BharatCode Desktop...")
         started = time.monotonic()
         result = self.agent.ask(self.workdir, messages, token_budget=self.budget_remaining(),
                                 on_step=self.log_agent_step, should_stop=self.should_stop)
         if result.stopped == "stop":
-            raise StopRequested("stopped by `gtu stop`")
+            raise StopRequested("stopped")
         if result.stopped == "budget":
             raise BudgetExceeded(f"stopped BharatCode Desktop after {result.tokens} tokens: budget reached")
         if result.stopped == "timeout":
@@ -77,9 +67,9 @@ class StepContext:
             raise BharatCodeError(f"BharatCode Desktop failed: {result.error or 'unknown error'}")
         inputs = sum(s.input_tokens + s.cache_read_tokens for s in result.steps)
         outputs = sum(s.output_tokens + s.reasoning_tokens for s in result.steps)
-        return ChatResult(content=result.text, finish_reason="stop", truncated=False,
+        return ChatResult(content=result.text,
                           usage=Usage(prompt_tokens=inputs, completion_tokens=outputs, total_tokens=result.tokens),
-                          request_id=None, elapsed_ms=(time.monotonic() - started) * 1000, attempts=1)
+                          elapsed_ms=(time.monotonic() - started) * 1000)
 
     def log_agent_step(self, step: AgentStep) -> None:
         """Record one step of a Desktop session like a request, so budgets and reports include it."""
@@ -140,9 +130,7 @@ Plan = list[tuple[str, StepFn]]
 
 DEFAULT_PLANS: dict[str, Plan] = PLANS
 
-_STATUS_ORDER = {"running": 0, "paused": 1, "queued": 2}
-
-BUSY_WAIT = 60.0  # seconds before trying a step again after BharatCode answered busy...
+BUSY_WAIT = 60.0  # seconds before trying a step again after a session didn't finish in time...
 BUSY_WAIT_MAX = 600.0  # ...doubling each time it happens in a row, up to this
 
 
@@ -150,7 +138,6 @@ class Scheduler:
     def __init__(
         self,
         store: Store,
-        client: BharatCodeClient | None,
         *,
         plans: dict[str, Plan] | None = None,
         agent: DesktopAgent | None = None,
@@ -161,17 +148,12 @@ class Scheduler:
         log: Callable[[str], None] = lambda message: None,
         isolate: bool = True,
         should_stop: Callable[[], bool] | None = None,
-        desktop_missing: str | None = None,
         route: Callable[[Job], Choice] | None = None,
     ):
         self.store = store
         # Picks the model for a job before its first step (router.choose with fresh wait figures);
         # None keeps every job on the worker's own model.
         self.route = route
-        # Why BharatCode Desktop can't be used, if it can't: tests and docs jobs then stay
-        # queued (not failed) and the run carries on with review jobs.
-        self.desktop_missing = desktop_missing
-        self.client = client
         self.plans = plans or DEFAULT_PLANS
         self.agent = agent
         self.budgets = budgets or Budgets()
@@ -180,14 +162,15 @@ class Scheduler:
         self._now = now
         self._log = log
         self.isolate = isolate
-        self.busy_wait = BUSY_WAIT  # grows while BharatCode keeps answering busy, resets on a finished step
-        # `gtu stop`: checked between steps, about once a second while waiting, and while a session runs.
+        self.busy_wait = BUSY_WAIT  # grows while sessions keep not finishing in time, resets on a finished step
+        # A stop (the job cancelled from the chat): checked between steps, about once a second while
+        # waiting, and while a session runs.
         self._interruptible = should_stop is not None
         self.should_stop = should_stop or (lambda: False)
         self.stopped = False
 
     def _wait(self, seconds: float) -> None:
-        """Sleep, waking about once a second to notice `gtu stop`."""
+        """Sleep, waking about once a second to notice a stop."""
         if not self._interruptible:
             self._sleep(seconds)
             return
@@ -197,10 +180,6 @@ class Scheduler:
             self._sleep(chunk)
             left -= chunk
 
-    def pending_jobs(self) -> list[Job]:
-        jobs = self.store.list_jobs(include_finished=False)
-        return sorted(jobs, key=lambda j: _STATUS_ORDER.get(j.status, 3))
-
     def _over_budget(self, job: Job) -> str | None:
         """Why this job can't run now because of its budget, or None."""
         job_used = self.budgets.used(self.store, job.id)
@@ -208,68 +187,9 @@ class Scheduler:
             return f"its token budget is used up ({job_used} of {self.budgets.per_job})"
         return None
 
-    def run(self, stop: Callable[[], bool] = lambda: False, max_steps: int | None = None) -> int:
-        """Work through the queue until it is empty or every job left is over budget."""
-        completed = 0
-        paused_for_budget: set[str] = set()
-        waiting_for_desktop: set[str] = set()
-        queued = self.pending_jobs()
-        if queued:
-            self._log(f"{len(queued)} job(s) to run. Starting now.")
-        while not stop():
-            if self.should_stop():
-                self._stop_now()
-                return completed
-            runnable = []
-            for job in self.pending_jobs():
-                if job.id in paused_for_budget:  # a step already said it can't fit: don't pick it up again
-                    continue
-                if self.desktop_missing and job.kind in AGENT_KINDS:
-                    if job.id not in waiting_for_desktop:
-                        waiting_for_desktop.add(job.id)
-                        self._log(f"Job {job.id} ({job.kind}): skipped, it needs BharatCode Desktop, "
-                                  "which isn't available here. It stays queued for the next `gtu start`.")
-                    continue
-                reason = self._over_budget(job)
-                if reason is None:
-                    runnable.append(job)
-                elif job.id not in paused_for_budget:
-                    paused_for_budget.add(job.id)
-                    self.store.set_status(job.id, "paused")
-                    self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
-            if not runnable:
-                if waiting_for_desktop:
-                    self._log(f"{len(waiting_for_desktop)} job(s) are waiting for BharatCode Desktop. {self.desktop_missing}")
-                elif paused_for_budget:
-                    self._log("Nothing left that fits the token budget.")
-                else:
-                    self._log("Queue empty.")
-                return completed
-            job = runnable[0]
-            outcome = self.run_step(job)
-            if outcome == "stopped":
-                self._stop_now()
-                return completed
-            if outcome == "busy":
-                self._wait_out_busy()
-                continue
-            if outcome == "budget":
-                # The step couldn't start or finish within what's left (e.g. a review whose prompt
-                # alone is bigger than the remaining budget). The raw totals may still be under
-                # the budgets, so without this the job would be picked up again at once, forever.
-                paused_for_budget.add(job.id)
-                continue
-            if outcome == "done":
-                completed += 1
-                self.busy_wait = BUSY_WAIT
-                if max_steps is not None and completed >= max_steps:
-                    return completed
-        return completed
-
     def run_job(self, job_id: str) -> str:
         """Run one job to its end, in front of whoever asked. Returns its final status: done, failed
-        or cancelled; paused when its budget ran out or a stop was asked for; waiting when it needs
-        BharatCode Desktop and that isn't here."""
+        or cancelled; paused when its budget ran out or a stop was asked for."""
         while True:
             job = self.store.get_job(job_id)
             if job.status in FINAL_STATUSES:
@@ -277,18 +197,14 @@ class Scheduler:
             if self.should_stop():
                 self._stop_now()
                 return self.store.get_job(job_id).status
-            if self.desktop_missing and job.kind in AGENT_KINDS:
-                self._log(f"Job {job.id} ({job.kind}): it needs BharatCode Desktop, which isn't "
-                          "available here. It stays queued for the next `gtu start`.")
-                return "waiting"
             reason = self._over_budget(job)
             if reason is not None:
                 self.store.set_status(job.id, "paused")
-                self._log(f"Job {job.id}: paused, {reason}. Raise the budget to let it continue.")
+                self._log(f"Job {job.id}: stopped, {reason}.")
                 return "paused"
             outcome = self.run_step(job)
             if outcome == "stopped":
-                if self.store.get_job(job_id).status == "cancelled":  # spare_cancel_work, not `gtu stop`
+                if self.store.get_job(job_id).status == "cancelled":  # spare_cancel_work
                     self._finish(job, "cancelled")
                     self._log(f"Job {job.id}: cancelled; its copy is removed and nothing was exported.")
                     return "cancelled"
@@ -304,7 +220,7 @@ class Scheduler:
                 return self.store.get_job(job_id).status
 
     def _wait_out_busy(self) -> None:
-        """BharatCode answered busy: wait, longer each time in a row, then try the step again."""
+        """A session didn't finish in time: wait, longer each time in a row, then try the step again."""
         self._log(f"BharatCode is busy; trying again in {self.busy_wait:.0f} s.")
         self._wait(self.busy_wait)
         self.busy_wait = min(self.busy_wait * 2, BUSY_WAIT_MAX)
@@ -351,7 +267,7 @@ class Scheduler:
         self.store.set_step(step["id"], "running")
         recorder = _ToolRecorder(worker) if worker is not None else None
         ctx = StepContext(
-            job, step["id"], step["name"], self.store, self.client, workdir, state_dir,
+            job, step["id"], step["name"], self.store, workdir, state_dir,
             self.config, recorder, lambda: self.budgets.remaining(self.store, job.id),
             self.should_stop, self._log,
         )
@@ -374,11 +290,8 @@ class Scheduler:
         except BudgetExceeded as exc:
             self._undo_step(job, workdir)
             self.store.set_status(job.id, "paused")
-            self._log(f"Job {job.id}: paused, {exc}.")
+            self._log(f"Job {job.id}: stopped, {exc}.")
             return "budget"
-        except AuthError:
-            self._undo_step(job, workdir)
-            raise
         except (BharatCodeError, worktree.GitError, DesktopNotFound) as exc:
             if self.should_stop():  # failed because we were being stopped: that's a pause, not a failure
                 self._undo_step(job, workdir)
@@ -404,8 +317,8 @@ class Scheduler:
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
             return "failed"
         except Exception as exc:  # noqa: BLE001  anything else (a git call, a truncated junit.xml, a locked file)
-            # fails this job and is written down; the runner carries on with the queue instead of
-            # dying with a traceback and leaving every job marked running for the night.
+            # fails this job and is written down, instead of the server dying with a traceback and
+            # leaving the job marked running.
             if self.should_stop():
                 self._undo_step(job, workdir)
                 self.store.set_status(job.id, "paused")
@@ -459,12 +372,12 @@ class Scheduler:
         return True
 
     def _stop_now(self) -> None:
-        """`gtu stop` was requested: leave every started job paused and resumable."""
+        """A stop was asked for: leave every started job paused."""
         self.stopped = True
         for job in self.store.list_jobs(include_finished=False):
             if job.status == "running":
                 self.store.set_status(job.id, "paused")
-        self._log("Stopped by `gtu stop`. Progress is saved; run `gtu start` to resume.")
+        self._log("Stopped.")
 
     def _undo_step(self, job: Job, workdir: Path) -> None:
         """Put an unfinished step back to pending and drop its edits, so it reruns cleanly."""
@@ -476,7 +389,7 @@ class Scheduler:
                 requests_before: int, status: str, outcome: str | None) -> None:
         """One ledger entry for a step that finished or failed, written now: a crash later still
         leaves the record. Tokens and the model come from the requests the step logged; the tools
-        from what the worker reported (none for a review answered by the API)."""
+        from what the worker reported."""
         rows = [r for r in self.store.requests(job.id) if r["id"] > requests_before]
         model = next((r["model"] for r in reversed(rows) if r["model"]), None) \
             or getattr(worker, "model", None) or self.store.get_job(job.id).model

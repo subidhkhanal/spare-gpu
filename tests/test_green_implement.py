@@ -1,6 +1,6 @@
 """The green ("make the tests pass") and implement (a Markdown plan file) job kinds, end to end: a
 real git repo whose tests fail at first, the fake BharatCode Desktop scripted per session, the real
-scheduler and real pytest. Plus the places that list job kinds: the dry run, spare_delegate, the
+scheduler and real pytest. Plus the places that list job kinds: spare_delegate, the
 store's CHECK constraint, the settings and the README."""
 
 import json
@@ -12,11 +12,9 @@ import anyio
 import httpx
 import mcp
 import pytest
-from typer.testing import CliRunner
 
 from gpu_token_utilization import actions, settings
 from gpu_token_utilization.budget import Budgets
-from gpu_token_utilization.cli import app
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.mcp_server import build_server
 from gpu_token_utilization.router import Choice
@@ -45,13 +43,16 @@ def config(**changes) -> JobConfig:
 
 
 @pytest.fixture
-def run_jobs(store, client, fake, desktop_fake):
+def run_jobs(store, clock, desktop_fake):
+    """Run every unfinished job, one after another, each to its end."""
     def run(config=CONFIG, **kwargs):
         logs = []
-        Scheduler(
-            store, client, agent=desktop_fake.agent(timeout=60), budgets=Budgets(), config=config,
-            sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append, **kwargs,
-        ).run()
+        scheduler = Scheduler(
+            store, agent=desktop_fake.agent(timeout=60), budgets=Budgets(), config=config,
+            sleep=clock.sleep, now=clock.utcnow, log=logs.append, **kwargs,
+        )
+        for job in store.list_jobs(include_finished=False):
+            scheduler.run_job(job.id)
         return logs
 
     return run
@@ -265,7 +266,7 @@ def test_implement_drops_a_result_that_fails_the_tests_or_changes_nothing(repo_w
     assert store.get_job(nothing.id).status == "done"
 
 
-def test_implement_needs_a_markdown_plan_file_in_the_project(repo_with_plan, store, scenario, run_jobs, monkeypatch):
+def test_implement_needs_a_markdown_plan_file_in_the_project(repo_with_plan, store, scenario, run_jobs):
     open_store = lambda repo: Store(repo / ".gtu" / "gtu.db")  # noqa: E731
     with pytest.raises(actions.ActionError, match="src/calc.py is not a Markdown file; an implement job needs a plan file ending in .md"):
         actions.queue_job(open_store, repo_with_plan, "implement", "src/calc.py")
@@ -274,11 +275,6 @@ def test_implement_needs_a_markdown_plan_file_in_the_project(repo_with_plan, sto
     with pytest.raises(actions.ActionError, match="does not exist"):
         actions.queue_job(open_store, repo_with_plan, "implement", "docs/missing.md")
     assert actions.queue_job(open_store, repo_with_plan, "implement", "docs/plan.md").job.target == "docs/plan.md"
-    # the same through `gtu add`
-    monkeypatch.chdir(repo_with_plan)
-    monkeypatch.delenv("GTU_DB", raising=False)
-    outcome = CliRunner().invoke(app, ["add", "implement", "src/calc.py"])
-    assert outcome.exit_code == 1 and "src/calc.py is not a Markdown file" in outcome.output
     # a job queued another way is refused by the step itself, and the job fails with the reason
     scenario(steps=[{"tokens": 500}])
     job = store.add_job("implement", "src/calc.py", str(repo_with_plan))
@@ -289,27 +285,11 @@ def test_implement_needs_a_markdown_plan_file_in_the_project(repo_with_plan, sto
 
 # --- the places that list job kinds ---------------------------------------------------------
 
-def test_the_dry_run_lists_green_and_implement_jobs(repo_with_plan, monkeypatch):
-    monkeypatch.chdir(repo_with_plan)
-    monkeypatch.delenv("GTU_DB", raising=False)
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    runner = CliRunner()
-    for args in (["add", "green", "."], ["add", "implement", "docs/plan.md"]):
-        added = runner.invoke(app, args)
-        assert added.exit_code == 0, added.output
-    out = runner.invoke(app, ["start", "--dry-run"]).output
-    assert "  green  .  (queued)" in out and "  implement  docs/plan.md  (queued)" in out
-    assert "1. write   run the test command here; if it fails, a Desktop session fixes the code (never the tests)" in out
-    assert "2. verify  run the test command here; done if it passes, else another round (up to green_rounds)" in out
-    assert "1. write   a Desktop session carries out the Markdown plan file" in out
-    assert "2. verify  run the test command here, keep the changes only if it passes, commit" in out
-    assert "estimate: 4-10 session steps" in out and "PROBLEM" not in out
-
-
-def test_spare_delegate_accepts_green_and_implement(repo_with_plan, fake):
+def test_spare_delegate_accepts_green_and_implement(repo_with_plan):
     base = quick_plans()
     plans = {**base, "green": base["tests"], "implement": base["tests"]}
-    tools = quick_tools(repo_with_plan, lambda: httpx.Client(transport=fake.transport()), plans=plans)
+    no_wait_figures = lambda: httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503)))  # noqa: E731
+    tools = quick_tools(repo_with_plan, no_wait_figures, plans=plans)
     assert tools.delegate("green", ".").startswith("Done: green for . (job ")
     assert tools.delegate("implement", "docs/plan.md").startswith("Done: implement for docs/plan.md (job ")
     refused = tools.delegate("implement", "src/calc.py")
@@ -352,7 +332,7 @@ def test_an_older_store_learns_green_and_implement_and_keeps_its_rows(tmp_path, 
         assert [j.id for j in again.list_jobs()] == ["old00001", green.id, plan.id]
 
 
-def test_green_rounds_setting_is_read_validated_and_written_by_init(git_repo, monkeypatch):
+def test_green_rounds_setting_is_read_and_validated(git_repo, monkeypatch):
     monkeypatch.delenv("GTU_GREEN_ROUNDS", raising=False)
     assert JobConfig.load(git_repo).green_rounds == 3 and settings.KEYS["green_rounds"][0] == "GTU_GREEN_ROUNDS"
     folder = git_repo / ".gtu"
@@ -370,11 +350,8 @@ def test_green_rounds_setting_is_read_validated_and_written_by_init(git_repo, mo
         (folder / "settings.json").write_text(json.dumps({"green_rounds": bad}), encoding="utf-8")
         with pytest.raises(ValueError, match="green_rounds must be a whole number of rounds from 1 to 10"):
             JobConfig.load(git_repo)
-    (folder / "settings.json").unlink()
-    monkeypatch.chdir(git_repo)
-    monkeypatch.delenv("GTU_DB", raising=False)
-    assert CliRunner().invoke(app, ["init"]).exit_code == 0
-    assert json.loads((folder / "settings.json").read_text(encoding="utf-8"))["green_rounds"] == 3
+    (folder / "settings.json").write_text(json.dumps({}), encoding="utf-8")
+    assert JobConfig.load(git_repo).green_rounds == 3  # a settings file that doesn't name it keeps the default
 
 
 def test_the_readme_documents_every_setting_and_the_two_kinds():

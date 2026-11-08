@@ -1,4 +1,4 @@
-"""How long work would wait on each BharatCode model right now (`spare_waits`, `gtu waits`, the router).
+"""How long work would wait on each BharatCode model right now (`spare_waits` and the router).
 
 Four signals per model, each optional; a failure means "no data", never "no wait":
 - BharatCode's measured queue waits for everyone, last 60 min (GET /api/serving/queue-waits: p50/p75/p90);

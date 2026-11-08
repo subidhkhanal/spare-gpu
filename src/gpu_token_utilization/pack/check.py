@@ -1,4 +1,4 @@
-"""`gtu pack-check`: the parts of the pack's manual checks that can be read from files, as a
+"""The parts of the pack's manual checks that can be read from files, as a
 doctor. It never starts BharatCode and never changes anything; it says what is installed, what
 is stale, what is missing, and what conflicts with the user's own settings.
 """

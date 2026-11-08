@@ -9,7 +9,7 @@ session:
 - with the job's deny-first permission file (agent.permission_config), written into the worktree;
 - with the model chosen per task (the router's "sticky per task" rule);
 - polled for its steps, so tokens are reported as they come in and the token budget, the
-  timeout and `gtu stop` all abort the session.
+  timeout and a cancel from the chat all abort the session.
 It uses Desktop's sign-in, so spare-gpu needs no login of its own for it. Jobs only run while
 Desktop is open: the server lives inside it.
 """
@@ -41,8 +41,8 @@ POLL_RETRIES = 5
 STALL_POLLS = 15  # polls a session may sit idle with an unfinished reply before the step gives up
 
 
-DESKTOP_NEEDED = ("Tests and docs jobs run inside BharatCode Desktop: open this project in Desktop and ask "
-                  "spare-gpu there (or run `gtu start` from Desktop's terminal).")
+DESKTOP_NEEDED = ("spare-gpu's jobs run inside BharatCode Desktop: open this project in Desktop and ask "
+                  "spare-gpu there.")
 
 
 class DesktopNotFound(Exception):

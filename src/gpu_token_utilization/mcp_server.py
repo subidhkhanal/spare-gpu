@@ -1,11 +1,12 @@
 """MCP server: spare-gpu as tools an agent can call (BharatCode Desktop, or any MCP client).
 
-Started with `gtu mcp`, over stdio. Five tools, each shaped around a task the user wants done
-rather than around our internal functions. Selection accuracy drops as tool count grows and when
-tools overlap, so related questions are merged (one status tool answers "what's queued", "is it
-done" and "where are its files"). Each tool is a thin wrapper over the code the matching `gtu`
-command uses, sharing the repo's .gtu/gtu.db (safe alongside a `gtu start` in a terminal).
-Tools return plain text for the agent to relay. spare_delegate runs the job in front of the user,
+BharatCode Desktop starts it (`gtu mcp`, over stdio). Five tools every chat sees, each shaped
+around a task the user wants done rather than around our internal functions. Selection accuracy
+drops as tool count grows and when tools overlap, so related questions are merged (one status tool
+answers "what's queued", "is it done" and "where are its files"). With `--pack`, the pack's own
+tools too, hidden from every agent but the pack's (each visible tool costs every step tokens):
+among them the ones behind /apply, /undo, /cost, /prompts and /doctor. Every tool shares the repo's
+.gtu/gtu.db and returns plain text for the agent to relay. spare_delegate runs the job in front of the user,
 as a visible Desktop session, and returns when it is done; while it runs, the server sends MCP
 progress notifications so the client's per-call timeout keeps being reset.
 """
@@ -24,11 +25,10 @@ import httpx
 from mcp.server.mcpserver import Context  # at module level: the tool's annotation must resolve
 
 from . import __version__, actions, desktop, pack, refs, router, runstate, scholar, security, stats, tally, waits, workers, worktree
-from .api import ApiKeyMissing
 from .budget import Budgets
 from .jobs import PLANS, JobConfig
 from .scheduler import Scheduler
-from .store import DB_ENV, FINAL_STATUSES, Store, StoreError
+from .store import DB_ENV, FINAL_STATUSES, IGNORE, Store, StoreError
 
 INSTRUCTIONS = (
     "spare-gpu does coding chores (writing tests, adding docs, code review, applying a fix) for a project "
@@ -100,7 +100,7 @@ class SpareTools:
         if not create and not path.exists():
             raise NoStore(
                 f"spare-gpu hasn't been used in this project yet (no .gtu folder in {self._root()}). "
-                "Hand something over with spare_delegate first, or queue it with `gtu add` in a terminal."
+                "Hand something over with spare_delegate (or /auto) first."
             )
         return Store(path)
 
@@ -143,8 +143,8 @@ class SpareTools:
             lines.append(f"A job is running now (process {pid}); it shows in Desktop as a session named "
                          "\"spare-gpu: ...\".")
         elif waiting:
-            lines.append("Nothing is running now. Waiting jobs start with `gtu start` in a terminal; a job handed "
-                         "over with spare_delegate runs at once.")
+            lines.append("Nothing is running now. A job that stopped before finishing (its token budget, or Desktop "
+                         "closed) doesn't start again by itself: ask for the task again to run it afresh.")
         if jobs:
             lines.append(SESSION_DETAIL)
         return "\n".join(lines)
@@ -202,7 +202,7 @@ class SpareTools:
             folder.mkdir(parents=True, exist_ok=True)
             marker = folder / ".gitignore"  # spare-gpu's own folder stays out of the user's repo, as the store keeps it
             if not marker.exists():
-                marker.write_text("*\n", encoding="utf-8")
+                marker.write_text(IGNORE, encoding="utf-8")
             self._usage_file().write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds")}),
                                           encoding="utf-8")
         except OSError:
@@ -299,49 +299,63 @@ class SpareTools:
 
     def _run_now(self, store: Store, job_id: str, progress: Callable[[str], None]) -> str:
         """Run one queued job to its end and say how it went. Another run in this process goes
-        first; a `gtu start` (or another server) already running in the folder keeps the job queued
-        for its loop, so two runners never work the same queue."""
+        first; a job another server (another Desktop window on this project) is running makes this
+        one wait for the user to ask again, so two servers never work in the same folder at once."""
         folder = store.path.parent
         job = store.get_job(job_id)
         what = f"{job.kind} for {job.target} (job {job.id})"
         with self._running:
             other = runstate.running_pid(folder)
             if other and other != os.getpid():
-                return (f"Queued: {what} waits behind the run already going in this project (process {other}), "
-                        "which picks it up next. spare_work_status shows it.")
+                store.cancel_job(job_id)
+                return (f"Not started: another BharatCode Desktop window is running a spare-gpu job in this project "
+                        f"(process {other}). Ask again once it's done; spare_work_status shows it.")
+            for left in runstate.tidy(store):  # jobs a crashed server left running: nothing resumes them
+                self._drop_copy(store, left)
             try:
                 job_config = JobConfig.load(Path(job.repo))
                 budgets = Budgets.load(Path(job.repo))
             except ValueError as exc:
-                return f"Queued, not started: {exc}"
+                store.cancel_job(job_id)
+                return f"Not started: {exc}"
             try:
                 worker = self._make_worker(store, progress, job_config)
-            except ApiKeyMissing as exc:
-                return (f"Queued, not started: {what} needs BharatCode Desktop open, or an API key ({exc}). "
-                        "Run `gtu setup` in a terminal, then `gtu start`.")
+            except desktop.DesktopNotFound as exc:
+                store.cancel_job(job_id)
+                return f"Not started: {what} runs as a BharatCode Desktop session, and Desktop wasn't reached ({exc})."
             runstate.clear(folder)
             runstate.write_run(folder)
             try:
                 scheduler = Scheduler(
-                    store, worker.client, agent=worker.agent, plans=self._plans, budgets=budgets,
-                    config=job_config, log=progress, sleep=self._sleep, desktop_missing=worker.desktop_missing,
-                    should_stop=lambda: runstate.stop_requested(folder) or store.get_job(job_id).status == "cancelled",
+                    store, agent=worker.agent, plans=self._plans, budgets=budgets,
+                    config=job_config, log=progress, sleep=self._sleep,
+                    should_stop=lambda: store.get_job(job_id).status == "cancelled",
                 )
                 status = scheduler.run_job(job_id)
             finally:
                 runstate.clear(folder)
                 worker.close()
-        return self._outcome(store, store.get_job(job_id), status, worker.inside_desktop)
+            if status == "paused":  # stopped before it finished: nothing resumes it, so its copy goes
+                self._drop_copy(store, job_id)
+        return self._outcome(store, store.get_job(job_id), status)
 
-    def _outcome(self, store: Store, job, status: str, inside_desktop: bool) -> str:
+    @staticmethod
+    def _drop_copy(store: Store, job_id: str) -> None:
+        """Delete a stopped job's private copy of the project (best effort: a locked file keeps it)."""
+        try:
+            worktree.remove(Path(store.get_job(job_id).repo), job_id)
+        except (worktree.GitError, OSError):
+            pass
+
+    def _outcome(self, store: Store, job, status: str) -> str:
         what = f"{job.kind} for {job.target} (job {job.id})"
         tokens = store.request_summary(job.id)["total_tokens"]
         spent = f" It used {tokens:,} tokens." if tokens else ""
-        where = (" Its full transcript is the Desktop session named \"spare-gpu: ...\"." if inside_desktop else "")
+        where = " Its full transcript is the Desktop session named \"spare-gpu: ...\"."
         if status == "done":
             if job.output_dir:
                 return (f"Done: {what} finished; its edited files are in {job.output_dir}/ in this project. Your "
-                        f"files weren't touched.{spent}{where}")
+                        f"files weren't touched: /apply copies them in, /undo takes that back.{spent}{where}")
             return f"Done: {what} finished, but it changed no files.{spent}{where}"
         if status == "failed":
             step = next((s for s in store.steps(job.id) if s["status"] == "failed"), None)
@@ -349,16 +363,14 @@ class SpareTools:
             return f"Failed: {what}{why}.{spent}{where}".replace("..", ".")
         if status == "cancelled":
             return f"Cancelled: {what} was stopped; nothing was copied to {worktree.OUTPUT_DIR}/.{spent}"
-        if status == "waiting":
-            return (f"Queued, not started: {what} needs BharatCode Desktop. {desktop.DESKTOP_NEEDED}")
         try:
             used = Budgets.load(Path(job.repo)).per_job
         except ValueError:
             used = Budgets().per_job
-        return (f"Paused: {what} stopped before it finished"
-                + (f" (its token budget of {used:,} is used up; raise GTU_JOB_TOKEN_BUDGET)" if tokens >= used else
-                   " (a stop was asked for)")
-                + f". Progress is saved; `gtu start` in a terminal resumes it.{spent}")
+        return (f"Stopped: {what} stopped before it finished"
+                + (f" (its token budget of {used:,} is used up; raise job_token_budget in .gtu/settings.json)"
+                   if tokens >= used else " (a stop was asked for)")
+                + f". Nothing was copied to {worktree.OUTPUT_DIR}/; ask for the task again to run it afresh.{spent}")
 
 
     # --- the pack's tools (only with `gtu mcp --pack`: every tool costs every session tokens) ---
@@ -417,6 +429,86 @@ class SpareTools:
             return f"Couldn't read the candidates: {exc}."
         return tally.describe(tally.tally(candidates))
 
+    # --- what /apply, /undo, /cost, /prompts and /doctor call ---------------------------------------
+
+    def apply_result(self, stamp: str = "latest", dry_run: bool = False, force: bool = False) -> str:
+        from . import landing
+
+        stamp = (stamp or "").strip() or "latest"
+        try:
+            outcome = landing.apply(landing.find_root(self.base), stamp, dry_run=dry_run, force=force)
+        except landing.LandingError as exc:
+            return f"Didn't apply it: {exc}"
+        except OSError as exc:
+            return f"Stopped part way: {exc}. What was applied before this is recorded, so /undo {stamp} still works."
+        return "\n".join(outcome.lines)
+
+    def undo_result(self, stamp: str = "latest") -> str:
+        from . import landing
+
+        stamp = (stamp or "").strip() or "latest"
+        try:
+            outcome = landing.undo(landing.find_root(self.base), stamp)
+        except landing.LandingError as exc:
+            return f"Didn't undo it: {exc}"
+        except OSError as exc:
+            return (f"Stopped part way: {exc}. The remaining files are still in spare-gpu/<stamp>/.undo; "
+                    f"run /undo {stamp} again.")
+        return "\n".join(outcome.lines)
+
+    @staticmethod
+    def _channel(channel: str | None) -> str | None:
+        """A Desktop channel the user named, checked; None: the Desktop that started this server."""
+        from .bc_config import CHANNELS
+
+        channel = (channel or "").strip().lower() or None
+        if channel is not None and channel not in CHANNELS:
+            raise ValueError(f"unknown Desktop build {channel!r}; use one of {', '.join(CHANNELS)}")
+        return channel
+
+    def cost_summary(self, days: float = 1.0, channel: str | None = None, short: bool = True) -> str:
+        from . import costs
+
+        if days <= 0:
+            return "Give a period of more than 0 days."
+        try:
+            channel = self._channel(channel)
+        except ValueError as exc:
+            return str(exc)
+        path = db_path(self._root())
+        with Store(path if path.exists() else ":memory:") as store:
+            summary = costs.period(store, days=days, channel=channel)
+        return costs.render_short(summary) if short else costs.render(summary)
+
+    def prompt_rules(self, days: int = 30, min_sessions: int = 3, channel: str | None = None) -> str:
+        from . import bc_config, prompts as prompting
+
+        if days < 1 or min_sessions < 1:
+            return "The number of days and the minimum sessions must each be at least 1."
+        try:
+            channel = self._channel(channel) or stats.channel()
+        except ValueError as exc:
+            return str(exc)
+        folder = bc_config.config_dir() if channel == "stable" else bc_config.channel_config_dir(channel)
+        try:
+            review = prompting.collect(prompting.database_path(channel), days=days, min_sessions=min_sessions)
+        except prompting.PromptsError as exc:
+            return str(exc)
+        return prompting.render(review, bc_config.config_file(folder))
+
+    def doctor_check(self, live: bool = False, channel: str | None = None) -> str:
+        from . import doctor as doctoring
+
+        try:
+            channel = self._channel(channel) or stats.channel()
+        except ValueError as exc:
+            return str(exc)
+        report = doctoring.run(self.base, channel=channel, live_mode=live)
+        lines = [str(finding) for finding in report.findings] + [f"Result: {report.verdict}"]
+        lines.append(f"Still manual: {doctoring.MANUAL_LEFT}." if live else
+                     "/doctor live also measures a real Desktop session (one short model call).")
+        return "\n".join(lines)
+
 
 def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False):
     """The MCP server for one project folder (the agent's working directory by default). With
@@ -439,8 +531,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         Use it for any "where are things" question: "what's queued?", "is my tests job done?",
         "what is spare-gpu doing?", "why hasn't my job started?", "what did spare-gpu do
         today?". Also use it to find a job id before cancelling. For how long each model would
-        wait right now use spare_waits; the full summary with token totals is `gtu report` in a
-        terminal."""
+        wait right now use spare_waits; for what the day cost, the /cost command."""
         return tools.work_status()
 
     @server.tool(annotations=notes(False, destructive=True))
@@ -560,6 +651,73 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             """
             return tools.tally_findings(findings)
 
+        @server.tool(annotations=notes(False, destructive=True))
+        def apply_result(stamp: str = "latest", dry_run: bool = False, force: bool = False) -> str:
+            """/apply: copy a finished job's files from spare-gpu/<stamp>/ into the user's project. A
+            file that changed since the job started is skipped and said so (force replaces it
+            anyway). What was there before is saved under spare-gpu/<stamp>/.undo/, so undo_result
+            can take it all back.
+
+            Args:
+                stamp: The result folder under spare-gpu/, e.g. 2026-11-05_12-38-50, or "latest".
+                dry_run: Say what would happen; write nothing.
+                force: Also replace files that changed since the job started.
+            """
+            return tools.apply_result(stamp, dry_run, force)
+
+        @server.tool(annotations=notes(False, destructive=True))
+        def undo_result(stamp: str = "latest") -> str:
+            """/undo: take back an apply_result: restore every file it replaced, remove the files it
+            added, and remove the .undo folder, so the result can be applied again.
+
+            Args:
+                stamp: The result folder that was applied, or "latest": the newest one applied.
+            """
+            return tools.undo_result(stamp)
+
+        @server.tool(annotations=notes(True))
+        def cost_summary(days: float = 1.0, channel: str | None = None, short: bool = True) -> str:
+            """/cost: what a period cost. Tokens per model from BharatCode Desktop's own record of every
+            reply on this machine, then this project's spare-gpu jobs: how many ran and how they
+            ended, their tokens, how many kept nothing after their check, and the most expensive.
+
+            Args:
+                days: How many days back (1 = today's last 24 hours, 7 = a week).
+                channel: Which Desktop build's record: stable, beta, dev or local (default: the one
+                    running this chat).
+                short: One paragraph (default); false gives the tables.
+            """
+            return tools.cost_summary(days, channel, short)
+
+        @server.tool(annotations=notes(True))
+        def prompt_rules(days: int = 30, min_sessions: int = 3, channel: str | None = None) -> str:
+            """/prompts: allow rules for the read-only commands the user keeps approving in Desktop.
+            Reads a private copy of Desktop's database, counts the sessions each command was
+            approved in, keeps those on a short list of commands that only read (git status, ls,
+            pytest, ...), and returns the "permission" snippet to paste into the config file it
+            names. Writes nothing.
+
+            Args:
+                days: How many days of sessions to look at.
+                min_sessions: Propose a command only if it was approved in at least this many sessions.
+                channel: Which Desktop build: stable, beta, dev or local (default: the one running this chat).
+            """
+            return tools.prompt_rules(days, min_sessions, channel)
+
+        @server.tool(annotations=notes(False, world=True))
+        def doctor_check(live: bool = False, channel: str | None = None) -> str:
+            """/doctor: check the whole install and say what to fix: spare-gpu, git, Desktop's config,
+            the MCP entry (and that the server really starts), the pack, this project's jobs and
+            settings, each finding PASS, WARN or FAIL with its fix.
+
+            Args:
+                live: Also run one tiny real request as a Desktop session (one short model call) to
+                    measure the per-step context and check a job's copy.
+                channel: Which Desktop build's config: stable, beta, dev or local (default: the one
+                    running this chat).
+            """
+            return tools.doctor_check(live, channel)
+
         @server.tool(annotations=notes(True))
         def pack_cost() -> str:
             """The tokens each model used in this project's Desktop sessions since the spare_waits
@@ -585,7 +743,6 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         model is free", "get this reviewed now, don't wait in the queue", "delegate the docs for
         utils", "run tests for the payments module", "make the tests pass", "fix the failing
         tests", "implement docs/plan.md". For a plain question (not a coding chore) use spare_ask.
-        Work for later is queued from a terminal with `gtu add` and run by `gtu start`.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without

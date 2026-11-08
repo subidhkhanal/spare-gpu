@@ -1,4 +1,4 @@
-"""`gtu prompts`: allow rules for the read-only commands the user keeps approving in Desktop,
+"""/prompts (the pack's prompt_rules tool): allow rules for the read-only commands the user keeps approving in Desktop,
 read from a private copy of Desktop's database. The fixture database is built with the tables
 Desktop's drizzle schema defines (packages/core/src/session/sql.ts, permission/sql.ts,
 project/sql.ts), with the columns spare-gpu relies on, and tool calls stored the way Desktop
@@ -13,12 +13,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from gpu_token_utilization import cli, prompts
-from gpu_token_utilization.cli import app
+from gpu_token_utilization import prompts
+from gpu_token_utilization.mcp_server import SpareTools
 
-runner = CliRunner()
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
 
 # The tables as sql.ts defines them (drizzle `text`/`integer`, Timestamps = time_created, time_updated in ms).
@@ -319,7 +317,7 @@ def test_render_when_there_is_nothing_to_propose(desktop):
     desktop.bash("s1", "git status")
     text = prompts.render(prompts.collect(desktop.path, now=NOW), Path("x"))
     assert "1 bash command(s) finished in the last 30 days, but none that only reads ran in 3 or more sessions" in text
-    assert "Lower --min or widen --days" in text and "Left out: 1 that only read but ran in fewer than 3 sessions (git status in 1)." in text
+    assert "Ask /prompts for fewer sessions" in text and "Left out: 1 that only read but ran in fewer than 3 sessions (git status in 1)." in text
 
 
 # --- the database: found, copied, never written ----------------------------------------------------
@@ -409,36 +407,35 @@ def test_database_path_honours_the_override_and_desktops_layout(monkeypatch, tmp
     assert prompts.database_path() == tmp_path / "share" / "BharatCode" / "bharatcode.db"
 
 
-# --- the command -------------------------------------------------------------------------------------
+# --- the tool ----------------------------------------------------------------------------------------
 
-def test_the_command_prints_the_proposals_and_the_config_path(desktop, monkeypatch, tmp_path):
+def test_the_tool_returns_the_proposals_and_the_config_path(desktop, monkeypatch, tmp_path):
     populate(desktop)
     monkeypatch.setenv("GTU_BHARATCODE_DB", str(desktop.path))
     monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(tmp_path / "Config"))
     monkeypatch.setattr(prompts, "datetime", _FixedDatetime)
-    result = runner.invoke(app, ["prompts"])
-    assert result.exit_code == 0, result.output
-    assert '"git status *": "allow"' in result.output and '"python -m pytest *": "allow"' in result.output
-    assert str(tmp_path / "Config" / "opencode.jsonc") in result.output
-    assert "Left out:" in result.output
-    result = runner.invoke(app, ["prompts", "--min", "2", "--days", "30"])
-    assert result.exit_code == 0 and '"ls *": "allow"' in result.output
+    tools = SpareTools(tmp_path)
+    text = tools.prompt_rules()
+    assert '"git status *": "allow"' in text and '"python -m pytest *": "allow"' in text
+    assert str(tmp_path / "Config" / "opencode.jsonc") in text
+    assert "Left out:" in text
+    assert '"ls *": "allow"' in tools.prompt_rules(days=30, min_sessions=2)
     assert (tmp_path / "Config").exists() is False  # nothing was written anywhere
 
 
-def test_the_command_fails_plainly_without_a_database(monkeypatch, tmp_path):
+def test_the_tool_says_plainly_what_is_wrong(monkeypatch, tmp_path):
     monkeypatch.setenv("GTU_BHARATCODE_DB", str(tmp_path / "nope.db"))
     monkeypatch.setenv("GTU_BHARATCODE_CONFIG_DIR", str(tmp_path / "Config"))
-    result = runner.invoke(app, ["prompts"])
-    assert result.exit_code == 1 and "No BharatCode Desktop database at" in result.output
-    assert runner.invoke(app, ["prompts", "--channel", "nightly"]).exit_code == 1
-    assert runner.invoke(app, ["prompts", "--min", "0"]).exit_code == 1
+    tools = SpareTools(tmp_path)
+    assert tools.prompt_rules().startswith("No BharatCode Desktop database at")
+    assert "unknown Desktop build 'nightly'" in tools.prompt_rules(channel="nightly")
+    assert "at least 1" in tools.prompt_rules(min_sessions=0)
 
 
-def test_the_command_defaults_match_the_module():
-    params = inspect.signature(cli.prompts).parameters
-    assert params["days"].default.default == prompts.DEFAULT_DAYS == 30
-    assert params["min_sessions"].default.default == prompts.DEFAULT_MIN_SESSIONS == 3
+def test_the_tool_defaults_match_the_module():
+    params = inspect.signature(SpareTools.prompt_rules).parameters
+    assert params["days"].default == prompts.DEFAULT_DAYS == 30
+    assert params["min_sessions"].default == prompts.DEFAULT_MIN_SESSIONS == 3
 
 
 class _FixedDatetime(datetime):

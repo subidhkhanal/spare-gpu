@@ -1,6 +1,5 @@
-"""The three job types end to end: real git repo, fake BharatCode Desktop, fake API, real pytest."""
+"""The job types end to end: real git repo, fake BharatCode Desktop, real pytest."""
 
-import json
 import sys
 from pathlib import Path
 
@@ -8,9 +7,9 @@ import pytest
 
 from gpu_token_utilization import jobs, landing, worktree
 from gpu_token_utilization.budget import Budgets
-from gpu_token_utilization.fakeapi import Reply
+from gpu_token_utilization.fakedesktop import FakeClock, Step
 from gpu_token_utilization.jobs import JobConfig
-from gpu_token_utilization.scheduler import Scheduler
+from gpu_token_utilization.scheduler import BUSY_WAIT, Scheduler
 
 from conftest import git
 
@@ -29,17 +28,17 @@ def only_session(desktop):
 
 
 @pytest.fixture
-def run_jobs(store, client, fake, desktop_fake):
-    def run(budgets=None, config=None, **kwargs):
+def run_jobs(store, clock, desktop_fake):
+    def run(job, budgets=None, config=None, agent=None, **kwargs):
         logs = []
         scheduler = Scheduler(
-            store, client,
-            agent=desktop_fake.agent(timeout=60),
+            store,
+            agent=agent or desktop_fake.agent(timeout=60),
             budgets=budgets or Budgets(),
             config=config or JobConfig(test_command=(sys.executable, "-m", "pytest")),
-            sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append, **kwargs,
+            sleep=clock.sleep, now=clock.utcnow, log=logs.append, **kwargs,
         )
-        scheduler.run()
+        scheduler.run_job(job.id)
         return logs
 
     return run
@@ -97,7 +96,7 @@ def test_tests_job_keeps_only_passing_tests(git_repo, store, scenario, run_jobs)
         {"tokens": 400},
     ])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs()
+    run_jobs(job)
 
     assert store.get_job(job.id).status == "done"
     # only the kept test file: the broken one was dropped and the sneaky source change reverted,
@@ -115,7 +114,7 @@ def test_tests_job_session_tokens_are_logged_per_step(git_repo, store, scenario,
     scenario(steps=[{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": IMPORT_SRC + "def test_ok():\n    assert add(1, 1) == 2\n"}},
                     {"tokens": 300}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs()
+    run_jobs(job)
     rows = [r for r in store.requests(job.id) if r["endpoint"] == "bharatcode-desktop"]
     assert [r["total_tokens"] for r in rows] == [11500, 300]
 
@@ -123,7 +122,7 @@ def test_tests_job_session_tokens_are_logged_per_step(git_repo, store, scenario,
 def test_tests_job_with_no_tests_generated_finishes_cleanly(git_repo, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 9000}], text="I could not write tests.")
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs()
+    run_jobs(job)
     assert store.get_job(job.id).status == "done"
     assert "nothing to keep" in store.steps(job.id)[1]["output"]
     assert store.get_job(job.id).output_dir is None and not (git_repo / "spare-gpu").exists()
@@ -132,7 +131,7 @@ def test_tests_job_with_no_tests_generated_finishes_cleanly(git_repo, store, sce
 def test_the_session_is_given_the_test_allowlist_and_the_worktree(git_repo, store, scenario, run_jobs):
     desktop = scenario(steps=[{"tokens": 100}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    run_jobs()
+    run_jobs(job)
     session = only_session(desktop)
     assert Path(session["directory"]) == worktree.worktree_path(git_repo, job.id)
     bash = session["config"]["permission"]["bash"]
@@ -153,10 +152,10 @@ def test_crash_during_verify_resumes_without_rerunning_the_session(git_repo, sto
 
     monkeypatch.setattr(jobs, "_run_pytest", crash_once)
     with pytest.raises(KeyboardInterrupt):
-        run_jobs()
+        run_jobs(job)
     assert [s["status"] for s in store.steps(job.id)] == ["done", "running"]
 
-    run_jobs()  # a fresh start
+    run_jobs(job)  # a fresh start
     assert store.get_job(job.id).status == "done"
     assert len(desktop.sessions) == 1  # the session ran once, its work was kept in the patch
     kept = result(store, job.id, "tests/test_gtu_calc.py")
@@ -166,7 +165,7 @@ def test_crash_during_verify_resumes_without_rerunning_the_session(git_repo, sto
 def test_a_failed_session_fails_the_job_with_its_message(git_repo, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 100}], error="Unexpected server error")
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    logs = run_jobs()
+    logs = run_jobs(job)
     assert store.get_job(job.id).status == "failed"
     assert any("Unexpected server error" in line for line in logs)
 
@@ -186,7 +185,7 @@ def test_docs_job_keeps_docstring_only_changes_and_reverts_the_rest(git_repo, st
         "docs/calc.md": "# calc\n",
     }}])
     job = store.add_job("docs", "src", str(git_repo))
-    run_jobs()
+    run_jobs(job)
 
     assert store.get_job(job.id).status == "done"
     assert '"""Return the sum of a and b."""' in result(store, job.id, "src/calc.py")
@@ -203,8 +202,7 @@ def test_docs_job_keeps_docstring_only_changes_and_reverts_the_rest(git_repo, st
 
 def test_docs_job_never_gets_a_shell(git_repo, store, scenario, run_jobs):
     desktop = scenario(steps=[{"tokens": 100}])
-    store.add_job("docs", "src", str(git_repo))
-    run_jobs()
+    run_jobs(store.add_job("docs", "src", str(git_repo)))
     assert only_session(desktop)["config"]["permission"]["bash"] == "deny"
 
 
@@ -269,7 +267,7 @@ def test_fix_job_keeps_the_fix_when_the_tests_pass_and_never_lets_it_touch_exist
         "tests/test_calc.py": "def test_nothing():\n    pass\n",  # a fix that weakens the tests
     }}, {"tokens": 200}])
     job = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
-    run_jobs(config=FIX_CONFIG)
+    run_jobs(job, config=FIX_CONFIG)
     assert store.get_job(job.id).status == "done"
     verify = store.steps(job.id)[1]["output"]
     assert verify.startswith("Kept the fix in 1 file(s): the test command passed.")
@@ -284,7 +282,7 @@ def test_fix_job_keeps_the_fix_when_the_tests_pass_and_never_lets_it_touch_exist
 def test_fix_job_drops_the_fix_when_the_tests_fail(repo_with_tests, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 3000, "writes": {"src/calc.py": "def add(a, b):\n    return a - b\n"}}])
     job = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
-    run_jobs(config=FIX_CONFIG)
+    run_jobs(job, config=FIX_CONFIG)
     assert store.get_job(job.id).status == "done"
     verify = store.steps(job.id)[1]["output"]
     assert verify.startswith("Kept the fix in 0 file(s): the test command failed with it.")
@@ -297,43 +295,54 @@ def test_fix_job_drops_the_fix_when_the_tests_fail(repo_with_tests, store, scena
 def test_fix_job_without_findings_or_without_a_fix_finishes_honestly(repo_with_tests, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 500}], text="Nothing to change.")
     nothing = store.add_job("fix", ".", str(repo_with_tests), note=FINDINGS)
-    run_jobs(config=FIX_CONFIG)
+    run_jobs(nothing, config=FIX_CONFIG)
     assert store.get_job(nothing.id).status == "done" and "No fix was generated" in store.steps(nothing.id)[1]["output"]
     blank = store.add_job("fix", ".", str(repo_with_tests))
-    run_jobs(config=FIX_CONFIG)
+    run_jobs(blank, config=FIX_CONFIG)
     assert store.get_job(blank.id).status == "failed"
     assert "needs the findings" in (store.steps(blank.id)[0]["output"] or "")
 
 
 # --- review job --------------------------------------------------------------------------
 
-def test_review_job_writes_a_report_and_changes_no_source(git_repo, store, scenario, run_jobs, fake):
+def test_review_job_writes_a_report_and_changes_no_source(git_repo, store, desktop_fake, run_jobs):
     head = git(git_repo, "rev-parse", "HEAD")
-    fake.queue(Reply(content="## Likely bugs\n- `src/calc.py:2` no type checks\n\n## Risky code\nNothing found.\n\n## Suggestions\nNothing found.",
-                     queue_wait_ms=4200))
-    desktop = scenario()
+    desktop_fake.steps = [Step(tokens=1500, text="## Likely bugs\n- `src/calc.py:2` no type checks\n\n"
+                                                  "## Risky code\nNothing found.\n\n## Suggestions\nNothing found.")]
     job = store.add_job("review", "src", str(git_repo))
-    run_jobs()
+    run_jobs(job)
 
     assert store.get_job(job.id).status == "done"
-    assert not desktop.sessions  # with a key, the review uses our own client, not a Desktop session
     name = f"gtu-review-{job.id}.md"
     assert result_files(store, job.id) == {name}  # the report only: no source file changed
     report = result(store, job.id, name)
     assert report.startswith("# Code review: `src`") and "`src/calc.py:2`" in report
-    sent = json.loads([r for r in fake.requests if r.url.path.endswith("/chat/completions")][0].content)
-    assert "src/calc.py:1| def add(a, b):" in sent["messages"][1]["content"]
+    # one read-only Desktop session, sent the numbered listing
+    session = only_session(desktop_fake)
+    assert "src/calc.py:1| def add(a, b):" in session["prompt"]["parts"][0]["text"]
+    permission = session["config"]["permission"]
+    assert permission["edit"] == "deny" and permission["bash"] == "deny" and permission["read"]["*"] == "allow"
     (row,) = store.requests(job.id)
-    assert row["queue_wait_ms"] == 4200 and row["request_id"]
+    assert row["endpoint"] == "bharatcode-desktop" and row["total_tokens"] == 1500
     assert_main_untouched(git_repo, head)
 
 
-def test_review_job_keeps_a_cut_off_report_and_says_so(git_repo, store, scenario, run_jobs, fake):
-    fake.truncated("## Likely bugs\n- `src/calc.py:1` something")
+def test_a_review_session_that_times_out_is_retried_after_a_wait(git_repo, store, desktop_fake, clock, run_jobs):
+    # the first session never finishes within the agent's timeout; the second answers at once
+    slow = [Step(tokens=100, polls=1000, text="never seen")]
+    fast = [Step(tokens=200, text="## Likely bugs\nNothing found.")]
+    desktop_fake.calls = [slow, fast]
+    polls = FakeClock()  # the agent's own time: each poll moves it on
+    agent = desktop_fake.agent(timeout=60, sleep=polls.sleep, clock=polls)
     job = store.add_job("review", "src/calc.py", str(git_repo))
-    run_jobs()
-    report = result(store, job.id, f"gtu-review-{job.id}.md")
-    assert "something" in report and "cut off at the output token limit" in report
+    logs = run_jobs(job, agent=agent)
+
+    assert store.get_job(job.id).status == "done", "\n".join(logs)
+    assert len(desktop_fake.sessions) == 2
+    assert desktop_fake.sessions["ses_1"]["aborted"] and not desktop_fake.sessions["ses_2"]["aborted"]
+    assert clock.sleeps == [BUSY_WAIT]  # waited once before trying the step again
+    assert any("busy" in line for line in logs)
+    assert "Nothing found." in result(store, job.id, f"gtu-review-{job.id}.md")
 
 
 # --- budgets -----------------------------------------------------------------------------
@@ -342,7 +351,7 @@ def test_job_budget_stops_the_session_and_pauses_the_job(git_repo, store, scenar
     scenario(steps=[{"tokens": 2000, "sleep": 0.3, "writes": {"tests/test_gtu_x.py": "def test_x():\n    pass\n"}}
                     for _ in range(6)])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    logs = run_jobs(budgets=Budgets(per_job=5000))
+    logs = run_jobs(job, budgets=Budgets(per_job=5000))
     assert store.get_job(job.id).status == "paused"
     assert [s["status"] for s in store.steps(job.id)] == ["pending", "pending"]
     used = store.request_summary(job.id)["total_tokens"]

@@ -67,7 +67,7 @@ copy by a fix job that runs in front of the user and are kept only if the projec
    private copy of the project, runs the project's test command, and keeps the changes only if
    it passes; a fix may not change existing tests. Its changed files land in
    spare-gpu/<date>_<time>/ as one set to accept or ignore; the user's own files are never
-   touched. Say all that, and that `gtu list` shows the job. Never edit files yourself.
+   touched. Say all that, and that /apply copies the files in. Never edit files yourself.
 
 ## Report back
 7. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: finders (standard model, how many runs),

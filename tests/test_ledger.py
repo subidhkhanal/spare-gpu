@@ -1,5 +1,6 @@
 """The record of every job (.gtu/jobs/<id>/ledger.json), the RUN.md and manifest.json written next
-to a job's files, and `gtu apply` / `gtu undo`: real git, the fake BharatCode Desktop, the fake API."""
+to a job's files, and /apply and /undo (the pack's apply_result and undo_result tools): real git and
+the fake BharatCode Desktop."""
 
 import hashlib
 import json
@@ -9,12 +10,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from typer.testing import CliRunner
 
 from gpu_token_utilization import landing, ledger, worktree
-from gpu_token_utilization.cli import app
-from gpu_token_utilization.fakeapi import Reply
+from gpu_token_utilization.fakedesktop import Step
 from gpu_token_utilization.jobs import JobConfig
+from gpu_token_utilization.mcp_server import SpareTools
 from gpu_token_utilization.scheduler import Scheduler
 
 from conftest import git
@@ -39,12 +39,16 @@ def sha(data: bytes) -> str:
 
 
 @pytest.fixture
-def run_jobs(store, client, fake, desktop_fake):
+def run_jobs(store, desktop_fake, clock):
+    """Run every queued job to its end, one at a time."""
     def run():
         logs = []
-        Scheduler(store, client, agent=desktop_fake.agent(timeout=60),
-                  config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
-                  sleep=fake.clock.sleep, now=fake.clock.utcnow, log=logs.append).run()
+        scheduler = Scheduler(store, agent=desktop_fake.agent(timeout=60),
+                              config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
+                              sleep=clock.sleep, now=clock.utcnow, log=logs.append)
+        for job in store.list_jobs():
+            if job.status == "queued":
+                scheduler.run_job(job.id)
         return logs
 
     return run
@@ -95,9 +99,8 @@ def test_the_ledger_is_written_after_every_step_not_only_at_the_end(git_repo, st
     assert [e["step"] for e in doc["steps"]] == ["write"] and doc["steps"][0]["tokens"] == 500
 
 
-def test_a_review_step_is_recorded_with_its_tokens_and_no_tools(git_repo, store, scenario, run_jobs, fake):
-    fake.queue(Reply(content="## Likely bugs\nNothing found.", prompt_tokens=300, completion_tokens=40))
-    scenario()
+def test_a_review_step_is_recorded_with_its_tokens_and_no_tools(git_repo, store, run_jobs, desktop_fake):
+    desktop_fake.steps = [Step(tokens=340, text="## Likely bugs\nNothing found.")]
     job = store.add_job("review", "src", str(git_repo))
     run_jobs()
     (entry,) = ledger_of(git_repo, job.id)["steps"]
@@ -173,11 +176,11 @@ def test_run_md_summarises_the_job_its_steps_its_files_and_what_was_reverted(git
     assert "| verify | done | qwen-3.8-27b |" in text and "| 0 | none |" in text
     assert "- `tests/test_gtu_calc.py` (added): 2 passing test(s), dropped 1 failing" in text
     assert "## Reverted by the checks\n\n- `src/calc.py`: tests jobs only add new test files" in text
-    assert f"`gtu apply {folder.name}`" in text and f"`gtu undo {folder.name}`" in text
+    assert f"`/apply {folder.name}`" in text and f"`/undo {folder.name}`" in text
     assert "\u2014" not in text  # plain punctuation only
 
 
-# --- gtu apply and gtu undo ---------------------------------------------------------------------
+# --- /apply and /undo ---------------------------------------------------------------------------
 
 def snapshot(repo: Path) -> dict[str, bytes]:
     """Every file of the user's project, byte for byte (spare-gpu's own folders left out)."""
@@ -244,7 +247,7 @@ def test_apply_copies_the_files_in_and_saves_what_it_replaced(git_repo, result):
     assert "replaced: src/calc.py" in outcome.lines and "added: tests/test_calc.py" in outcome.lines \
         and "deleted: old.txt" in outcome.lines
     assert outcome.lines[-1].startswith("Applied 4 file(s) from spare-gpu/2026-11-05_14-32-07") \
-        and outcome.lines[-1].endswith(f"gtu undo {STAMP}")
+        and outcome.lines[-1].endswith(f"/undo {STAMP}")
     assert "spare-gpu" not in git(git_repo, "status", "--porcelain")  # the folder still ignores itself
 
 
@@ -289,7 +292,7 @@ def test_dry_run_says_what_would_happen_and_writes_nothing(git_repo, result):
 
 def test_apply_twice_is_refused_until_undo(git_repo, result):
     landing.apply(git_repo, "latest")
-    with pytest.raises(landing.LandingError, match=f"already applied.*gtu undo {STAMP}"):
+    with pytest.raises(landing.LandingError, match=f"already applied.*/undo {STAMP}"):
         landing.apply(git_repo, "latest")
     with pytest.raises(landing.LandingError, match="already applied"):
         landing.apply(git_repo, "latest", dry_run=True)
@@ -307,7 +310,7 @@ def test_undo_restores_exactly_and_removes_the_files_apply_added(git_repo, resul
     assert not (result / ".undo").exists()
     assert outcome.counts == {"restored": 3, "removed": 1}
     assert "restored: src/calc.py" in outcome.lines and "removed: tests/test_calc.py" in outcome.lines
-    assert outcome.lines[-1].endswith(f"gtu apply {STAMP}")
+    assert outcome.lines[-1].endswith(f"/apply {STAMP}")
     assert git(git_repo, "status", "--porcelain") == ""
     with pytest.raises(landing.LandingError, match="nothing to undo"):
         landing.undo(git_repo, "latest")
@@ -358,33 +361,29 @@ def test_latest_means_the_newest_folder_with_a_manifest_and_names_are_taken_in_a
         landing.undo(git_repo, "latest")
 
 
-def test_the_commands_work_from_a_subfolder_of_the_project(git_repo, result, monkeypatch):
-    monkeypatch.chdir(git_repo / "src")
-    runner = CliRunner()
-    dry = runner.invoke(app, ["apply", "--dry-run"])
-    assert dry.exit_code == 0, dry.output
-    assert "would replace: src/calc.py" in dry.output and (git_repo / "src" / "calc.py").read_text() == CALC
-    done = runner.invoke(app, ["apply", "latest"])
-    assert done.exit_code == 0, done.output
-    assert (git_repo / "src" / "calc.py").read_text() == DOCUMENTED and f"gtu undo {STAMP}" in done.output
-    again = runner.invoke(app, ["apply", STAMP])
-    assert again.exit_code == 1 and f"gtu undo {STAMP}" in again.output
-    back = runner.invoke(app, ["undo"])
-    assert back.exit_code == 0, back.output
+def test_the_tools_work_from_a_subfolder_of_the_project(git_repo, result):
+    tools = SpareTools(git_repo / "src")
+    dry = tools.apply_result(dry_run=True)
+    assert "would replace: src/calc.py" in dry and (git_repo / "src" / "calc.py").read_text() == CALC
+    done = tools.apply_result("latest")
+    assert (git_repo / "src" / "calc.py").read_text() == DOCUMENTED and f"/undo {STAMP}" in done
+    again = tools.apply_result(STAMP)
+    assert again.startswith("Didn't apply it:") and f"/undo {STAMP}" in again
+    back = tools.undo_result()
+    assert back.endswith(f"/apply {STAMP}")
     assert (git_repo / "src" / "calc.py").read_text() == CALC and not (result / ".undo").exists()
-    nothing = runner.invoke(app, ["undo"])
-    assert nothing.exit_code == 1 and "nothing to undo" in nothing.output
+    nothing = tools.undo_result()
+    assert nothing.startswith("Didn't undo it:") and "nothing to undo" in nothing
 
 
-def test_apply_works_in_a_plain_folder_from_a_subfolder(tmp_path, monkeypatch):
+def test_apply_works_in_a_plain_folder_from_a_subfolder(tmp_path):
     plain = tmp_path / "plain"
     (plain / "src").mkdir(parents=True)
     (plain / "src" / "calc.py").write_text(CALC)
     finished(plain, "j", lambda copy: (copy / "src" / "calc.py").write_text(DOCUMENTED), kind="docs", target="src", model=None)
     assert landing.find_root(plain / "src") == plain.resolve()
-    monkeypatch.chdir(plain / "src")
-    result = CliRunner().invoke(app, ["apply"])
-    assert result.exit_code == 0, result.output
+    text = SpareTools(plain / "src").apply_result()
+    assert text.startswith("replaced: src/calc.py"), text
     assert (plain / "src" / "calc.py").read_text() == DOCUMENTED and not (plain / ".git").exists()
 
 
@@ -399,10 +398,9 @@ def test_a_job_that_only_deleted_a_file_still_gets_a_folder_with_the_deletion_on
     assert worktree.changed_files(copy, None) == []  # nothing to copy, as before
 
 
-def test_the_report_reads_the_manifest(git_repo, store, scenario, run_jobs):
-    from gpu_token_utilization import report
-
+def test_a_tests_jobs_manifest_lists_only_the_test_file_it_kept(git_repo, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 1000, "writes": {"tests/test_gtu_calc.py": GOOD_AND_BAD_TESTS}}, {"tokens": 100}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
     run_jobs()
-    assert report.build_job(store, store.get_job(job.id)).files == [("A", "tests/test_gtu_calc.py")]
+    manifest = json.loads((folder_of(store, job.id) / "manifest.json").read_text(encoding="utf-8"))
+    assert [(f["change"], f["path"]) for f in manifest["files"]] == [("A", "tests/test_gtu_calc.py")]

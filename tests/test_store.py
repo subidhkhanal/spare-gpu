@@ -11,9 +11,11 @@ def store(tmp_path):
         yield s
 
 
-def test_store_gitignores_its_folder(tmp_path):
+def test_store_gitignores_its_folder_but_the_settings_and_memory(tmp_path):
+    from gpu_token_utilization.store import IGNORE
+
     Store(tmp_path / ".gtu" / "gtu.db").close()
-    assert (tmp_path / ".gtu" / ".gitignore").read_text() == "*\n"
+    assert (tmp_path / ".gtu" / ".gitignore").read_text() == IGNORE == "*\n!.gitignore\n!settings.json\n!memory.md\n"
 
 
 def test_a_store_elsewhere_never_gitignores_that_folder(tmp_path):

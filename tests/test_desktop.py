@@ -235,9 +235,9 @@ def test_ask_is_a_session_that_may_not_edit_or_run_anything(fake, tmp_path):
     assert prompt.startswith("You review code.\n\nReview a.py") and "Don't use any tools" in prompt
 
 
-# --- inside Desktop, no API key is needed -------------------------------------------------------
+# --- a review job is one read-only Desktop session ----------------------------------------------
 
-def test_a_review_job_runs_as_a_desktop_session_without_a_client(fake, tmp_path, store):
+def test_a_review_job_runs_as_one_read_only_desktop_session(fake, tmp_path, store):
     from gpu_token_utilization.scheduler import Scheduler
 
     repo = tmp_path / "repo"
@@ -245,24 +245,11 @@ def test_a_review_job_runs_as_a_desktop_session_without_a_client(fake, tmp_path,
     (repo / "a.py").write_text("def f(x):\n    return 1 / x\n")
     job = store.add_job("review", "a.py", str(repo))
     fake.steps = [Step(900, text="## Likely bugs\n- `a.py:2` divides by zero when x is 0.")]
-    done = Scheduler(store, None, agent=agent(fake), isolate=False).run()
-    assert done == 1 and store.get_job(job.id).status == "done"
+    assert Scheduler(store, agent=agent(fake), isolate=False).run_job(job.id) == "done"
     report = (repo / f"gtu-review-{job.id}.md").read_text()
     assert "divides by zero" in report
+    assert len(fake.sessions) == 1
     assert store.request_summary(job.id)["total_tokens"] == 900  # counted against the budget like any step
-
-
-def test_gtu_start_inside_desktop_needs_no_api_key(tmp_path, monkeypatch):
-    from typer.testing import CliRunner
-
-    from gpu_token_utilization.cli import app
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("GTU_DB", raising=False)
-    monkeypatch.setattr(desktop, "discover", lambda: Connection(URL, "opencode", PASSWORD))
-    result = CliRunner().invoke(app, ["start"])
-    assert result.exit_code == 0, result.output
-    assert "no API key needed" in result.output and "Queue empty" in result.output
 
 
 def test_the_session_carries_the_jobs_rules_and_hides_spare_gpus_own_tools(fake, tmp_path):

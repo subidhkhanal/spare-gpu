@@ -1,5 +1,5 @@
-"""Token totals for `gtu report` (per-session detail is in BharatCode Desktop itself), and
-`gtu cost`: BharatCode's per-model figures next to spare-gpu's jobs."""
+"""Token totals per job and period (per-session detail is in BharatCode Desktop itself), and
+/cost (the pack's cost_summary tool): BharatCode's per-model figures next to spare-gpu's jobs."""
 
 import re
 from datetime import datetime, timedelta, timezone
@@ -54,14 +54,11 @@ def test_an_unknown_job_id_is_an_error(store):
         costs.collect(store, "nope1234")
 
 
-# --- `gtu cost`: BharatCode's per-model figures next to spare-gpu's jobs -----------------------------
-
-from typer.testing import CliRunner  # noqa: E402
+# --- /cost: BharatCode's per-model figures next to spare-gpu's jobs ----------------------------------
 
 from gpu_token_utilization import stats  # noqa: E402
-from gpu_token_utilization.cli import app  # noqa: E402
+from gpu_token_utilization.mcp_server import SpareTools  # noqa: E402
 
-runner = CliRunner()
 # What Desktop's own record gives per model (stats.tokens_since), for a day's chats.
 USAGE = {"bharatcode/deepseek-v4.1-flash": {"messages": 12, "input": 120_500, "output": 8_200, "reasoning": 0,
                                             "cache_read": 40_000, "cache_write": 0, "tokens": 168_700},
@@ -127,7 +124,7 @@ def test_period_without_desktop_data_says_so_and_without_jobs_too(store):
     assert short == f"In the last 24 hours: {no_data}. spare-gpu ran no jobs in the last 24 hours."
     assert costs.render_short(costs.period(store, days=7, usage={}, channel="stable")).startswith(
         "In the last 7 days: BharatCode Desktop (stable) recorded no replies in this period; "
-        "`--channel` reads another Desktop build (stable, beta, dev or local).")
+        "`/cost beta` (or stable, dev, local) reads another Desktop build.")
 
 
 def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkeypatch, tmp_path):
@@ -155,19 +152,19 @@ def test_a_running_job_with_requests_in_the_period_counts_as_ran(store, job_repo
     assert "1 job(s) ran, 2,000 tokens" in costs.render(period)
 
 
-def test_the_cost_command(store, job_repo, monkeypatch):
+def test_the_cost_summary_tool(store, job_repo, monkeypatch, tmp_path):
     monkeypatch.setenv("GTU_DB", str(store.path))
     monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: USAGE)
     monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: store.path)  # any file: the figures are faked
     finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 0 passing test(s), dropped 2.")
-    result = runner.invoke(app, ["cost"])
-    assert result.exit_code == 0, result.output
-    assert "Tokens per model" in result.output and "1 job(s) ran (1 done), 20,000 tokens; 1 kept nothing" in result.output
-    result = runner.invoke(app, ["cost", "--short", "--days", "2"])
-    assert result.exit_code == 0 and result.output.count("\n") == 1 and result.output.startswith("In the last 2 days: By model")
+    tools = SpareTools(tmp_path)
+    tables = tools.cost_summary(short=False)
+    assert "Tokens per model" in tables and "1 job(s) ran (1 done), 20,000 tokens; 1 kept nothing" in tables
+    short = tools.cost_summary(days=2)
+    assert "\n" not in short and short.startswith("In the last 2 days: By model")
     monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: None)
-    assert "BharatCode Desktop's session data wasn't found" in runner.invoke(app, ["cost"]).output
-    assert runner.invoke(app, ["cost", "--days", "0"]).exit_code == 1
+    assert "BharatCode Desktop's session data wasn't found" in tools.cost_summary(short=False)
+    assert tools.cost_summary(days=0) == "Give a period of more than 0 days."
 
 
 def test_the_channel_option_reads_that_desktops_record(store, job_repo, monkeypatch, tmp_path):
@@ -179,9 +176,10 @@ def test_the_channel_option_reads_that_desktops_record(store, job_repo, monkeypa
     local = tmp_path / "local"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
     desktop_db(local / "BharatCode Beta" / "Data" / "bharatcode.db", [("C:/x", now_ms - 1000, "bharatcode/qwen-3.8-27b", reply)])
-    beta = runner.invoke(app, ["cost", "--short", "--channel", "beta"])
-    assert beta.exit_code == 0 and "Qwen 3.8 27B 1,000 tokens in 1 message(s)" in beta.output
-    stable = runner.invoke(app, ["cost", "--short"]).output  # not started by Desktop: the released app's, which has no data here
+    tools = SpareTools(tmp_path)
+    beta = tools.cost_summary(channel="beta")
+    assert "Qwen 3.8 27B 1,000 tokens in 1 message(s)" in beta
+    stable = tools.cost_summary()  # not started by Desktop: the released app's, which has no data here
     assert "session data wasn't found" in stable
-    bad = runner.invoke(app, ["cost", "--channel", "nightly"])
-    assert bad.exit_code == 1 and "unknown channel 'nightly'" in bad.output
+    bad = tools.cost_summary(channel="nightly")
+    assert "unknown Desktop build 'nightly'" in bad

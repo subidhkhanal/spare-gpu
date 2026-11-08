@@ -1,23 +1,15 @@
 import json
-import uuid
 
 import pytest
 
-from gpu_token_utilization import keystore
-from gpu_token_utilization.keystore import TARGET_ENV
 from gpu_token_utilization import workers
-from gpu_token_utilization.client import BharatCodeClient, RetryPolicy
-from gpu_token_utilization.fakeapi import FakeBharatCode
-from gpu_token_utilization.fakedesktop import FakeDesktop, Step
+from gpu_token_utilization.fakedesktop import FakeClock, FakeDesktop, Step
 from gpu_token_utilization.store import Store
-
-KEY = "bc_live_fake_key"
 
 
 @pytest.fixture(autouse=True)
 def no_real_api_key(monkeypatch):
-    """No test may find the user's real key (and so reach the real API, or let a background
-    runner do it). Tests that need a key set a fake one."""
+    """No test sees a BharatCode API key the user may have set (jobs strip it from what they run)."""
     monkeypatch.delenv("BHARATCODE_API_KEY", raising=False)
 
 
@@ -49,22 +41,10 @@ def neutral_routing_policy(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("GTU_ROUTING_POLICY", str(path))
 
 
-@pytest.fixture(autouse=True)
-def private_credential_target(monkeypatch):
-    """Every test gets its own Credential Manager entry name, so no test can read (or
-    overwrite) a key the user saved with `gtu setkey`. Tests that save one clean up."""
-    target = f"spare-gpu-test/{uuid.uuid4().hex}"
-    monkeypatch.setenv(TARGET_ENV, target)
-    yield target
-    try:
-        keystore.delete()
-    except keystore.KeystoreError:
-        pass
-
-
 @pytest.fixture
-def fake():
-    return FakeBharatCode(api_key=KEY)
+def clock():
+    """Fake time for the scheduler: clock.sleep records each wait, clock.utcnow is its `now`."""
+    return FakeClock()
 
 
 @pytest.fixture
@@ -78,15 +58,6 @@ def job_repo(tmp_path):
     """A repo path for jobs that never touch git. Must be a real temp folder: the scheduler
     writes per-job state under <repo>/.gtu, and a literal like "/repo" escapes the sandbox."""
     return str(tmp_path / "repo")
-
-
-@pytest.fixture
-def client(fake, store):
-    # Scheduler-style client: no retries; the scheduler waits out a busy answer and tries the step again.
-    return BharatCodeClient(
-        api_key=KEY, store=store, transport=fake.transport(), retry=RetryPolicy(max_retries=0),
-        sleep=fake.clock.sleep, clock=fake.clock, rng=lambda: 0.5,  # 0.5 = no jitter
-    )
 
 
 def git(cwd, *args):
@@ -132,7 +103,7 @@ class QuickAgent:
 
 def quick_worker(store=None, log=None, config=None):
     """What workers.build returns inside Desktop, without a Desktop."""
-    return workers.Worker(client=None, agent=QuickAgent(), desktop_missing=None, inside_desktop=True)
+    return workers.Worker(agent=QuickAgent())
 
 
 def quick_plans(write=None):

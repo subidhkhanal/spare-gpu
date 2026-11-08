@@ -16,12 +16,36 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 
 PASSWORD = "fake-desktop-password"
 URL = "http://127.0.0.1:4096"
+
+
+class FakeClock:
+    """Fake time for the scheduler's waits: `sleep` records and advances, nothing really sleeps."""
+
+    def __init__(self, start: datetime | None = None) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+        self.start = start or datetime.now(timezone.utc)
+
+    def __call__(self) -> float:
+        return self.now
+
+    def utcnow(self) -> datetime:
+        """Wall-clock view of the same fake time."""
+        return self.start + timedelta(seconds=self.now)
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
 @dataclass

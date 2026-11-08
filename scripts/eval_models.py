@@ -39,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gpu_token_utilization import desktop, worktree
+from gpu_token_utilization import desktop
 from gpu_token_utilization.budget import Budgets
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.scheduler import Scheduler
@@ -86,7 +86,7 @@ def run_task(conn, task: dict, model: str, workdir: Path, job_budget: int, log=p
         config = JobConfig.from_env()
         agent = desktop.DesktopAgent(conn, model=f"bharatcode/{model}", timeout=config.agent_timeout)
         budgets = Budgets(per_job=job_budget)
-        Scheduler(store, None, agent=agent, config=config, budgets=budgets, log=log).run()
+        Scheduler(store, agent=agent, config=config, budgets=budgets, log=log).run_job(job.id)
         status = store.get_job(job.id).status
         if status == "failed":
             # A failed job (service unreachable, say) says nothing about the model: retry it, never score it 0.

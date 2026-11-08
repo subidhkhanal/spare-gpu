@@ -3,8 +3,8 @@
 #   irm https://raw.githubusercontent.com/subidhkhanal/spare-gpu/master/install.ps1 | iex
 #
 # It installs Python and git with winget if they're missing, installs spare-gpu into its own
-# Python environment (%LOCALAPPDATA%\spare-gpu), connects it to BharatCode Desktop (`gtu
-# integrate`) and puts `gtu` on your PATH. Run it again to update. Nothing needs admin rights
+# Python environment (%LOCALAPPDATA%\spare-gpu), connects it to BharatCode Desktop with every chat
+# command (`gtu integrate --pack`) and puts `gtu` on your PATH. Run it again to update. Nothing needs admin rights
 # except, possibly, the git install (Windows may ask).
 #
 # Options, as environment variables set before running it:
@@ -113,7 +113,7 @@ function Install-SpareGpu {
     if ($LASTEXITCODE -ne 0 -or -not $installed) { Fail 'spare-gpu was installed but `gtu --version` did not run (see above).' }
     Say "installed spare-gpu $installed"
 
-    # 4. `gtu` on your PATH, for new windows (`gtu integrate --uninstall`, `gtu list`, ...)
+    # 4. `gtu` on your PATH, for new windows (`gtu integrate --uninstall`)
     $scripts = Split-Path $gtu
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not $userPath) { $userPath = '' }  # a fresh account may have no user PATH at all
@@ -123,18 +123,18 @@ function Install-SpareGpu {
     }
     $env:Path = "$scripts;$env:Path"
 
-    # 5. connect it to BharatCode Desktop: the spare-gpu tools and the /auto command
+    # 5. connect it to BharatCode Desktop: the spare-gpu tools and every chat command
     if ($env:SPARE_GPU_SKIP_INTEGRATE -eq '1') {
         Say 'installed. Skipped connecting to BharatCode Desktop (SPARE_GPU_SKIP_INTEGRATE=1).'
         return
     }
-    & $gtu integrate
-    if ($LASTEXITCODE -ne 0) { Fail 'gtu integrate reported a problem (see above).' }
+    & $gtu integrate --pack
+    if ($LASTEXITCODE -ne 0) { Fail 'gtu integrate --pack reported a problem (see above).' }
 
     Write-Host ''
     Write-Host "spare-gpu $installed is installed." -ForegroundColor Green
-    Write-Host 'Now fully close BharatCode Desktop and open it again, then type /auto in a chat, for example:'
-    Write-Host '  /auto write docs for src/utils.py'
+    Write-Host 'Now fully close BharatCode Desktop and open it again. Then, in any chat, try for example:'
+    Write-Host '  /code-review          /auto write docs for src/utils.py          /doctor'
     Write-Host 'To remove it later: gtu integrate --uninstall, then delete' $home_
 }
 

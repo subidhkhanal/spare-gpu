@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="spare-gpu: less waiting in BharatCode Desktop">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="spare-gpu: chat commands that make BharatCode Desktop do more">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#1c1410"/>
@@ -19,29 +19,26 @@
 
   <!-- title -->
   <text x="72" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="78" font-weight="700" fill="#fff4ec">spare<tspan fill="#ff6a35">-</tspan>gpu</text>
-  <text x="76" y="200" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="27" fill="#d8c8bc">Less waiting, more done in BharatCode Desktop</text>
-  <text x="76" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#a8968a">faster model · safe coding jobs · review &amp; research commands · memory · cost</text>
+  <text x="76" y="200" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="27" fill="#d8c8bc">Chat commands that make BharatCode Desktop do more</text>
+  <text x="76" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#a8968a">answers · coding jobs · reviews · research · memory · cost · checks</text>
 
-  <!-- two lanes -->
-  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
-    <!-- DeepSeek lane: queued -->
-    <text x="760" y="104" font-size="16" fill="#a8968a">DeepSeek <tspan fill="#c9774f">· queue 2m 43s</tspan></text>
-    <rect x="760" y="114" width="440" height="52" rx="10" fill="#120c09" stroke="#3a2c24"/>
-    <rect x="776" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
-    <rect x="842" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
-    <rect x="908" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
-    <rect x="974" y="128" width="58" height="24" rx="6" fill="#5e5652"/>
-
-    <!-- Qwen lane: free -->
-    <text x="760" y="214" font-size="16" fill="#a8968a">Qwen <tspan fill="#6fd3e6">· free slot</tspan></text>
-    <rect x="760" y="224" width="440" height="52" rx="10" fill="#120c09" stroke="#3a2c24"/>
-    <rect x="776" y="238" width="58" height="24" rx="6" fill="#038fac"/>
-
-    <!-- your task moves to the free lane -->
-    <rect x="1048" y="128" width="58" height="24" rx="6" fill="none" stroke="#ff6a35" stroke-width="2" stroke-dasharray="5 4"/>
-    <path d="M1077 156 C 1077 200, 870 205, 870 232" fill="none" stroke="#ff6a35" stroke-width="2.5"/>
-    <path d="M862 226 L870 238 L878 226" fill="none" stroke="#ff6a35" stroke-width="2.5" stroke-linejoin="round"/>
-    <rect x="842" y="238" width="58" height="24" rx="6" fill="#ff6a35"/>
-    <text x="871" y="255" font-size="13" font-weight="700" fill="#1c1410" text-anchor="middle">you</text>
+  <!-- twelve features, one tile each, all alike -->
+  <g font-family="Consolas, Menlo, monospace" font-size="15" fill="#fff4ec" text-anchor="middle">
+    <g fill="#120c09" stroke="#3a2c24">
+      <rect x="724" y="64" width="156" height="46" rx="9"/><rect x="890" y="64" width="156" height="46" rx="9"/><rect x="1056" y="64" width="156" height="46" rx="9"/>
+      <rect x="724" y="122" width="156" height="46" rx="9"/><rect x="890" y="122" width="156" height="46" rx="9"/><rect x="1056" y="122" width="156" height="46" rx="9"/>
+      <rect x="724" y="180" width="156" height="46" rx="9"/><rect x="890" y="180" width="156" height="46" rx="9"/><rect x="1056" y="180" width="156" height="46" rx="9"/>
+      <rect x="724" y="238" width="156" height="46" rx="9"/><rect x="890" y="238" width="156" height="46" rx="9"/><rect x="1056" y="238" width="156" height="46" rx="9"/>
+    </g>
+    <g fill="#ff6a35">
+      <rect x="724" y="64" width="5" height="46" rx="2"/><rect x="890" y="64" width="5" height="46" rx="2"/><rect x="1056" y="64" width="5" height="46" rx="2"/>
+      <rect x="724" y="122" width="5" height="46" rx="2"/><rect x="890" y="122" width="5" height="46" rx="2"/><rect x="1056" y="122" width="5" height="46" rx="2"/>
+      <rect x="724" y="180" width="5" height="46" rx="2"/><rect x="890" y="180" width="5" height="46" rx="2"/><rect x="1056" y="180" width="5" height="46" rx="2"/>
+      <rect x="724" y="238" width="5" height="46" rx="2"/><rect x="890" y="238" width="5" height="46" rx="2"/><rect x="1056" y="238" width="5" height="46" rx="2"/>
+    </g>
+    <text x="804" y="92">/auto</text><text x="970" y="92">coding jobs</text><text x="1136" y="92">/apply /undo</text>
+    <text x="804" y="150">/code-review</text><text x="970" y="150">/security-review</text><text x="1136" y="150">/deep-research</text>
+    <text x="804" y="208">/simplify</text><text x="970" y="208">/verify-app</text><text x="1136" y="208">/remember</text>
+    <text x="804" y="266">/handoff /pickup</text><text x="970" y="266">/cost /prompts</text><text x="1136" y="266">/doctor</text>
   </g>
 </svg>

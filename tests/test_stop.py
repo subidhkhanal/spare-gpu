@@ -1,38 +1,39 @@
-"""`gtu stop`: ask the running job to stop, cleanly and without killing anything; jobs end up paused and resumable."""
+"""Stopping a job: a cancel from the chat ends a running job cleanly, without killing anything; jobs a
+crashed server left running end up paused and resumable; and two servers never run jobs in the same
+project at once."""
 
 import json
 import os
 import subprocess
 import sys
-import threading
-import time
 
-import pytest
-from typer.testing import CliRunner
+import httpx
 
-from gpu_token_utilization import runstate, worktree
-from gpu_token_utilization.budget import Budgets
-from gpu_token_utilization.cli import app
-from gpu_token_utilization.jobs import JobConfig
-from gpu_token_utilization.scheduler import Scheduler
+from gpu_token_utilization import runstate, workers, worktree
+from gpu_token_utilization.agent import BusyError
+from gpu_token_utilization.fakedesktop import Step
+from gpu_token_utilization.mcp_server import db_path
+from gpu_token_utilization.scheduler import DEFAULT_PLANS, Scheduler
 from gpu_token_utilization.store import Store
 
-from conftest import git
+from conftest import git, quick_tools
 
-runner = CliRunner()
+
+def no_wait_figures() -> httpx.Client:
+    """BharatCode's live stats, unavailable: every job stays on its preferred model."""
+    return httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503)))
 
 
 # --- run file and process helpers ----------------------------------------------------------
 
-def test_run_file_and_stop_flag(tmp_path):
+def test_run_file_names_the_running_server(tmp_path):
     assert runstate.running_pid(tmp_path) is None
     runstate.write_run(tmp_path)
     assert runstate.running_pid(tmp_path) == os.getpid()
-    assert not runstate.stop_requested(tmp_path)
-    runstate.request_stop(tmp_path)
-    assert runstate.stop_requested(tmp_path)
+    assert runstate.read_run(tmp_path)["pid"] == os.getpid()
     runstate.clear(tmp_path)
-    assert runstate.running_pid(tmp_path) is None and not runstate.stop_requested(tmp_path)
+    assert runstate.running_pid(tmp_path) is None and runstate.read_run(tmp_path) is None
+    runstate.clear(tmp_path)  # clearing twice is fine
 
 
 def test_a_stale_run_file_does_not_count(tmp_path):
@@ -54,54 +55,47 @@ def test_checking_liveness_never_kills_the_process():
 
 # --- the scheduler -------------------------------------------------------------------------
 
-def test_stop_while_waiting_out_a_busy_answer(fake, store, client, job_repo):
+def test_cancel_while_waiting_out_a_busy_answer(clock, store, job_repo):
     job = store.add_job("review", "a.py", job_repo)
-    fake.busy(100)  # BharatCode keeps answering busy
-    checks = {"n": 0}
-
-    def should_stop():
-        checks["n"] += 1
-        return checks["n"] > 5
 
     def review(ctx):
-        ctx.chat([{"role": "user", "content": "review"}])
-        return "x"
+        raise BusyError("BharatCode Desktop did not finish within 60 s")  # Desktop keeps timing out
 
-    s = Scheduler(store, client, plans={"review": [("x", review)]}, sleep=fake.clock.sleep,
-                  isolate=False, should_stop=should_stop)
-    assert s.run() == 0 and s.stopped
-    assert sum(fake.clock.sleeps) < 10  # woke within seconds, not after the 60 s wait
-    assert store.get_job(job.id).status == "paused"  # its step was put back and the job left resumable
+    def sleep(seconds):
+        clock.sleep(seconds)
+        if sum(clock.sleeps) >= 5:
+            store.cancel_job(job.id)  # the user cancels five seconds into the wait
+
+    s = Scheduler(store, plans={"review": [("x", review)]}, sleep=sleep, isolate=False,
+                  should_stop=lambda: store.get_job(job.id).status == "cancelled")
+    assert s.run_job(job.id) == "cancelled"
+    assert sum(clock.sleeps) < 10  # woke within seconds, not after the 60 s wait
+    assert store.get_job(job.id).status == "cancelled"
 
 
-def test_stop_mid_session_step_aborts_it_and_leaves_the_job_paused_and_clean(
-        git_repo, store, client, fake, scenario):
-    # a step that would take 60 s of polls (0.05 s each), writing half a file as it starts
-    desktop = scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"}, "polls": 1200}])
+def test_cancel_mid_session_aborts_it_and_keeps_nothing(git_repo, store, clock, scenario):
+    head = git(git_repo, "rev-parse", "HEAD")
+    # a step that would take 1000 polls, writing half a file as it starts
+    desktop = scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"}, "polls": 1000}])
     job = store.add_job("tests", "src/calc.py", str(git_repo))
-    flag = threading.Event()
-    threading.Timer(3.0, flag.set).start()
+    polls = []
 
-    def make(should_stop):
-        return Scheduler(store, client, agent=desktop.agent(timeout=120, poll=0.05, sleep=time.sleep),
-                         budgets=Budgets(), config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
-                         sleep=fake.clock.sleep, now=fake.clock.utcnow, should_stop=should_stop)
+    def poll_sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 5:
+            store.cancel_job(job.id)  # spare_cancel_work, five polls into the session
 
-    started = time.monotonic()
-    s = make(flag.is_set)
-    s.run()
-    assert time.monotonic() - started < 20  # the 60 s step was cut short
+    logs = []
+    s = Scheduler(store, agent=desktop.agent(timeout=600, sleep=poll_sleep), sleep=clock.sleep, now=clock.utcnow,
+                  log=logs.append, should_stop=lambda: store.get_job(job.id).status == "cancelled")
+    assert s.run_job(job.id) == "cancelled"
+    assert len(polls) < 10  # the 1000-poll step was cut short
     assert next(iter(desktop.sessions.values()))["aborted"]  # and its session stopped
-    assert s.stopped and store.get_job(job.id).status == "paused"  # paused, not failed
-    assert [st["status"] for st in store.steps(job.id)] == ["pending", "pending"]
-    wt = worktree.worktree_path(git_repo, job.id)
-    assert not (wt / "tests" / "test_gtu_x.py").exists()  # unfinished edit dropped
-    assert worktree.changed_files(wt, None) == []  # nothing half-done was kept
-
-    # resume: a quick, good run this time
-    scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "def test_ok():\n    assert True\n"}}])
-    make(lambda: False).run()
-    assert store.get_job(job.id).status == "done"
+    assert store.get_job(job.id).status == "cancelled"
+    assert not worktree.worktree_path(git_repo, job.id).exists()  # its copy, half-written file and all, is gone
+    assert not (git_repo / "spare-gpu").exists() and store.get_job(job.id).output_dir is None
+    assert git(git_repo, "rev-parse", "main") == head and git(git_repo, "status", "--porcelain") == ""
+    assert any("cancelled; its copy is removed and nothing was exported" in line for line in logs)
 
 
 def test_tidy_makes_a_crashed_job_resumable(git_repo, store):
@@ -116,79 +110,66 @@ def test_tidy_makes_a_crashed_job_resumable(git_repo, store):
     assert store.get_job(job.id).status == "paused"
     assert [s["status"] for s in store.steps(job.id)] == ["pending", "pending"]
     assert (wt / "src" / "calc.py").read_text() == "def add(a, b):\n    return a + b\n"
+    assert runstate.tidy(store) == []  # nothing left to tidy
 
 
-# --- the commands --------------------------------------------------------------------------
+# --- through the MCP tools -----------------------------------------------------------------
 
-@pytest.fixture
-def folder(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GTU_DB", str(tmp_path / ".gtu" / "gtu.db"))
-    return tmp_path / ".gtu"
+def test_cancelling_a_running_job_from_the_chat_stops_it(git_repo, desktop_fake):
+    desktop_fake.steps = [Step(tokens=100, writes={"tests/test_gtu_x.py": "half-written"}, polls=1000)]
+    answers, polls = [], []
 
+    def poll_sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 5:  # the user cancels it from another chat while the session runs
+            with Store(db_path(git_repo)) as store:
+                (job,) = store.list_jobs()
+            answers.append(tools.cancel_work(job.id))
 
-def wait_for_run_file(folder, timeout=10):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if runstate.running_pid(folder):
-            return
-        time.sleep(0.1)
-    raise AssertionError("the stand-in gtu start never registered")
+    def make_worker(store, log, config):
+        return workers.Worker(agent=desktop_fake.agent(timeout=600, sleep=poll_sleep))
 
-
-def test_stop_with_nothing_running(folder):
-    result = runner.invoke(app, ["stop"])
-    assert result.exit_code == 0 and "Nothing is running." in result.output
-
-
-def test_stop_with_nothing_running_still_pauses_crashed_jobs(folder, job_repo):
-    with Store(folder / "gtu.db") as s:
-        job = s.add_job("review", "a.py", job_repo)
-        s.set_status(job.id, "running")
-    result = runner.invoke(app, ["stop"])
-    assert f"Paused interrupted job(s): {job.id}" in result.output
+    tools = quick_tools(git_repo, no_wait_figures, make_worker=make_worker, plans=DEFAULT_PLANS)
+    text = tools.delegate("tests", "src/calc.py")
+    assert answers and answers[0].startswith("Cancelled job ")
+    assert "it was running; it stops within a few seconds" in answers[0]
+    assert text.startswith("Cancelled: tests for src/calc.py (job ") and "nothing was copied to spare-gpu/" in text
+    assert len(polls) < 10 and next(iter(desktop_fake.sessions.values()))["aborted"]
+    with Store(db_path(git_repo)) as store:
+        (job,) = store.list_jobs()
+        assert job.status == "cancelled"
+    assert not worktree.worktree_path(git_repo, job.id).exists() and not (git_repo / "spare-gpu").exists()
+    assert runstate.running_pid(git_repo / ".gtu") is None  # the run file went with it
 
 
-STANDIN = """
-import json, os, pathlib, sys, time
-folder = pathlib.Path(sys.argv[1]); folder.mkdir(parents=True, exist_ok=True)
-(folder / "run.json").write_text(json.dumps({"pid": os.getpid()}))
-obey = sys.argv[2] == "obey"
-while not (obey and (folder / "stop").exists()):
-    time.sleep(0.1)
-(folder / "run.json").unlink()  # what a real runner does in its `finally`
-"""
+def test_delegate_first_pauses_jobs_a_crashed_server_left_running_and_drops_their_copy(git_repo):
+    with Store(db_path(git_repo)) as store:
+        crashed = store.add_job("review", "src/calc.py", str(git_repo))
+        store.set_status(crashed.id, "running")
+    wt = worktree.create(git_repo, crashed.id)
+    (wt / "src" / "calc.py").write_text("half-edited\n")
+    text = quick_tools(git_repo, no_wait_figures).delegate("docs", "src")
+    assert text.startswith("Done: docs for src (job ")
+    with Store(db_path(git_repo)) as store:
+        assert store.get_job(crashed.id).status == "paused"
+    assert not wt.exists()  # a paused job doesn't start again by itself, so its copy isn't kept
+    assert (git_repo / "src" / "calc.py").read_text() == "def add(a, b):\n    return a + b\n"
 
 
-def test_stop_asks_and_the_run_stops_cleanly(folder):
-    proc = subprocess.Popen([sys.executable, "-c", STANDIN, str(folder), "obey"])
-    wait_for_run_file(folder)
-    result = runner.invoke(app, ["stop", "--wait", "10"])
-    assert result.exit_code == 0, result.output
-    assert "stopped cleanly" in result.output
-    assert proc.wait(timeout=5) == 0
-    assert not (folder / "run.json").exists() and not (folder / "stop").exists()
-
-
-def test_stop_never_kills_a_run_that_has_not_answered_yet(folder):
-    proc = subprocess.Popen([sys.executable, "-c", STANDIN, str(folder), "ignore"])
+def test_delegate_never_runs_alongside_another_servers_job(git_repo):
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
-        wait_for_run_file(folder)
-        result = runner.invoke(app, ["stop", "--wait", "1"])
-        assert result.exit_code == 0, result.output
-        assert "hasn't stopped within 1 s" in result.output and "stop request stays" in result.output
-        assert proc.poll() is None  # still alive: nothing was killed
-        assert (folder / "stop").exists()  # the request is left for it to notice
+        folder = git_repo / ".gtu"
+        folder.mkdir(exist_ok=True)
+        (folder / runstate.RUN_FILE).write_text(json.dumps({"pid": other.pid}))  # another Desktop window's server
+        text = quick_tools(git_repo, no_wait_figures).delegate("docs", "src")
+        assert text.startswith("Not started: another BharatCode Desktop window is running a spare-gpu job")
+        assert f"(process {other.pid})" in text
+        with Store(db_path(git_repo)) as store:
+            (job,) = store.list_jobs()
+            assert job.status == "cancelled"
+        assert runstate.running_pid(folder) == other.pid  # its run file is left alone
+        assert other.poll() is None  # and nothing was killed
     finally:
-        proc.kill()
-        proc.wait(timeout=10)
-
-
-def test_start_refuses_to_run_twice(folder, monkeypatch):
-    monkeypatch.setenv("BHARATCODE_API_KEY", "bc_live_test_key_not_real")
-    runstate.write_run(folder)  # "another" gtu start: this test process, which is alive
-    try:
-        result = runner.invoke(app, ["start"])
-        assert result.exit_code == 1 and "already running" in result.output
-    finally:
-        runstate.clear(folder)
+        other.kill()
+        other.wait()

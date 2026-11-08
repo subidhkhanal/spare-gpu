@@ -34,6 +34,17 @@ def test_the_installed_version_is_printed_and_checked():
     assert "did not run" in TEXT  # a broken install is reported, not announced as done
 
 
+def test_it_installs_the_pack_into_desktop_and_points_at_chat_commands():
+    assert "& $gtu integrate --pack" in TEXT and "& $gtu integrate\n" not in TEXT
+    assert "Fail 'gtu integrate --pack reported a problem (see above).'" in TEXT
+    closing = TEXT[TEXT.index("& $gtu integrate --pack"):]
+    for command in ("/code-review", "/auto write docs for src/utils.py", "/doctor"):
+        assert command in closing
+    # the only gtu command it runs or names besides --version is integrate ("gtu to your PATH" is prose)
+    named = set(re.findall(r"gtu (\w[\w-]*)", TEXT)) - {"on", "to", "command"}
+    assert named == {"integrate"}, named
+
+
 def test_a_missing_user_path_does_not_abort_the_installer():
     assert "if (-not $userPath) { $userPath = '' }" in TEXT  # a fresh account may have no user PATH at all
 

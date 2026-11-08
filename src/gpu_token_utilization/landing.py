@@ -1,14 +1,14 @@
-"""What a finished job leaves in spare-gpu/<date>_<time>/ besides its files, and `gtu apply` and
-`gtu undo`, the two commands that move those files into the project and back out.
+"""What a finished job leaves in spare-gpu/<date>_<time>/ besides its files, and /apply and
+/undo, the two chat commands that move those files into the project and back out.
 
 Next to the exported files:
 - RUN.md: a short human summary of the job (what ran, on which model, with which tools, which
   files came out and why, what the checks reverted), from the job's ledger (ledger.py);
 - manifest.json: every file the job changed, with its change type and two hashes: the file as it
-  was when the job started and as the job left it. `gtu apply` uses the first to tell a file that
+  was when the job started and as the job left it. /apply uses the first to tell a file that
   moved on since the job from one it may safely replace, and the second to see what is already
   as the job left it;
-- .undo/: made by `gtu apply`, holding what it replaced, so `gtu undo` can put it all back.
+- .undo/: made by /apply, holding what it replaced, so /undo can put it all back.
 
 Nothing here writes into the project unless the user asks with one of the two commands, and
 even then only inside the project: a manifest path that is absolute or climbs out with ".." is
@@ -47,7 +47,7 @@ DEFAULT_REASON = {
 
 
 class LandingError(Exception):
-    """Something `gtu apply` or `gtu undo` refuses or can't do; the message is for the user."""
+    """Something /apply or /undo refuses or can't do; the message is for the user."""
 
 
 # --- hashes and the result folder's files -------------------------------------------------------
@@ -218,8 +218,8 @@ def run_markdown(manifest: dict, ledger_doc: dict, steps: list[dict], stamp: str
         "",
         "## Using it",
         "",
-        f"`gtu apply {stamp}` copies these files into your project; a file that changed since the job started "
-        f"is skipped unless you add `--force`. `gtu undo {stamp}` takes that back. Or copy what you want by hand. "
+        f"`/apply {stamp}` copies these files into your project; a file that changed since the job started "
+        f"is skipped unless you add `--force`. `/undo {stamp}` takes that back. Or copy what you want by hand. "
         "The job itself never touched your files.",
         "",
     ]
@@ -229,7 +229,7 @@ def run_markdown(manifest: dict, ledger_doc: dict, steps: list[dict], stamp: str
 # --- finding a result folder ------------------------------------------------------------------------
 
 def find_root(cwd: Path) -> Path:
-    """The project `gtu apply` works in: the project containing `cwd` (the top of its git repo,
+    """The project /apply works in: the project containing `cwd` (the top of its git repo,
     else the folder itself); when that has no spare-gpu/ folder, the nearest parent that has
     one, so the commands work from any subfolder of a project that isn't a git repo too."""
     cwd = Path(cwd).resolve()
@@ -358,7 +358,7 @@ def apply(root: Path, stamp: str | None = None, *, dry_run: bool = False, force:
     """Copy a job's files from spare-gpu/<stamp>/ into the project. A file is applied when the
     project's copy is exactly as it was when the job started (or absent, for a new file); one that
     changed since is skipped and said so, unless `force`. What apply replaces or removes is saved
-    under <stamp>/.undo/ first, with a manifest of what was done, for `gtu undo`. Refuses to apply
+    under <stamp>/.undo/ first, with a manifest of what was done, for /undo. Refuses to apply
     the same folder twice without an undo in between. `dry_run` reports and writes nothing."""
     root = Path(root)
     folder = find(root, stamp)
@@ -367,7 +367,7 @@ def apply(root: Path, stamp: str | None = None, *, dry_run: bool = False, force:
     shown = _shown(folder, root)
     undo_dir = folder / UNDO_DIR
     if (undo_dir / MANIFEST).is_file():
-        raise LandingError(f"{shown} was already applied. Run `gtu undo {name}` first to take it back; then "
+        raise LandingError(f"{shown} was already applied. Run `/undo {name}` first to take it back; then "
                            "it can be applied again.")
     entries = [(check_path(f.get("path")), f) for f in manifest["files"]]  # every path checked before any write
     for rel, entry in entries:
@@ -421,14 +421,14 @@ def apply(root: Path, stamp: str | None = None, *, dry_run: bool = False, force:
         outcome.lines.append(f"Dry run: would apply {applied} file(s) from {shown}, skip {skipped}{extra}. Nothing was written.")
     elif applied:
         outcome.lines.append(f"Applied {applied} file(s) from {shown}, skipped {skipped}{extra}. What they replaced "
-                             f"is saved in {shown}/{UNDO_DIR}; take it back with: gtu undo {name}")
+                             f"is saved in {shown}/{UNDO_DIR}; take it back with: /undo {name}")
     else:
         outcome.lines.append(f"Nothing was applied from {shown}: skipped {skipped}{extra}.")
     return outcome
 
 
 def undo(root: Path, stamp: str | None = None) -> Outcome:
-    """Put back what `gtu apply` replaced from spare-gpu/<stamp>/ and remove the files it added,
+    """Put back what /apply replaced from spare-gpu/<stamp>/ and remove the files it added,
     then remove the .undo folder so the result can be applied again."""
     root = Path(root)
     folder = find(root, stamp, for_undo=True)
@@ -461,5 +461,5 @@ def undo(root: Path, stamp: str | None = None) -> Outcome:
     except worktree.GitError as exc:
         raise LandingError(f"the files are back, but {undo_dir} couldn't be removed: {exc}") from None
     outcome.lines.append(f"Undid {shown}: restored {outcome.counts['restored']} file(s), removed "
-                         f"{outcome.counts['removed']}. It can be applied again with: gtu apply {name}")
+                         f"{outcome.counts['removed']}. It can be applied again with: /apply {name}")
     return outcome

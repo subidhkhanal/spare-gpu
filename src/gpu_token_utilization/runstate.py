@@ -1,19 +1,17 @@
-"""Coordination between whoever is running jobs and `gtu stop`, in the store's folder (.gtu/).
+"""Coordination between spare-gpu's MCP servers in one project, in the store's folder (.gtu/).
 
-run.json  written while jobs run (by `gtu start`, or by the MCP server while a delegated job
-          runs in front of the user): the process id, so a second runner doesn't start.
-stop      created by `gtu stop` (or spare_cancel_work for one job); the runner checks for it
-          between steps and every few seconds inside a step, and stops cleanly, leaving the
-          job paused and resumable. Nothing is ever killed.
+run.json  written by the MCP server while a delegated job runs in front of the user: the process
+          id, so a second server (another Desktop window on the same project) doesn't start one
+          alongside it.
 
-`tidy` makes jobs left 'running' by a crashed process resumable.
+`tidy` puts jobs left 'running' by a crashed server back to paused, with their unfinished edits
+dropped.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,11 +19,10 @@ from . import worktree
 from .store import Store
 
 RUN_FILE = "run.json"
-STOP_FILE = "stop"
 
 
 class StopRequested(Exception):
-    """`gtu stop` asked the running `gtu start` to stop."""
+    """The job was stopped from the chat (cancelled) while a step ran."""
 
 
 def write_run(folder: Path) -> None:
@@ -42,16 +39,6 @@ def read_run(folder: Path) -> dict | None:
 
 def clear(folder: Path) -> None:
     (folder / RUN_FILE).unlink(missing_ok=True)
-    (folder / STOP_FILE).unlink(missing_ok=True)
-
-
-def request_stop(folder: Path) -> None:
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / STOP_FILE).write_text(datetime.now(timezone.utc).isoformat())
-
-
-def stop_requested(folder: Path) -> bool:
-    return (folder / STOP_FILE).exists()
 
 
 def alive(pid: int) -> bool:
@@ -77,24 +64,14 @@ def alive(pid: int) -> bool:
 
 
 def running_pid(folder: Path) -> int | None:
-    """The pid of a `gtu start` that is still running, or None (a stale run file doesn't count)."""
+    """The pid of a server whose job is still running, or None (a stale run file doesn't count)."""
     info = read_run(folder)
     pid = info.get("pid") if info else None
     return pid if isinstance(pid, int) and alive(pid) else None
 
 
-def wait_until_stopped(folder: Path, seconds: float, poll: float = 0.2) -> bool:
-    """True once no run is going in `folder` (the runner cleared its run file, or its process is gone)."""
-    deadline = time.monotonic() + seconds
-    while running_pid(folder) is not None:
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(poll)
-    return True
-
-
 def tidy(store: Store) -> list[str]:
-    """Make interrupted jobs resumable: running steps back to pending, their unfinished edits
+    """Jobs a crashed server left running: running steps back to pending, their unfinished edits
     dropped from the job's own worktree, and the job paused (not failed). Returns the job ids."""
     paused = []
     for job in store.list_jobs(include_finished=False):

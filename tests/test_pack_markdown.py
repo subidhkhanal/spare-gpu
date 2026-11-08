@@ -3,6 +3,8 @@ placeholders only, every agent denying everything first, leads as primary agents
 exactly their own helpers, helpers that may write only their own files, and the agents that read
 the web or the notes told to treat them as data."""
 
+import re
+
 import yaml
 import pytest
 
@@ -38,7 +40,8 @@ def test_every_file_parses_carries_the_marker_and_only_the_two_placeholders(kind
     if kind == "agent":
         assert data["mode"] in ("primary", "subagent") and data["model"] in (FILLED.heavy, FILLED.standard)
         # a step limit Desktop enforces, so a confused agent stops instead of looping
-        assert data["steps"] == (pack.LEAD_STEPS if name.endswith("-lead") else pack.HELPER_STEPS), name
+        steps = pack.LEAD_STEPS if name.endswith("-lead") else 6 if name == "spare-helper" else pack.HELPER_STEPS
+        assert data["steps"] == steps, name  # spare-helper calls one tool and relays it: a few steps are plenty
         assert data["permission"]["*"] == "deny"  # everything denied first, then what the agent needs
         # no shell, or git's commands only, plus reading a pull request; commenting on one is the review lead's alone
         read_pr = ("gh pr view*", "gh pr diff*") + (("gh pr comment*",) if name == "review-lead" else ())
@@ -60,12 +63,12 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
                 continue
             lead = parse(files[("command", command)])[0].get("agent")
             if lead is None:  # memory's commands run in the user's own agent, which has the chat's history
-                assert not component.agents, command  # memory and cost: no agents of their own
+                assert not component.agents, command  # memory: no agents of its own
                 continue
             assert ("agent", lead) in files, f"{command}: its agent {lead} is in the pack"
             data, _ = parse(files[("agent", lead)])
             assert data["mode"] == "primary"  # depth 0: the only place a task may start more tasks
-            helpers = set(pack.helper_names(component))
+            helpers = set(pack.helper_names(component)) - {lead}  # manage's spare-helper is its own commands' agent
             if not helpers:
                 assert "task" not in data["permission"], f"{lead} has no helpers to start"
                 continue
@@ -73,6 +76,44 @@ def test_a_commands_lead_is_a_primary_agent_that_may_start_exactly_its_helpers()
             allowed = {name for name, action in task.items() if action == "allow"}
             assert task["*"] == "deny" and allowed == helpers, f"{lead} may start {helpers}"
             assert set(pack.helpers([component])) == helpers
+
+
+MANAGE_TOOLS = ("apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check")
+
+
+def test_every_manage_command_runs_in_spare_helper_and_names_its_one_tool():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["manage"]])}
+    assert {n for k, n in files if k == "command"} == {"apply", "undo", "cost", "prompts", "doctor"}
+    for command, tool in zip(("apply", "undo", "cost", "prompts", "doctor"), MANAGE_TOOLS):
+        data, body = parse(files[("command", command)])
+        assert data["agent"] == "spare-helper", command
+        assert f"`{tool}`" in body and "once" in body, command  # one tool call, named exactly
+        assert not any(f"`{other}`" in body for other in MANAGE_TOOLS if other != tool), command
+        assert "!`" not in body  # no shell line: Desktop would run it outside the project
+
+
+def test_spare_helper_is_a_hidden_primary_agent_on_the_standard_model_that_may_call_only_the_five_tools():
+    files = {(k, n): p for k, n, p in pack.markdown_files([COMPONENTS["manage"]])}
+    raw = files[("agent", "spare-helper")].read_text(encoding="utf-8")
+    assert "model: {{STANDARD_MODEL}}" in raw and HEAVY not in raw
+    data, body = parse(files[("agent", "spare-helper")])
+    assert data["mode"] == "primary" and data["hidden"] is True and data["model"] == FILLED.standard
+    permission = data["permission"]
+    assert permission["*"] == "deny"
+    assert {k for k, v in permission.items() if v == "allow"} == {f"spare-gpu_{t}" for t in MANAGE_TOOLS}
+    assert set(permission) == {"*", *(f"spare-gpu_{t}" for t in MANAGE_TOOLS)}  # no edit, no bash, no task
+    flat = " ".join(body.split())
+    assert "never call another tool" in flat and "never change a file yourself" in flat
+    assert pack.helpers([COMPONENTS["manage"]]) == []  # primary: never listed as a subagent anywhere
+
+
+def test_no_pack_file_tells_the_model_to_run_a_gtu_command_other_than_integrate():
+    sources = [path for _, _, path in present()] + [pack.PACK_DIR.parent / "commands" / "auto.md"]
+    for path in sources:
+        named = set(re.findall(r"\bgtu (\w[\w-]*)", path.read_text(encoding="utf-8")))
+        assert named <= {"integrate"}, f"{path.name} names gtu {named - {'integrate'}}"
+    for _, name, text in pack.install_files(pack.select(None), FILLED):  # variants too
+        assert set(re.findall(r"\bgtu (\w[\w-]*)", text)) <= {"integrate"}, name
 
 
 def edit_patterns(data):

@@ -1,4 +1,4 @@
-"""`gtu prompts`: allow rules for the read-only commands you keep approving in BharatCode Desktop.
+"""/prompts: allow rules for the read-only commands you keep approving in BharatCode Desktop.
 
 Desktop asks before its agents run a shell command, and remembers an "always" answer only for
 that exact command text (core/src/tool/bash.ts saves `input.command` as the rule's resource).
@@ -469,7 +469,7 @@ def render(review: Review, config_path: Path) -> str:
     elif not review.proposals:
         lines.append(f"{review.commands} bash command(s) finished in {window}, but none that only reads ran in "
                      f"{review.min_sessions} or more sessions, so there is nothing to propose. "
-                     "Lower --min or widen --days to look further.")
+                     "Ask /prompts for fewer sessions (`/prompts --min 2`) or more days (`/prompts 90`) to look further.")
     else:
         lines.append(f"Commands that only read, approved in {review.min_sessions} or more sessions in {window} "
                      f"({review.commands} bash commands in all):")

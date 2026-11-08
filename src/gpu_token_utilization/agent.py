@@ -94,3 +94,27 @@ class AgentResult:
     @property
     def ok(self) -> bool:
         return self.stopped is None and self.exit_code == 0 and self.error is None
+
+
+class BharatCodeError(Exception):
+    """A step failed in a way trying again will not fix."""
+
+
+class BusyError(BharatCodeError):
+    """BharatCode Desktop didn't finish in time: the step is tried again later."""
+
+
+@dataclass
+class Usage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
+class ChatResult:
+    """A one-answer step (the review job's), as a read-only Desktop session answered it."""
+    content: str
+    usage: Usage
+    elapsed_ms: float
+    truncated: bool = False

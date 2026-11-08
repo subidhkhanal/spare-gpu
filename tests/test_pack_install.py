@@ -76,8 +76,10 @@ def test_the_config_file_splits_models_and_hides_helpers_and_pack_tools(pack_dir
     doc = pack.config(pack.select(None), models())
     assert doc["small_model"] == STANDARD and doc["agent"] == {"title": {"model": STANDARD}, "explore": {"model": STANDARD}}
     assert doc["permission"]["task"] == {"research-scout": "deny"}
-    for tool in ("scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost"):
+    for tool in ("scholar_search", "verify_refs", "build_report", "security_filter", "pack_cost", "tally_findings",
+                 "apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"):
         assert doc["permission"][f"spare-gpu_{tool}"] == "deny"
+    assert len([k for k in doc["permission"] if k.startswith("spare-gpu_")]) == 11
     assert doc["mcp"] == {"exa": {"type": "remote", "url": "https://mcp.exa.ai/mcp", "oauth": False}}
     assert doc["permission"]["exa_*"] == "deny"  # Exa's tools only for the scout, which allows exa_* itself
     text = pack.config_text(doc, bc_config.PACK_LINE)
@@ -93,16 +95,35 @@ def test_without_the_split_or_research_the_config_file_is_smaller(pack_dir):
     assert pack.describe({"$schema": pack.SCHEMA}) == "nothing yet"
 
 
+def test_the_manage_component_is_five_commands_one_hidden_agent_and_five_tools(pack_dir):
+    manage = pack.COMPONENTS["manage"]
+    assert "cost" not in pack.COMPONENTS  # replaced by manage, which holds /cost
+    assert manage.commands == ("apply", "undo", "cost", "prompts", "doctor") and manage.agents == ("spare-helper",)
+    assert manage.tools == ("apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check")
+    doc = pack.config(pack.select("manage"), models())
+    assert doc["permission"] == {f"spare-gpu_{t}": "deny" for t in manage.tools} and "mcp" not in doc
+    assert pack.describe(doc) == "5 pack-only tool(s) hidden from them too"  # spare-helper is primary: not a task helper
+
+
 def test_model_ids_are_filled_in_and_lite_puts_every_role_on_the_standard_model():
     assert models().fill(LEAD).count(HEAVY) == 2 and "{{" not in models().fill(LEAD)
     assert pack.Models(STANDARD, STANDARD).fill(LEAD).count(STANDARD) == 2
 
 
-def test_models_come_from_bharatcodes_public_list_or_the_known_ids(fake, monkeypatch):
+def model_list(request):
+    """BharatCode's public /models answer, recorded shape: the access tier names each model's role."""
+    assert request.url.path.endswith("/models") and "authorization" not in request.headers  # public: no key
+    return httpx.Response(200, json={"data": [
+        {"id": "qwen-3.8-27b", "display_name": "Qwen 3.8 27B", "access_tier": "standard"},
+        {"id": "deepseek-v4.1-flash", "display_name": "DeepSeek V4.1 Flash", "access_tier": "heavy"}]})
+
+
+def test_models_come_from_bharatcodes_public_list_or_the_known_ids(monkeypatch):
     monkeypatch.delenv("GTU_MODELS")
-    chosen, note = pack.resolve_models(client=httpx.Client(transport=fake.transport()))
+    listed = httpx.Client(transport=httpx.MockTransport(model_list))
+    chosen, note = pack.resolve_models(client=listed)
     assert (chosen.heavy, chosen.standard) == (HEAVY, STANDARD) and note == ""
-    assert pack.resolve_models(client=httpx.Client(transport=fake.transport()), lite=True)[0].heavy == STANDARD
+    assert pack.resolve_models(client=listed, lite=True)[0].heavy == STANDARD
     down = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503)))
     chosen, note = pack.resolve_models(client=down)
     assert (chosen.heavy, chosen.standard) == (HEAVY, STANDARD) and "using the known ids" in note
@@ -167,7 +188,7 @@ def test_integrate_pack_installs_everything_and_says_what_it_did(config_dir, pac
     assert result.exit_code == 0, out
     assert "Pack models: heavy DeepSeek V4.1 Flash (bharatcode/deepseek-v4.1-flash), standard Qwen 3.8 27B" in out
     assert f"Wrote the pack's settings in {config_dir / 'config.json'}: titles and explore on Qwen 3.8 27B; " in out
-    assert "1 helper agent(s) hidden" in out and "6 pack-only tool(s) hidden" in out and "MCP: exa" in out
+    assert "1 helper agent(s) hidden" in out and "11 pack-only tool(s) hidden" in out and "MCP: exa" in out
     assert "Added /deep-research" in out and "Added the research-lead agent" in out and "Added the research-scout agent" in out
     assert "To undo the pack: gtu integrate --pack --uninstall" in out
     lead = (config_dir / "agent" / "research-lead.md").read_text(encoding="utf-8")

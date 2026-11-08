@@ -1,4 +1,4 @@
-"""Per-project settings: <project>/.gtu/settings.json, written by `gtu init`, read by every job.
+"""Per-project settings: <project>/.gtu/settings.json, written by hand when the defaults don't fit, read by every job.
 
 The file holds what used to live only in environment variables: the test command and the
 commands a job may run, the timeouts, the token budget per job, the preferred model and the job
@@ -16,12 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import worktree
-from .store import JOB_KINDS
+from .store import IGNORE, JOB_KINDS  # noqa: F401  IGNORE: what .gtu/.gitignore holds
 
 FILE = "settings.json"
-HELP_KEY = "_help"
-HELP = ("spare-gpu's settings for this project. A GTU_* environment variable overrides its key for one run. "
-        "`gtu init --force` rewrites this file from what it detects.")
+SETTINGS_NAME = FILE
+HELP_KEY = "_help"  # a note of the user's own in the file; ignored
 
 # key -> (environment variable, what it means). Keep README's Settings table in step with this.
 KEYS: dict[str, tuple[str, str]] = {
@@ -35,8 +34,6 @@ KEYS: dict[str, tuple[str, str]] = {
     "switch_safe": ("GTU_SWITCH_SAFE", "job kinds that may move to the faster model, on top of routing_policy.json"),
 }
 
-IGNORE = "*\n!.gitignore\n!settings.json\n!memory.md\n"  # .gtu/.gitignore: only settings and memory are for git
-OURS = ("*", "*\n!.gitignore\n!settings.json")  # earlier contents of ours, upgraded in place
 
 
 class SettingsError(ValueError):
@@ -79,9 +76,9 @@ def load(root: Path | None) -> Settings:
     try:
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
     except ValueError as exc:
-        raise SettingsError(f"{path} doesn't parse ({exc}); fix it, or delete it and run `gtu init`") from None
+        raise SettingsError(f"{path} doesn't parse ({exc}); fix it, or delete it to use the defaults") from None
     if not isinstance(raw, dict):
-        raise SettingsError(f"{path} must hold a JSON object; run `gtu init --force` to rewrite it")
+        raise SettingsError(f"{path} must hold a JSON object; fix it, or delete it to use the defaults")
     values = validate(raw, path)
     return Settings(path, values, present=True)
 
@@ -127,7 +124,7 @@ def _problem(key: str, value) -> str | None:
     return "is not a setting"
 
 
-# --- gtu init -------------------------------------------------------------------------------------
+# --- the test command, when the settings don't name one -------------------------------------------------------------------------------------
 
 DETECTIONS = (
     # (file in the project root, command, how it was recognised); the first match wins
@@ -161,52 +158,3 @@ def detect_test_command(root: Path) -> tuple[str, str]:
     if any(root.glob("tests/test_*.py")) or any(root.glob("test_*.py")):
         return "python -m pytest", "found test_*.py files"
     return "python -m pytest", "nothing recognisable; edit test_command if your tests run another way"
-
-
-def defaults(root: Path) -> tuple[dict, str]:
-    """What `gtu init` writes for this project, and why that test command."""
-    from .budget import Budgets
-    from .jobs import DEFAULT_ALLOWED, JobConfig
-    from .router import DELEGATE_PREFERRED
-
-    command, why = detect_test_command(root)
-    allowed = list(DEFAULT_ALLOWED)
-    prefix = " ".join(command.split()[:2])
-    if not any(" ".join(a.split()[:2]) == prefix for a in allowed):
-        allowed.append(prefix)
-    config = JobConfig()
-    doc = {
-        HELP_KEY: HELP,
-        "test_command": command,
-        "allowed_commands": allowed,
-        "test_timeout": config.test_timeout,
-        "agent_timeout": config.agent_timeout,
-        "green_rounds": config.green_rounds,
-        "job_token_budget": Budgets().per_job,
-        "preferred_model": DELEGATE_PREFERRED,
-        "switch_safe": [],
-    }
-    return doc, why
-
-
-def ensure_ignore(folder: Path) -> None:
-    """.gtu/.gitignore that keeps the folder out of git except settings.json. An older file of
-    ours (just "*") is upgraded; a file the user wrote is left alone."""
-    folder.mkdir(parents=True, exist_ok=True)
-    marker = folder / ".gitignore"
-    if not marker.exists() or marker.read_text(encoding="utf-8", errors="replace").strip() in OURS:
-        marker.write_text(IGNORE, encoding="utf-8")
-
-
-def init(root: Path, force: bool = False) -> tuple[Path, str, dict, str]:
-    """Write the settings file unless it exists (then keep it, unless `force`).
-    Returns (path, "written" | "kept" | "replaced", the settings, why that test command)."""
-    root = Path(root)
-    path = settings_path(root)
-    doc, why = defaults(root)
-    if path.is_file() and not force:
-        return path, "kept", load(root).values, why
-    outcome = "replaced" if path.is_file() else "written"
-    ensure_ignore(path.parent)
-    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8", newline="\n")
-    return path, outcome, {k: v for k, v in doc.items() if k != HELP_KEY}, why
