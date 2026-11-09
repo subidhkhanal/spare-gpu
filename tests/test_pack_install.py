@@ -207,7 +207,7 @@ def test_integrate_pack_installs_everything_and_says_what_it_did(config_dir, pac
 def test_integrate_pack_with_only_split_or_lite(config_dir, pack_dir):
     result = cli.invoke(app, ["integrate", "--pack", "--only", "split"])
     assert result.exit_code == 0 and "No commands or agents to add for: split" in result.output
-    assert not (config_dir / "agent").exists()
+    assert [p.name for p in (config_dir / "agent").glob("*.md")] == ["spare-auto.md"]  # only /auto's own
     settings = parse_jsonc((config_dir / "config.json").read_text(encoding="utf-8"))
     assert settings["small_model"] == STANDARD and "permission" not in settings and "mcp" not in settings
     lite = cli.invoke(app, ["integrate", "--pack", "--only", "research", "--lite"])

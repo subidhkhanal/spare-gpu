@@ -339,6 +339,7 @@ def unregister(path: Path) -> bool:
 
 # Slash commands spare-gpu adds to BharatCode Desktop (it loads <config folder>/command/*.md).
 COMMANDS_DIR = Path(__file__).with_name("commands")
+AGENTS_DIR = Path(__file__).with_name("agents")  # the agents those commands run as (/auto's spare-auto)
 COMMAND_MARKER = "# Installed by spare-gpu"
 
 
@@ -380,12 +381,22 @@ def remove_markdown(folder: Path, names: list[tuple[str, str]]) -> list[str]:
 
 
 def install_commands(folder: Path) -> dict[str, str]:
-    """Copy spare-gpu's own slash commands (/auto) into <folder>/command/. {name: added|updated|unchanged|kept-yours}."""
+    """Copy spare-gpu's own slash commands (/auto) into <folder>/command/, and the agents they run
+    as into <folder>/agent/. {command name: added|updated|unchanged|kept-yours}."""
+    install_markdown(folder, [("agent", source.stem, source.read_text(encoding="utf-8"))
+                              for source in sorted(AGENTS_DIR.glob("*.md"))])
     files = [("command", source.stem, source.read_text(encoding="utf-8")) for source in sorted(COMMANDS_DIR.glob("*.md"))]
     return {key.split("/", 1)[1]: what for key, what in install_markdown(folder, files).items()}
 
 
+def command_files() -> set[str]:
+    """spare-gpu's own command and agent files ("command/auto.md", ...), installed with or without the pack."""
+    return ({f"command/{p.name}" for p in COMMANDS_DIR.glob("*.md")}
+            | {f"agent/{p.name}" for p in AGENTS_DIR.glob("*.md")})
+
+
 def remove_commands(folder: Path) -> list[str]:
     """Remove the slash commands spare-gpu installed (only files still carrying its marker)."""
+    remove_markdown(folder, [("agent", source.stem) for source in sorted(AGENTS_DIR.glob("*.md"))])
     names = [("command", source.stem) for source in sorted(COMMANDS_DIR.glob("*.md"))]
     return [key.split("/", 1)[1] for key in remove_markdown(folder, names)]

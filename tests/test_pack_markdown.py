@@ -311,3 +311,19 @@ def test_every_lead_stops_at_plan_and_every_agent_has_its_step_limit():
             data, body = parse(path)
             if name.endswith("-lead"):
                 assert "`--plan`" in body and "stop without starting anything" in " ".join(body.split()), name
+
+
+def test_the_auto_handoff_agent_may_call_only_autos_three_tools():
+    from gpu_token_utilization import bc_config
+
+    text = (bc_config.AGENTS_DIR / "spare-auto.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n" + bc_config.COMMAND_MARKER)
+    data = yaml.safe_load(text.split("\n---\n", 1)[0][4:])
+    assert data["mode"] == "primary" and data["hidden"] is True and data["steps"] <= 4
+    allowed = {tool for tool, action in data["permission"].items() if action == "allow"}
+    assert data["permission"]["*"] == "deny"
+    assert allowed == {"spare-gpu_spare_auto", "spare-gpu_spare_delegate", "spare-gpu_spare_waits"}
+    auto = (bc_config.COMMANDS_DIR / "auto.md").read_text(encoding="utf-8")
+    assert "\nagent: spare-auto\n" in auto
+    # every tool auto.md tells the model to call is one the agent may call
+    assert set(re.findall(r"`(spare_\w+)`", auto)) == {t.removeprefix("spare-gpu_") for t in allowed}

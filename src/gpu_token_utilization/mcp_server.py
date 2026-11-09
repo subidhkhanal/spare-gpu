@@ -261,7 +261,7 @@ class SpareTools:
         chat = desktop.calling_session(conn, root, AUTO_TOOL)
         known = None if new else links.get(chat or LATEST)
         title = (known or {}).get("title") or f"auto: {request.splitlines()[0][:60]}"
-        agent = desktop.DesktopAgent(conn, timeout=AUTO_TIMEOUT)
+        agent = desktop.DesktopAgent(conn, timeout=AUTO_TIMEOUT, poll=1.0)
 
         def turn(model: str):
             progress(f"Working on {waits.name(model)} in the '{title}' session.")

@@ -3,8 +3,10 @@
 # once this line is gone, spare-gpu leaves the file alone.
 # The handoff itself runs on Qwen (every plan has it, and it's rarely queued): it is one tool call,
 # and running it on a stalled DeepSeek would make /auto wait in the very queue it exists to avoid.
+# It runs as the small spare-auto agent (agent/spare-auto.md), not the full Build agent.
 description: Do anything a normal chat does, on whichever model starts it sooner
 model: bharatcode/qwen-3.8-27b
+agent: spare-auto
 ---
 The user's request is between the markers:
 <<<$ARGUMENTS>>>

@@ -126,6 +126,8 @@ def check_config(report: Report, folder: Path, how: str) -> list[str] | None:
         report.add(WARN, "the /auto command isn't installed; run `gtu integrate`")
     elif bc_config.COMMAND_MARKER not in auto.read_text(encoding="utf-8-sig", errors="replace"):
         report.add(PASS, "the /auto command is there, edited by you (spare-gpu leaves it alone)")
+    elif not (folder / "agent" / "spare-auto.md").is_file():
+        report.add(WARN, "the /auto command is installed but its spare-auto agent isn't; run `gtu integrate`")
     else:
         report.add(PASS, "the /auto command is installed")
     return command

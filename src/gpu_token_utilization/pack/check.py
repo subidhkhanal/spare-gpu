@@ -164,7 +164,7 @@ def run(folder: Path, how: str = "") -> list[Finding]:
 
     known = {f"{kind}/{name}.md" for kind, name in all_markdown_names()}
     strays = sorted(f"{kind}/{p.name}" for kind in ("command", "agent") for p in (folder / kind).glob("*.md")
-                    if _marked(p) and f"{kind}/{p.name}" not in known and p.name != "auto.md")
+                    if _marked(p) and f"{kind}/{p.name}" not in known | bc_config.command_files())
     if strays:
         found.append(Finding(WARN, "marked as spare-gpu's but not part of this pack (an older version's?): " + ", ".join(strays)
                              + "; `gtu integrate --pack` removes retired files, or delete them by hand"))
