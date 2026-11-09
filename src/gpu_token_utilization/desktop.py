@@ -365,10 +365,20 @@ class DesktopAgent:
                 finished = self._read(listed, seen, result, on_step)
                 # Each step is its own assistant message, so a completed one doesn't mean the agent
                 # is done; the session's status does. Idle sessions are left out of the status map.
-                busy = session in self._statuses(http, where)
+                statuses = self._statuses(http, where)
+                busy = session in statuses
                 if on_approval and busy and not asked and self._waits_for_approval(http, session, where):
                     asked = True
                     on_approval()
+                if keep_running and (statuses.get(session) or {}).get("type") == "retry":
+                    # Desktop retries a failing model quietly (seen 9 Nov: 83 s of "Model unavailable"
+                    # before it gave up); a conversation gives up at once so it can use the other model.
+                    result.error = f"unavailable: {(statuses.get(session) or {}).get('message') or 'the model failed'}"
+                    result.stopped = "unavailable"
+                    self._abort(http, session, where)
+                    return
+                if keep_running and finished and self._replied(listed):
+                    busy = False  # the reply is complete; Desktop may stay busy a little longer on its own
             except httpx.TransportError:
                 # A dropped local connection (seen 4 Nov: WinError 10054 mid-job while Desktop's
                 # server carried on) isn't a failed job: the session keeps going, so look again.
@@ -399,6 +409,12 @@ class DesktopAgent:
                 return
             if done:
                 return
+
+    @staticmethod
+    def _replied(messages: list[dict]) -> bool:
+        """Whether the last assistant message ended the turn (not with more tool calls to come)."""
+        last = next((m.get("info") or {} for m in reversed(messages) if (m.get("info") or {}).get("role") == "assistant"), {})
+        return last.get("finish") == "stop"
 
     @staticmethod
     def _waits_for_approval(http, session, where) -> bool:

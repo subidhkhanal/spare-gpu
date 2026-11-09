@@ -167,3 +167,22 @@ def test_wait_figures_that_cant_be_fetched_never_stop_a_job(tmp_path):
     with Store(tmp_path / "gtu.db") as store:
         choice = router.decide(store, tmp_path, "review", QWEN, broken)
     assert choice.model == QWEN and not choice.routed
+
+
+def test_a_model_that_just_failed_is_skipped_for_a_while(tmp_path):
+    state = State()
+    state.mark_failing(QWEN, now=1000.0)
+    assert state.is_failing(QWEN, now=1000.0 + router.FAILING_FOR - 1)
+    assert not state.is_failing(QWEN, now=1000.0 + router.FAILING_FOR + 1)
+    state.mark_failing(QWEN)  # from now
+    choice = choose("tests", DEEPSEEK, [busy_deepseek(), free_qwen()], state, policy=SAFE)
+    assert choice.model == DEEPSEEK  # its free slot doesn't count while it's failing
+    state.save(tmp_path)
+    assert State.load(tmp_path).is_failing(QWEN)
+
+
+def test_a_preferred_model_that_just_failed_hands_over_to_the_other():
+    state = State()
+    state.mark_failing(DEEPSEEK)
+    choice = choose("tests", DEEPSEEK, [busy_deepseek(), free_qwen()], state, policy=SAFE)
+    assert choice.model == QWEN and "DeepSeek V4.1 Flash was unavailable a few minutes ago" in choice.reason

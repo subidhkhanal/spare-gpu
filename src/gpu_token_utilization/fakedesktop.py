@@ -11,7 +11,8 @@ like green, can be scripted. The job's opencode.json, if one is in the folder wh
 prompt arrives, is recorded with the session. A session can be prompted again (an /auto
 conversation): each prompt plays the next list of steps after a new user message. `chats` are
 the user's own chats, busy with a running call to the named tool; `pending` holds permission
-requests waiting for the user (GET /permission).
+requests waiting for the user (GET /permission). A prompt on a model in `failing` never
+progresses: its session's status is "retry", as Desktop shows while it retries a failing model.
 """
 
 from __future__ import annotations
@@ -72,6 +73,7 @@ class FakeDesktop:
     chats: dict = field(default_factory=dict)  # session id -> the tool it's running a call to
     pending: list = field(default_factory=list)  # permission requests, e.g. {"id": "per_1", "sessionID": ...}
     prompts: int = 0  # prompts sent so far, across sessions (picks each one's steps from `calls`)
+    failing: set = field(default_factory=set)  # model ids BharatCode answers "Model unavailable" for
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -99,7 +101,9 @@ class FakeDesktop:
                                   "steps": [], "prompts": [], "starts": []}
             return httpx.Response(200, json={"id": sid, "directory": directory, "title": body.get("title")})
         if path == "/session/status":
-            busy = {sid: {"type": "busy"} for sid, s in self.sessions.items()
+            busy = {sid: ({"type": "retry", "attempt": 1, "message": "Model unavailable.", "next": 10000}
+                          if self._stuck(s) else {"type": "busy"})
+                    for sid, s in self.sessions.items()
                     if s["prompt"] and not s["aborted"] and s["revealed"] < len(s["steps"])}
             return httpx.Response(200, json=busy | {sid: {"type": "busy"} for sid in self.chats})
         if path == "/permission" and method == "GET":
@@ -115,6 +119,7 @@ class FakeDesktop:
             if parts[2] == "prompt_async" and method == "POST":
                 s["prompt"] = json.loads(request.content)
                 s["prompts"].append(s["prompt"])
+                s["aborted"] = False  # a new turn after an aborted one
                 s["starts"].append(len(s["steps"]))
                 s["steps"] = s["steps"] + list(
                     self.calls[min(self.prompts, len(self.calls) - 1)] if self.calls else self.steps)
@@ -124,14 +129,18 @@ class FakeDesktop:
                 return httpx.Response(204)
             if parts[2] == "abort" and method == "POST":
                 s["aborted"] = True
+                s["steps"] = s["steps"][: s["revealed"]]  # the rest of that turn never happens
                 return httpx.Response(200, json=True)
             if parts[2] == "message" and method == "GET":
                 self._advance(s)
                 return httpx.Response(200, json=self._messages(parts[1], s))
         return httpx.Response(404)
 
+    def _stuck(self, s: dict) -> bool:
+        return ((s["prompt"] or {}).get("model") or {}).get("modelID") in self.failing
+
     def _advance(self, s: dict) -> None:
-        if not s["prompt"] or s["aborted"] or s["revealed"] >= len(s["steps"]):
+        if not s["prompt"] or s["aborted"] or s["revealed"] >= len(s["steps"]) or self._stuck(s):
             return
         step = s["steps"][s["revealed"]]
         if s["ticks"] == 0:
@@ -160,7 +169,9 @@ class FakeDesktop:
             parts.append({"id": f"prt_{i}_d", "type": "step-finish",
                           "tokens": {"input": step.tokens - 10, "output": 10, "reasoning": 0,
                                      "cache": {"read": 0, "write": 0}, "total": step.tokens}})
-            info = {"id": f"msg_{i}", "role": "assistant", "time": {"created": i, "completed": i}}
+            ends_turn = i == len(s["steps"]) or i in s["starts"]
+            info = {"id": f"msg_{i}", "role": "assistant", "time": {"created": i, "completed": i},
+                    "finish": "stop" if ends_turn else "tool-calls"}
             if last and self.stalled:
                 del info["time"]["completed"]
                 parts = parts[:1]

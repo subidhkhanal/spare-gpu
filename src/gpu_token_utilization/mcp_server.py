@@ -65,6 +65,14 @@ AUTO_SESSIONS = "auto-sessions.json"  # in .gtu: each chat's background session
 LATEST = "latest"  # the key for the most recent one, used when the calling chat can't be found
 
 
+def failed(result) -> bool:
+    """Whether a turn failed because BharatCode couldn't serve the model (so the other may)."""
+    if result.stopped == "unavailable":
+        return True
+    error = (result.error or "").lower()
+    return "model unavailable" in error or "503" in error or "overloaded" in error
+
+
 class SpareTools:
     """The five tools as plain functions returning text, for one project folder."""
 
@@ -265,10 +273,18 @@ class SpareTools:
         session, result = turn(choice.model)
         how = f"Answered by {waits.name(choice.model)}: {choice.reason}."
         refused = router.plan_refusal(result.error) if result.error else None
+        other = next((m for m in waits.models() if m != choice.model and m not in state.unavailable), None)
         if refused and refused != choice.model:  # the plan doesn't include it: use the one it does
             known = {"session": session, "title": title} if session else known
             session, result = turn(refused)
             how = f"Answered by {waits.name(refused)}: your plan doesn't include {waits.name(choice.model)}."
+        elif failed(result) and other:  # BharatCode says the model is unavailable: don't wait it out
+            state.mark_failing(choice.model)
+            state.save(path.parent)
+            progress(f"{waits.name(choice.model)} is unavailable right now; switching to {waits.name(other)}.")
+            known = {"session": session, "title": title} if session else known
+            session, result = turn(other)
+            how = f"Answered by {waits.name(other)}: {waits.name(choice.model)} was unavailable right now."
         if session:
             links[chat or LATEST] = links[LATEST] = {"session": session, "title": title}
             try:

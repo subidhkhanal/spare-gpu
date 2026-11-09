@@ -13,7 +13,10 @@ starts it sooner. The rules, in order:
   model is no longer slower by the threshold before routing back to it;
 - sticky per job: the choice is stored on the job and every step and retry uses it; the one
   exception is the fallback, when a routed job's check keeps nothing, which reruns it once on
-  the preferred model.
+  the preferred model;
+- a model that just failed (BharatCode answering "Model unavailable") is skipped for
+  FAILING_FOR seconds, whatever the wait figures say: they can show a free slot on a lane
+  that is failing.
 Routing happens inside spare-gpu (the model of the Desktop session it creates for the job):
 BharatCode's apps only serve their own catalog, so a routing "model" can't be added to them.
 """
@@ -23,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,6 +45,7 @@ ROUTE_ENV = "GTU_ROUTE"  # "off" disables routing
 DELEGATE_PREFERRED = "deepseek-v4.1-flash"
 DEFAULT_MIN_SAVING = 20.0
 BACK_VOTES = 2
+FAILING_FOR = 600.0  # seconds a model that just failed is skipped
 
 
 def load_policy(folder: Path | None = None) -> dict:
@@ -115,14 +120,23 @@ class State:
     away_from: str | None = None  # the preferred model we last routed away from
     back_votes: int = 0
     unavailable: list[str] = field(default_factory=list)
+    failing: dict[str, float] = field(default_factory=dict)  # model -> until when (epoch seconds) it's skipped
 
     @classmethod
     def load(cls, folder: Path) -> State:
         try:
             data = json.loads((folder / "router.json").read_text(encoding="utf-8"))
-            return cls(data.get("away_from"), int(data.get("back_votes") or 0), list(data.get("unavailable") or []))
-        except (OSError, ValueError, TypeError):
+            return cls(data.get("away_from"), int(data.get("back_votes") or 0), list(data.get("unavailable") or []),
+                       {str(k): float(v) for k, v in (data.get("failing") or {}).items()})
+        except (OSError, ValueError, TypeError, AttributeError):
             return cls()
+
+    def mark_failing(self, model: str, now: float | None = None) -> None:
+        """`model` just failed: skip it for FAILING_FOR seconds."""
+        self.failing[waits.model_id(model)] = (time.time() if now is None else now) + FAILING_FOR
+
+    def is_failing(self, model: str, now: float | None = None) -> bool:
+        return self.failing.get(waits.model_id(model), 0.0) > (time.time() if now is None else now)
 
     def mark_unavailable(self, model: str) -> None:
         if waits.model_id(model) not in self.unavailable:
@@ -187,9 +201,14 @@ def choose(kind: str, preferred: str, views: list[View], state: State | None = N
     preferred = waits.model_id(preferred)
     state = state if state is not None else State()
     threshold = min_saving() if threshold is None else threshold
-    views = [v for v in views if v.model not in state.unavailable]
+    views = [v for v in views if v.model not in state.unavailable and not state.is_failing(v.model)]
     estimates = [waits.estimate(v) for v in views]
     by_model = {e.model: e for e in estimates}
+    if state.is_failing(preferred) and preferred not in state.unavailable:
+        usable = [m for m in waits.models() if m not in state.unavailable and not state.is_failing(m)]
+        if usable:
+            return Choice(usable[0], preferred, f"{waits.name(preferred)} was unavailable a few minutes ago",
+                          estimates)
     if preferred in state.unavailable:
         usable = [m for m in waits.models() if m not in state.unavailable]
         if usable:

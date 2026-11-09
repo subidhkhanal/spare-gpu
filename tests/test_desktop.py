@@ -281,6 +281,34 @@ def test_a_long_turn_is_left_running_not_aborted(fake, git_repo, monkeypatch):
     assert not fake.sessions["ses_1"]["aborted"]
 
 
+def test_a_failing_model_hands_the_turn_to_the_other_at_once(fake, git_repo, monkeypatch):
+    from gpu_token_utilization import router
+
+    fake.chats = dict(CHAT)
+    fake.failing = {"qwen-3.8-27b"}  # the wait figures say Qwen is free, but BharatCode can't serve it
+    lines = []
+    tools = wired_auto(fake, git_repo, monkeypatch)
+    text = tools.auto("hello", progress=lines.append)
+    assert text.startswith("done")
+    assert "Answered by DeepSeek V4.1 Flash: Qwen 3.8 27B was unavailable right now." in text
+    (session,) = fake.sessions.values()  # the same conversation, now on DeepSeek
+    assert [t["model"]["modelID"] for t in session["prompts"]] == ["qwen-3.8-27b", "deepseek-v4.1-flash"]
+    assert "Qwen 3.8 27B is unavailable right now; switching to DeepSeek V4.1 Flash." in lines
+    assert router.State.load(git_repo / ".gtu").is_failing("qwen-3.8-27b")
+    fake.failing = set()
+    tools.auto("again")  # Qwen is skipped for a while: straight to DeepSeek, no failed try first
+    assert [t["model"]["modelID"] for t in session["prompts"]][2:] == ["deepseek-v4.1-flash"]
+
+
+def test_a_finished_reply_returns_without_waiting_for_desktop_to_go_idle(fake, git_repo, monkeypatch):
+    fake.chats = dict(CHAT)
+    fake.steps = [Step(100, text="hi")]
+    real = desktop.DesktopAgent._statuses
+    monkeypatch.setattr(desktop.DesktopAgent, "_statuses",
+                        staticmethod(lambda http, where: real(http, where) | {"ses_1": {"type": "busy"}}))
+    assert wired_auto(fake, git_repo, monkeypatch).auto("hello").startswith("hi")
+
+
 def test_an_empty_request_starts_nothing(fake, git_repo, monkeypatch):
     assert "Nothing to do" in wired_auto(fake, git_repo, monkeypatch).auto("  ")
     assert not fake.sessions

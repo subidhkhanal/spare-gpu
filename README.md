@@ -305,6 +305,7 @@ Anything that isn't a coding job is done the way a normal BharatCode chat does i
 | `/auto` | Shows how long each model would wait right now |
 
 - Each chat keeps its own "auto: ..." session. The model is picked again for every message, so one turn can run on DeepSeek and the next on Qwen, with the whole history kept.
+- If the chosen model is failing ("Model unavailable"), the turn moves to the other model at once instead of waiting for Desktop's retries, and that model is skipped for the next 10 minutes.
 - Put `/auto` in front of every follow-up; a plain message goes to your chat's own model.
 - If the work needs your approval (an edit, a command), the reply says so: open the "auto: ..." session and approve it there.
 - A long task that's still running after 30 minutes keeps going in its session; the reply says where to watch it.
