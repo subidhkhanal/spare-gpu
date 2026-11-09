@@ -39,12 +39,15 @@ small project of your own.
    but that folder, which ignores itself.
 3. [ ] `/apply --dry-run` says what it would copy and writes nothing; `/apply` copies the files in;
    `/undo` puts your files back exactly (`git status` is clean again).
-4. [ ] "cancel the docs job" while a job runs: the reply says it stops within a few seconds, and
+4. [ ] `/auto what does <a file> do?` reads the file and answers, naming the model and an
+   "auto: ..." session; `/auto now add a comment to it` continues that session (it remembers the
+   first turn) and asks for your approval there before editing.
+5. [ ] "cancel the docs job" while a job runs: the reply says it stops within a few seconds, and
    nothing is copied to `spare-gpu/`.
-5. [ ] `/cost` answers with tokens per model for the last 24 hours and this project's jobs.
-6. [ ] `/prompts` answers with a table of approved commands (or says there were too few) and a
+6. [ ] `/cost` answers with tokens per model for the last 24 hours and this project's jobs.
+7. [ ] `/prompts` answers with a table of approved commands (or says there were too few) and a
    snippet to paste, and changes no file.
-7. [ ] `/code-review` on a small uncommitted change ends with ranked findings (or "no findings")
+8. [ ] `/code-review` on a small uncommitted change ends with ranked findings (or "no findings")
    and a cost summary.
 
 ## D. Windows specifics

@@ -12,7 +12,7 @@ from gpu_token_utilization import pack
 from gpu_token_utilization.pack import COMPONENTS, HEAVY, MARKER, STANDARD, Models
 
 FILLED = Models("bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b")
-AUTO_TOOLS = ("spare-gpu_spare_delegate", "spare-gpu_spare_ask", "spare-gpu_spare_work_status", "spare-gpu_spare_cancel_work")
+AUTO_TOOLS = ("spare-gpu_spare_delegate", "spare-gpu_spare_auto", "spare-gpu_spare_work_status", "spare-gpu_spare_cancel_work")
 
 
 def present():

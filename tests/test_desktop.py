@@ -182,38 +182,116 @@ def test_a_reply_still_being_written_is_waited_for(fake, tmp_path):
     assert result.ok and result.text == "done"
 
 
-def wired_ask(fake, git_repo, tmp_path, monkeypatch):
-    """spare_ask with Desktop and the wait figures faked: DeepSeek queued, Qwen idle."""
+CHAT = {"ses_chat": "spare-gpu_spare_auto"}  # the user's chat, mid-call to /auto's tool
+
+
+def wired_auto(fake, git_repo, monkeypatch):
+    """spare_auto with Desktop and the wait figures faked: DeepSeek queued, Qwen idle."""
     from test_routing_jobs import wait_figures
 
     from gpu_token_utilization import waits
-    from gpu_token_utilization.mcp_server import ASK_DIR_ENV, SpareTools
+    from gpu_token_utilization.mcp_server import SpareTools
 
     waits._cache.clear()
-    monkeypatch.setenv(ASK_DIR_ENV, str(tmp_path / "ask"))
     monkeypatch.setattr(desktop, "discover", lambda **kw: Connection(URL, "opencode", PASSWORD))
     real = desktop.DesktopAgent
     monkeypatch.setattr(desktop, "DesktopAgent",
                         lambda conn, **kw: real(conn, transport=fake.transport(), sleep=lambda s: None, **kw))
+    finder = desktop.calling_session
+    monkeypatch.setattr(desktop, "calling_session",
+                        lambda conn, workdir, tool: finder(conn, workdir, tool, transport=fake.transport()))
     return SpareTools(git_repo, http=wait_figures)
 
 
-def test_a_question_goes_to_the_faster_model_and_the_answer_comes_back(fake, git_repo, tmp_path, monkeypatch):
-    fake.steps = [Step(300, text="The newest is the M5.")]
-    text = wired_ask(fake, git_repo, tmp_path, monkeypatch).ask("what is the latest mac chip?",
-                                                                 your_model="deepseek-v4.1-flash")
-    assert text.startswith("The newest is the M5.")
+def test_auto_runs_a_full_session_in_the_project_on_the_faster_model(fake, git_repo, monkeypatch):
+    fake.chats = dict(CHAT)
+    fake.steps = [Step(200, tool=("read", "src/calc.py")), Step(300, text="calc.py adds two numbers.")]
+    text = wired_auto(fake, git_repo, monkeypatch).auto("what does calc.py do?", your_model="deepseek-v4.1-flash")
+    assert text.startswith("calc.py adds two numbers.")
     assert "Answered by Qwen 3.8 27B: saves about 2m 05s of waiting over DeepSeek V4.1 Flash" in text
+    assert "the 'auto: what does calc.py do?' session" in text
     (session,) = fake.sessions.values()
-    assert session["prompt"]["model"]["modelID"] == "qwen-3.8-27b"
-    assert session["directory"] == str(tmp_path / "ask")  # never the user's repo
-    assert {"permission": "edit", "pattern": "*", "action": "deny"} in session["permission"]
+    assert session["directory"] == str(git_repo)  # the user's project: it's a normal chat
+    assert session["title"] == "auto: what does calc.py do?"
+    assert session["permission"] == [desktop.AUTO_DENY]  # the user's own permissions, minus spare-gpu's tools
+    assert session["prompt"]["model"]["modelID"] == "qwen-3.8-27b" and "agent" not in session["prompt"]
+    assert session["prompt"]["parts"] == [{"type": "text", "text": "what does calc.py do?"}]
     assert not (git_repo / "opencode.json").exists()
 
 
-def test_an_empty_question_asks_nothing(fake, git_repo, tmp_path, monkeypatch):
-    assert "Nothing to ask" in wired_ask(fake, git_repo, tmp_path, monkeypatch).ask("  ")
+def test_a_follow_up_from_the_same_chat_continues_its_session(fake, git_repo, monkeypatch):
+    fake.chats = dict(CHAT)
+    fake.calls = [[Step(100, text="It adds.")], [Step(100, tool=("edit", "src/calc.py")), Step(100, text="Added divide.")]]
+    tools = wired_auto(fake, git_repo, monkeypatch)
+    tools.auto("what does calc.py do?")
+    text = tools.auto("now add a divide function")
+    assert text.startswith("Added divide.") and "It adds." not in text  # only this turn's reply
+    (session,) = fake.sessions.values()
+    assert [t["parts"][0]["text"] for t in session["prompts"]] == ["what does calc.py do?", "now add a divide function"]
+    assert "the 'auto: what does calc.py do?' session" in text  # the conversation keeps its first title
+
+
+def test_each_chat_gets_its_own_session_and_new_starts_over(fake, git_repo, monkeypatch):
+    tools = wired_auto(fake, git_repo, monkeypatch)
+    fake.chats = dict(CHAT)
+    tools.auto("first chat")
+    fake.chats = {"ses_other": "spare-gpu_spare_auto"}
+    tools.auto("second chat")
+    assert len(fake.sessions) == 2
+    fake.chats = dict(CHAT)
+    tools.auto("first chat again")
+    assert len(fake.sessions) == 2 and len(fake.sessions["ses_1"]["prompts"]) == 2
+    tools.auto("a fresh start", new=True)
+    assert len(fake.sessions) == 3 and fake.sessions["ses_3"]["title"] == "auto: a fresh start"
+
+
+def test_when_the_chat_cant_be_found_the_latest_session_continues(fake, git_repo, monkeypatch):
+    tools = wired_auto(fake, git_repo, monkeypatch)
+    tools.auto("one")
+    tools.auto("two")
+    assert len(fake.sessions) == 1
+
+
+def test_a_session_deleted_in_desktop_is_replaced(fake, git_repo, monkeypatch):
+    fake.chats = dict(CHAT)
+    tools = wired_auto(fake, git_repo, monkeypatch)
+    tools.auto("one")
+    fake.sessions.clear()  # deleted in Desktop
+    assert tools.auto("two").startswith("done")
+    assert list(fake.sessions) == ["ses_1"] and fake.sessions["ses_1"]["title"] == "auto: one"
+
+
+def test_waiting_for_an_approval_is_said(fake, git_repo, monkeypatch):
+    fake.chats = dict(CHAT)
+    fake.steps = [Step(100, polls=3, text="done")]
+    fake.pending = [{"id": "per_1", "sessionID": "ses_1", "permission": "edit", "patterns": ["*"],
+                     "metadata": {}, "always": []}]
+    lines = []
+    wired_auto(fake, git_repo, monkeypatch).auto("edit calc.py", progress=lines.append)
+    assert lines.count("Waiting for your approval: open the 'auto: edit calc.py' session and approve it.") == 1
+
+
+def test_a_long_turn_is_left_running_not_aborted(fake, git_repo, monkeypatch):
+    from gpu_token_utilization import mcp_server
+
+    monkeypatch.setattr(mcp_server, "AUTO_TIMEOUT", -1.0)
+    fake.steps = [Step(100, polls=50, text="done")]
+    text = wired_auto(fake, git_repo, monkeypatch).auto("refactor everything")
+    assert text.startswith("Still working after") and "'auto: refactor everything' session" in text
+    assert not fake.sessions["ses_1"]["aborted"]
+
+
+def test_an_empty_request_starts_nothing(fake, git_repo, monkeypatch):
+    assert "Nothing to do" in wired_auto(fake, git_repo, monkeypatch).auto("  ")
     assert not fake.sessions
+
+
+def test_the_calling_chat_is_the_one_running_the_tool(fake, tmp_path):
+    conn = Connection(URL, "opencode", PASSWORD)
+    fake.chats = {"ses_a": "spare-gpu_spare_delegate", "ses_b": "spare-gpu_spare_auto"}
+    assert desktop.calling_session(conn, tmp_path, "spare-gpu_spare_auto", transport=fake.transport()) == "ses_b"
+    fake.chats["ses_c"] = "spare-gpu_spare_auto"  # two at once: can't tell
+    assert desktop.calling_session(conn, tmp_path, "spare-gpu_spare_auto", transport=fake.transport()) is None
 
 
 def test_ask_is_a_session_that_may_not_edit_or_run_anything(fake, tmp_path):

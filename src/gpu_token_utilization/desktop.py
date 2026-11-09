@@ -201,6 +201,36 @@ def session_rules(edit: bool, commands: tuple[str, ...]) -> list[dict]:
     return rules
 
 
+AUTO_DENY = {"permission": "spare-gpu_*", "pattern": "*", "action": "deny"}
+
+
+def calling_session(conn: Connection, workdir: Path, tool: str, transport: httpx.BaseTransport | None = None) -> str | None:
+    """The chat that is calling `tool` right now (its full name, e.g. 'spare-gpu_spare_auto'): a
+    busy session in `workdir` whose last messages hold a running call to it. MCP doesn't say which
+    chat called, so this is how /auto keeps one background session per chat. None unless exactly one."""
+    where = {"directory": str(workdir)}
+    found = []
+    try:
+        with conn.client(timeout=10.0, transport=transport) as http:
+            statuses = http.get("/session/status", params=where)
+            statuses.raise_for_status()
+            for sid, status in statuses.json().items():
+                if (status or {}).get("type") == "idle":
+                    continue
+                listed = http.get(f"/session/{sid}/message", params=where)
+                if listed.status_code != 200:
+                    continue
+                for message in listed.json()[-3:]:
+                    if any(part.get("type") == "tool" and part.get("tool") == tool
+                           and (part.get("state") or {}).get("status") in ("pending", "running")
+                           for part in message.get("parts") or []):
+                        found.append(sid)
+                        break
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return found[0] if len(found) == 1 else None
+
+
 def _model_ref(model: str) -> dict:
     provider, _, model_id = model.partition("/")
     return {"providerID": provider, "modelID": model_id} if model_id else {"providerID": "bharatcode", "modelID": provider}
@@ -262,27 +292,53 @@ class DesktopAgent:
         except (httpx.HTTPError, ValueError, AttributeError):
             return None
 
+    def converse(self, workdir: Path, session: str | None, prompt: str, *, title: str, model: str,
+                 on_step: Callable[[AgentStep], None] = lambda step: None,
+                 on_approval: Callable[[], None] = lambda: None) -> tuple[str | None, AgentResult]:
+        """One turn of an ongoing conversation (/auto): `prompt` sent to `session` (a new one titled
+        `title` when None, or when that session is gone) in `workdir`, on `model`, with Desktop's
+        default agent and the user's own permissions; only spare-gpu's tools are denied, so it can't
+        call /auto again. Returns the session's id and this turn's result. A turn that runs past the
+        timeout is left running (result.stopped == "timeout"), never aborted; `on_approval` is
+        called once when the session waits for the user's approval."""
+        return self._session(Path(workdir), prompt, {"permission": [AUTO_DENY]}, {"model": _model_ref(model)},
+                             None, on_step, lambda: False, session=session, title=title, keep_running=True,
+                             on_approval=on_approval)
+
     def _session(self, workdir: Path, prompt: str, session_extra: dict, prompt_extra: dict, token_budget,
-                 on_step, should_stop) -> AgentResult:
+                 on_step, should_stop, *, session: str | None = None, title: str | None = None,
+                 keep_running: bool = False, on_approval: Callable[[], None] | None = None):
+        """Run one prompt as a session and follow it. Returns the result; with keep_running (an
+        ongoing conversation), the session's id and the result."""
         result = AgentResult(exit_code=None, text="")
         where = {"directory": str(workdir)}
         try:
             with self.conn.client(transport=self._transport) as http:
-                created = http.post("/session", params=where, json={
-                    "title": f"spare-gpu: {prompt.splitlines()[0][:60]}" if prompt.strip() else "spare-gpu",
-                    **session_extra,
-                })
-                created.raise_for_status()
-                session = created.json()["id"]
+                skip = 0
+                if session:
+                    earlier = http.get(f"/session/{session}/message", params=where)
+                    if earlier.status_code == 404:
+                        session = None  # deleted in Desktop: start a new one
+                    else:
+                        earlier.raise_for_status()
+                        skip = len(earlier.json())
+                if not session:
+                    created = http.post("/session", params=where, json={
+                        "title": title or (f"spare-gpu: {prompt.splitlines()[0][:60]}" if prompt.strip() else "spare-gpu"),
+                        **session_extra,
+                    })
+                    created.raise_for_status()
+                    session = created.json()["id"]
                 sent = http.post(f"/session/{session}/prompt_async", params=where,
                                  json={**prompt_extra, "parts": [{"type": "text", "text": prompt}]})
                 sent.raise_for_status()
-                self._follow(http, session, where, result, token_budget, on_step, should_stop)
+                self._follow(http, session, where, result, token_budget, on_step, should_stop, skip=skip,
+                             keep_running=keep_running, on_approval=on_approval)
         except httpx.HTTPError as exc:
             result.error = f"BharatCode Desktop's server: {exc}"
         if result.exit_code is None:
             result.exit_code = 1 if result.error or result.stopped else 0
-        return result
+        return (session, result) if keep_running else result
 
     def ask(self, workdir: Path, messages: list[dict], *, token_budget: int | None = None,
             on_step: Callable[[AgentStep], None] = lambda step: None,
@@ -294,20 +350,25 @@ class DesktopAgent:
         return self.run(workdir, prompt, edit=False, commands=(), token_budget=token_budget, on_step=on_step,
                         should_stop=should_stop)
 
-    def _follow(self, http, session, where, result, token_budget, on_step, should_stop) -> None:
+    def _follow(self, http, session, where, result, token_budget, on_step, should_stop, *, skip: int = 0,
+                keep_running: bool = False, on_approval: Callable[[], None] | None = None) -> None:
         deadline = self._clock() + self.timeout
         seen: set[str] = set()
         dropped = idle_unfinished = 0
+        asked = False
         while True:
             self._sleep(self.poll * (2 ** dropped))
             try:
                 messages = http.get(f"/session/{session}/message", params=where)
                 messages.raise_for_status()
-                listed = messages.json()
+                listed = messages.json()[skip:]  # an ongoing session's earlier turns aren't this one
                 finished = self._read(listed, seen, result, on_step)
                 # Each step is its own assistant message, so a completed one doesn't mean the agent
                 # is done; the session's status does. Idle sessions are left out of the status map.
                 busy = session in self._statuses(http, where)
+                if on_approval and busy and not asked and self._waits_for_approval(http, session, where):
+                    asked = True
+                    on_approval()
             except httpx.TransportError:
                 # A dropped local connection (seen 4 Nov: WinError 10054 mid-job while Desktop's
                 # server carried on) isn't a failed job: the session keeps going, so look again.
@@ -333,10 +394,21 @@ class DesktopAgent:
             elif self._clock() > deadline:
                 result.stopped = "timeout"
             if result.stopped:
-                self._abort(http, session, where)
+                if not (keep_running and result.stopped == "timeout"):
+                    self._abort(http, session, where)
                 return
             if done:
                 return
+
+    @staticmethod
+    def _waits_for_approval(http, session, where) -> bool:
+        """Whether the session has a permission request waiting for the user (best effort)."""
+        try:
+            response = http.get("/permission", params=where)
+            response.raise_for_status()
+            return any((p or {}).get("sessionID") == session for p in response.json())
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return False
 
     @staticmethod
     def _abort(http, session, where) -> None:

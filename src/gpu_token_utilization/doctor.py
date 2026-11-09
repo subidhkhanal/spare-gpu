@@ -38,7 +38,7 @@ from .store import FINAL_STATUSES, Store
 PROMPT = "Reply with the single word OK."
 MODEL = DEFAULT_MODEL  # the tiny request is pinned to one model: tokens differ per tokenizer
 BUDGET = 1_500  # tokens the pack may add to a normal session's step (plan §7)
-SPARE_TOOLS = ("spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask")
+SPARE_TOOLS = ("spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_auto")
 RESEARCH = Path(__file__).resolve().parents[2] / "research"
 
 

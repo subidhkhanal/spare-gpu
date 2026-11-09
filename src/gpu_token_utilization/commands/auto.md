@@ -3,7 +3,7 @@
 # once this line is gone, spare-gpu leaves the file alone.
 # The handoff itself runs on Qwen (every plan has it, and it's rarely queued): it is one tool call,
 # and running it on a stalled DeepSeek would make /auto wait in the very queue it exists to avoid.
-description: Run a task or question on whichever model starts it sooner
+description: Do anything a normal chat does, on whichever model starts it sooner
 model: bharatcode/qwen-3.8-27b
 ---
 The user's request is between the markers:
@@ -20,7 +20,8 @@ Follow exactly one of these, checked in this order, and call exactly one tool:
    - your_model: "deepseek-v4.1-flash" (it runs there unless the other model would start it sooner).
    The job runs now, in front of the user, as a Desktop session named "spare-gpu: ..." that they can open and watch; the tool returns when it is done. Then reply with spare_delegate's answer as it comes back: how it went, where its files landed, which model and why. Don't do the work yourself.
 
-3. Anything else (a question, an explanation, a quick piece of writing): call `spare_ask` with
-   - question: the request, exactly as written between the markers;
+3. Anything else (a question, a change to make in the project, anything a normal chat would do): call `spare_auto` with
+   - request: the request, exactly as written between the markers; if it starts with the word "new", leave that word out;
+   - new: true only if the request starts with the word "new" (the user wants a fresh conversation);
    - your_model: "deepseek-v4.1-flash".
-   Then reply with spare_ask's answer as it comes back, including the line saying which model answered. Don't answer it yourself.
+   It runs as a normal BharatCode session with every tool, on the faster model, and remembers this chat's earlier /auto turns. Then reply with spare_auto's answer as it comes back, including the line saying which model answered and where its session is. Don't do the work yourself.

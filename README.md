@@ -99,7 +99,7 @@ Twelve features, each a chat command. They are listed in the order a project usu
 | 9 | [Cost](#9-cost-cost) | `/cost` | Exact tokens per model, and what each job used |
 | 10 | [Fewer prompts](#10-fewer-permission-prompts-prompts) | `/prompts` | Allow rules for commands you keep approving |
 | 11 | [Health check](#11-health-check-doctor) | `/doctor` | Every problem in the install, with its fix |
-| 12 | [Faster answers](#12-faster-answers-auto) | `/auto <question>` | The answer from whichever model starts sooner |
+| 12 | [Faster answers](#12-faster-answers-auto) | `/auto <anything>` | A normal BharatCode chat, on whichever model starts sooner |
 
 The bigger commands (3 to 7) split the work: DeepSeek plans and judges, several Qwen helpers read or search at the same time, and each ends with a **cost summary** of which model did what and the exact tokens used. Add `--plan` to any of them (for example `/code-review --plan`) to see the plan, how many helpers it would start and on which model, without starting anything.
 
@@ -294,31 +294,41 @@ Checks everything (spare-gpu, git, Desktop's settings, the connection to spare-g
 
 At busy times one of Desktop's two models has a queue of several minutes while the other is free. `/auto` checks BharatCode's live queues and, when the other model would start sooner and is good enough for the task, sends your work there. `/auto` is also how you ask for [coding jobs](#1-coding-jobs).
 
+Anything that isn't a coding job is done the way a normal BharatCode chat does it: the model can read and edit your files, run commands, search and use your MCP tools, and asks for your approval as usual. It runs in a session named "auto: ..." in your project, and the reply comes back into your chat.
+
 | Type | What happens |
 |---|---|
-| `/auto what does a race condition mean?` | Answers in the chat, on the model that starts sooner |
-| `/auto write docs for src/utils.py` | Runs a docs job, on the model that starts sooner |
+| `/auto what does calc.py do?` | Reads the file and answers, on the model that starts sooner |
+| `/auto now add a divide function` | Continues the same conversation: it remembers the earlier `/auto` turns from this chat |
+| `/auto new <request>` | Starts a fresh conversation |
+| `/auto write docs for src/utils.py` | Runs a docs job on a private copy, on the model that starts sooner |
 | `/auto` | Shows how long each model would wait right now |
 
-Example from 5 Nov, when DeepSeek had a 3-minute queue:
+- Each chat keeps its own "auto: ..." session. The model is picked again for every message, so one turn can run on DeepSeek and the next on Qwen, with the whole history kept.
+- Put `/auto` in front of every follow-up; a plain message goes to your chat's own model.
+- If the work needs your approval (an edit, a command), the reply says so: open the "auto: ..." session and approve it there.
+- A long task that's still running after 30 minutes keeps going in its session; the reply says where to watch it.
+
+Example, when DeepSeek had a queue:
 
 ```
-/auto what is the name of the latest mac chip
-→ Apple M5 (M5 Pro / M5 Max for pro Macs)
-  (Answered by Qwen 3.8 27B: saves about 2m 43s of waiting over DeepSeek V4.1 Flash, and its lane has a free slot.)
+/auto what does calc.py do?
+→ calc.py has add() and sub(), both for two numbers.
+  (Answered by Qwen 3.8 27B: saves about 2m 43s of waiting over DeepSeek V4.1 Flash, and its lane has a free slot.
+   Steps and approvals: the 'auto: what does calc.py do?' session.)
 ```
 
 ### How it picks the model
 
 It starts from DeepSeek and switches only when that saves at least 20 seconds and the other model has a free slot:
 
-| Right now | Questions and docs run on | Everything else runs on |
+| Right now | `/auto` conversations and docs run on | Other jobs run on |
 |---|---|---|
 | DeepSeek free | DeepSeek | DeepSeek |
 | DeepSeek queued, Qwen free | **Qwen** | DeepSeek |
 | Qwen queued, DeepSeek free | DeepSeek | DeepSeek |
 
-Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for questions, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek. Questions aren't measured: a quick answer is the point, and the reply always names the model that answered. If your plan has only Qwen, everything runs on Qwen. The measurement is a small evaluation, 3 tasks per job type: see [research/eval/](research/eval/).
+Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for `/auto` conversations, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek. `/auto` conversations aren't measured: not waiting is the point, and the reply always names the model that answered. If your plan has only Qwen, everything runs on Qwen. The measurement is a small evaluation, 3 tasks per job type: see [research/eval/](research/eval/).
 
 In the bigger commands, some DeepSeek roles also ship as a standard-model variant on Qwen. They are only used once a benchmark shows Qwen is good enough for them; until then they stay on DeepSeek.
 
@@ -365,7 +375,7 @@ Jobs work without any settings. To change how they run, write `.gtu/settings.jso
 
 | Command | Feature |
 |---|---|
-| `/auto <task or question>` | [Coding jobs](#1-coding-jobs), [Faster answers](#12-faster-answers-auto) |
+| `/auto [new] <anything>` | [Coding jobs](#1-coding-jobs), [Faster answers](#12-faster-answers-auto) |
 | `/apply [result] [--dry-run] [--force]`, `/undo [result]` | [Apply and undo](#2-apply-and-undo-apply-undo) |
 | `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post] [--plan]` | [Code review](#3-code-review-code-review) |
 | `/security-review [commit or branch] [deep] [--plan]` | [Security review](#4-security-review-security-review) |
@@ -397,7 +407,7 @@ No. Every job works on a private copy. The files a job changed wait in `spare-gp
 <details>
 <summary>Will a cheaper model make my work worse?</summary>
 
-Only two kinds of work move to Qwen to save waiting. Docs jobs: Qwen was measured to be just as good at them. Questions: these go to the faster model by design. Tests, reviews and the other jobs stay on DeepSeek. In the bigger commands, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work. Every job's result is also checked before it's kept, and each reply names the model that answered.
+Only two kinds of work move to Qwen to save waiting. Docs jobs: Qwen was measured to be just as good at them. `/auto` conversations: these go to the faster model by design. Tests, reviews and the other jobs stay on DeepSeek. In the bigger commands, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work. Every job's result is also checked before it's kept, and each reply names the model that answered.
 </details>
 
 <details>

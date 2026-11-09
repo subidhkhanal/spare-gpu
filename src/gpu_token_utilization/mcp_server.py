@@ -58,18 +58,11 @@ def db_path(root: Path) -> Path:
     return Path(override) if override else root / ".gtu" / "gtu.db"
 
 
-QUESTION = "question"  # the router's "kind" for spare_ask
-ASK_TIMEOUT = 600.0
-ASK_DIR_ENV = "GTU_ASK_DIR"
-
-
-def ask_folder() -> Path:
-    """Where spare_ask's Desktop sessions run: spare-gpu's own folder, so a question never writes
-    into the user's repo. Desktop lists these sessions under that folder."""
-    override = os.environ.get(ASK_DIR_ENV)
-    base = Path(override) if override else Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "spare-gpu" / "ask"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+QUESTION = "question"  # the router's "kind" for /auto's conversations
+AUTO_TIMEOUT = 1800.0  # how long one /auto turn is waited on; after that it carries on in its session
+AUTO_TOOL = "spare-gpu_spare_auto"  # the tool's name as Desktop shows it in a chat's messages
+AUTO_SESSIONS = "auto-sessions.json"  # in .gtu: each chat's background session
+LATEST = "latest"  # the key for the most recent one, used when the calling chat can't be found
 
 
 class SpareTools:
@@ -229,41 +222,66 @@ class SpareTools:
             lines.append("- no replies recorded yet.")
         return "\n".join(lines)
 
-    def ask(self, question: str, your_model: str | None = None) -> str:
-        """Answer a general question on whichever model starts it sooner, and say which and why.
-        Runs as a read-only Desktop session in spare-gpu's own folder, never in the user's repo
-        (a session writes its permission file into its folder)."""
-        question = (question or "").strip()
-        if not question:
-            return "Nothing to ask: give the question."
+    def auto(self, request: str, your_model: str | None = None, new: bool = False,
+             progress: Callable[[str], None] = lambda line: None) -> str:
+        """Do anything a normal BharatCode chat does, on whichever model starts it sooner: the
+        request goes to a background Desktop session in the project, with Desktop's default agent
+        and the user's own permissions. Each chat keeps its own session, so a follow-up remembers
+        the earlier turns; the model is picked again for every turn. `new` starts a fresh one."""
+        request = (request or "").strip()
+        if not request:
+            return "Nothing to do: give the request."
         try:
             conn = desktop.discover()
         except desktop.DesktopNotFound as exc:
-            return f"Didn't ask: {exc}"
-        path = db_path(self._root())
-        folder = path.parent if path.exists() else None
-        with Store(path if path.exists() else ":memory:") as store, self._http() as http:
-            state = router.State.load(folder) if folder else router.State()
-            # Unlike job types, general questions have no measured quality check: the user asked for
-            # them to go to the faster model, so they're treated as switch-safe here.
+            return f"Didn't start: {exc}"
+        root = self._root()
+        path = db_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with Store(path) as store, self._http() as http:  # Store also writes .gtu/.gitignore
+            state = router.State.load(path.parent)
+            # Like questions before: no measured quality check, and the user asked for the faster
+            # model, so /auto's turns are treated as switch-safe.
             choice = router.choose(QUESTION, self._preferred(your_model), waits.views(store, http), state,
                                    {"types": {QUESTION: "switch-safe"}})
-            if folder:
-                state.save(folder)
-        workdir = ask_folder()
-        prompt = f"{question}\n\nAnswer directly and briefly. Don't use any tools."
-        result = desktop.DesktopAgent(conn, model=f"bharatcode/{choice.model}", timeout=ASK_TIMEOUT).run(
-            workdir, prompt, edit=False, commands=())
+            state.save(path.parent)
+        links_file = path.parent / AUTO_SESSIONS
+        try:
+            links = json.loads(links_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            links = {}
+        chat = desktop.calling_session(conn, root, AUTO_TOOL)
+        known = None if new else links.get(chat or LATEST)
+        title = (known or {}).get("title") or f"auto: {request.splitlines()[0][:60]}"
+        agent = desktop.DesktopAgent(conn, timeout=AUTO_TIMEOUT)
+
+        def turn(model: str):
+            progress(f"Working on {waits.name(model)} in the '{title}' session.")
+            return agent.converse(
+                root, (known or {}).get("session"), request, title=title, model=f"bharatcode/{model}",
+                on_step=lambda step: progress(f"Working on {waits.name(model)} in the '{title}' session."),
+                on_approval=lambda: progress(f"Waiting for your approval: open the '{title}' session and approve it."))
+
+        session, result = turn(choice.model)
         how = f"Answered by {waits.name(choice.model)}: {choice.reason}."
+        refused = router.plan_refusal(result.error) if result.error else None
+        if refused and refused != choice.model:  # the plan doesn't include it: use the one it does
+            known = {"session": session, "title": title} if session else known
+            session, result = turn(refused)
+            how = f"Answered by {waits.name(refused)}: your plan doesn't include {waits.name(choice.model)}."
+        if session:
+            links[chat or LATEST] = links[LATEST] = {"session": session, "title": title}
+            try:
+                links_file.write_text(json.dumps(links, indent=2), encoding="utf-8")
+            except OSError:
+                pass  # the next turn starts a new session; nothing else is lost
+        where = f"Steps and approvals: the '{title}' session."
+        if result.stopped == "timeout":
+            return (f"Still working after {int(AUTO_TIMEOUT // 60)} minutes. It carries on in the '{title}' "
+                    f"session: open it to watch (approve anything it's waiting on there). ({how})")
         if result.error or not result.text:
-            refused = router.plan_refusal(result.error)
-            if refused and refused != choice.model:  # the plan doesn't include it: ask the one it does
-                result = desktop.DesktopAgent(conn, model=f"bharatcode/{refused}", timeout=ASK_TIMEOUT).run(
-                    workdir, prompt, edit=False, commands=())
-                how = f"Answered by {waits.name(refused)}: your plan doesn't include {waits.name(choice.model)}."
-            if result.error or not result.text:
-                return f"Couldn't get an answer: {result.error or 'the model returned nothing'}. ({how})"
-        return f"{result.text}\n\n({how})"
+            return f"Couldn't finish: {result.error or 'the model returned nothing'}. ({how} {where})"
+        return f"{result.text}\n\n({how} {where})"
 
     def _preferred(self, your_model: str | None) -> str:
         """The model the task would otherwise run on: the calling chat's own model if it said;
@@ -560,22 +578,27 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         already-queued job hasn't started, use spare_work_status."""
         return tools.waits(roles=pack)
 
-    @server.tool(annotations=notes(True, world=True))
-    def spare_ask(question: str, your_model: str | None = None) -> str:
-        """Answer a general question (not a coding chore) on whichever BharatCode model will start
-        it sooner, so the user doesn't sit in DeepSeek's queue for a quick answer. Waits for the
-        answer and returns it, with which model answered and why. The answering model has no tools
-        and no web access, so it answers from what it knows.
+    @server.tool(annotations=notes(False, world=True))
+    async def spare_auto(request: str, your_model: str | None = None, new: bool = False,
+                         ctx: Context | None = None) -> str:
+        """Do the user's request exactly as a normal BharatCode chat would (read and edit files, run
+        commands, search, use tools), on whichever BharatCode model will start it sooner, so it
+        doesn't sit in DeepSeek's queue. It runs in a background Desktop session in this project
+        that keeps the conversation: each follow-up from this chat continues it, and the model is
+        picked again every turn. Waits for the reply and returns it, with which model answered and
+        why. Approvals the work needs are asked in that session; the reply says so.
 
-        Use it when the user asks a question through /auto, or says "ask whichever model is free:
-        ...". Pass the answer on as it comes back. For tests, docs or a code review of files in the
-        repo use spare_delegate instead.
+        Use it for anything the user sends through /auto that isn't a coding job: "/auto what does
+        calc.py do?", "/auto add a divide function", "ask whichever model is free: ...". Pass the
+        reply on as it comes back. For tests, docs, a review, "make the tests pass" or "implement
+        docs/plan.md" on a private copy, use spare_delegate instead.
 
         Args:
-            question: The user's question, in their words.
-            your_model: The model the question would otherwise go to, e.g. "deepseek-v4.1-flash".
+            request: The user's request, exactly as written.
+            your_model: The model the request would otherwise go to, e.g. "deepseek-v4.1-flash".
+            new: True to start a new conversation ("/auto new ...") instead of continuing.
         """
-        return tools.ask(question, your_model)
+        return await run_with_progress(ctx, lambda progress: tools.auto(request, your_model, new, progress))
 
     if pack:
         @server.tool(annotations=notes(True, world=True))
@@ -742,7 +765,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         Use it when the user wants the task done now: "write tests for src/pay.py on whichever
         model is free", "get this reviewed now, don't wait in the queue", "delegate the docs for
         utils", "run tests for the payments module", "make the tests pass", "fix the failing
-        tests", "implement docs/plan.md". For a plain question (not a coding chore) use spare_ask.
+        tests", "implement docs/plan.md". For anything else (a question, a change made right in the project) use spare_auto.
 
         Args:
             type: "tests" writes new passing tests; "docs" adds docstrings and README text without

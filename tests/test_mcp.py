@@ -19,7 +19,7 @@ from gpu_token_utilization.store import IGNORE, RequestLog, Store
 
 from conftest import desktop_db, git, quick_plans, quick_tools
 
-TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_ask"}
+TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_auto"}
 MANAGE_TOOLS = {"apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"}  # /apply ... /doctor
 PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "tally_findings",
               "pack_cost"} | MANAGE_TOOLS  # only for `gtu mcp --pack`
@@ -249,8 +249,8 @@ def test_protocol_offers_exactly_five_task_shaped_tools(tools, git_repo):
         ("spare_work_status", "why hasn't my job started?", "spare_waits"),
         ("spare_cancel_work", "cancel the docs job", "spare_work_status"),
         ("spare_waits", "is now a good time to run a big refactor?", "spare_delegate"),
-        ("spare_delegate", "write tests for src/pay.py on whichever model is free", "spare_ask"),
-        ("spare_ask", "ask whichever model is free", "spare_delegate"),
+        ("spare_delegate", "write tests for src/pay.py on whichever model is free", "spare_auto"),
+        ("spare_auto", "ask whichever model is free", "spare_delegate"),
     ]:
         description = " ".join(listed[name].description.split())
         assert phrase in description, name

@@ -13,8 +13,8 @@ POLICY = json.loads((ROOT / "src" / "gpu_token_utilization" / "routing_policy.js
 
 def test_questions_are_routed_by_design_and_the_readme_says_so():
     assert not any(kind.startswith("question") for kind in POLICY["types"])  # the policy measures job types only
-    assert "Questions aren't measured" in README
-    assert re.search(r"questions, which go to the faster model by design rather than by measurement", README)
+    assert "`/auto` conversations aren't measured" in README
+    assert re.search(r"conversations, which go to the faster model by design rather than by measurement", README)
     assert not re.search(r"questions[^.\n]*were measured", README, re.I)
 
 

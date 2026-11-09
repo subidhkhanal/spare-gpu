@@ -8,7 +8,10 @@ real server. A step can write files into the session's folder, as the model's ed
 and take several polls to finish. With `calls`, each new session plays its own list of steps (the
 first session the first list, and so on; the last list repeats), so a job whose rounds must differ,
 like green, can be scripted. The job's opencode.json, if one is in the folder when the
-prompt arrives, is recorded with the session.
+prompt arrives, is recorded with the session. A session can be prompted again (an /auto
+conversation): each prompt plays the next list of steps after a new user message. `chats` are
+the user's own chats, busy with a running call to the named tool; `pending` holds permission
+requests waiting for the user (GET /permission).
 """
 
 from __future__ import annotations
@@ -66,6 +69,9 @@ class FakeDesktop:
     password: str = PASSWORD
     sessions: dict = field(default_factory=dict)  # id -> {"directory", "title", "prompt", "config", "revealed", "aborted"}
     healthy: bool = True
+    chats: dict = field(default_factory=dict)  # session id -> the tool it's running a call to
+    pending: list = field(default_factory=list)  # permission requests, e.g. {"id": "per_1", "sessionID": ...}
+    prompts: int = 0  # prompts sent so far, across sessions (picks each one's steps from `calls`)
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -88,19 +94,31 @@ class FakeDesktop:
         if path == "/session" and method == "POST":
             sid = f"ses_{len(self.sessions) + 1}"
             body = json.loads(request.content or b"{}")
-            steps = self.calls[min(len(self.sessions), len(self.calls) - 1)] if self.calls else self.steps
             self.sessions[sid] = {"directory": directory, "title": body.get("title"), "prompt": None, "config": None,
                                   "revealed": 0, "ticks": 0, "aborted": False, "permission": body.get("permission"),
-                                  "steps": steps}
+                                  "steps": [], "prompts": [], "starts": []}
             return httpx.Response(200, json={"id": sid, "directory": directory, "title": body.get("title")})
         if path == "/session/status":
-            return httpx.Response(200, json={sid: {"type": "busy"} for sid, s in self.sessions.items()
-                                             if s["prompt"] and not s["aborted"] and s["revealed"] < len(s["steps"])})
+            busy = {sid: {"type": "busy"} for sid, s in self.sessions.items()
+                    if s["prompt"] and not s["aborted"] and s["revealed"] < len(s["steps"])}
+            return httpx.Response(200, json=busy | {sid: {"type": "busy"} for sid in self.chats})
+        if path == "/permission" and method == "GET":
+            return httpx.Response(200, json=self.pending)
         parts = path.strip("/").split("/")
+        if len(parts) >= 3 and parts[0] == "session" and parts[1] in self.chats and parts[2] == "message":
+            running = {"id": "prt_call", "type": "tool", "tool": self.chats[parts[1]], "state": {"status": "running"}}
+            return httpx.Response(200, json=[{"info": {"id": "msg_u", "role": "user"}, "parts": []},
+                                             {"info": {"id": "msg_a", "role": "assistant", "time": {"created": 1}},
+                                              "parts": [running]}])
         if len(parts) >= 3 and parts[0] == "session" and parts[1] in self.sessions:
             s = self.sessions[parts[1]]
             if parts[2] == "prompt_async" and method == "POST":
                 s["prompt"] = json.loads(request.content)
+                s["prompts"].append(s["prompt"])
+                s["starts"].append(len(s["steps"]))
+                s["steps"] = s["steps"] + list(
+                    self.calls[min(self.prompts, len(self.calls) - 1)] if self.calls else self.steps)
+                self.prompts += 1
                 config = Path(s["directory"] or ".") / "opencode.json"
                 s["config"] = json.loads(config.read_text(encoding="utf-8")) if config.is_file() else None
                 return httpx.Response(204)
@@ -127,8 +145,10 @@ class FakeDesktop:
             s["ticks"] = 0
 
     def _messages(self, sid: str, s: dict) -> list[dict]:
-        out = [{"info": {"id": "msg_0", "role": "user"}, "parts": []}] if s["prompt"] else []
+        out = []
         for i, step in enumerate(s["steps"][: s["revealed"]], 1):
+            if i - 1 in s["starts"]:
+                out.append({"info": {"id": f"msg_u{i}", "role": "user"}, "parts": []})
             last = i == len(s["steps"])
             parts = [{"id": f"prt_{i}_a", "type": "step-start"}]
             tools = ([step.tool] if step.tool else []) + [("edit", name) for name in step.writes]
@@ -147,4 +167,6 @@ class FakeDesktop:
             if last and self.error:
                 info["error"] = {"name": "UnknownError", "data": {"message": self.error}}
             out.append({"info": info, "parts": parts})
+        if s["prompt"] and len(s["steps"]) > s["revealed"] and s["revealed"] in s["starts"]:
+            out.append({"info": {"id": f"msg_u{s['revealed'] + 1}", "role": "user"}, "parts": []})  # not answered yet
         return out
