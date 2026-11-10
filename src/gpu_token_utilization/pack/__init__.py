@@ -30,7 +30,8 @@ COST_FIGURES_TEXT = (
     "the helper runs per model as `pack_cost` counted them (report its numbers, never your own count; if it "
     "gave none, say the count wasn't available); the tokens per model from `pack_cost` (or that they weren't "
     "available); and the queue time saved, estimated as the number of batches of standard-model helpers you "
-    "started (helpers started in the same message wait in the queue together, so a batch counts once) times "
+    "started (helpers started in the same message wait in the queue together, so a batch counts once; "
+    "every message that started any counts, retries and later rounds included) times "
     "the difference between the heavy and the standard model's wait in the `spare_waits` answer from the "
     "start. Say so when that answer had too little data. Never claim a number you didn't measure.")
 SCHEMA = "https://opencode.ai/config.json"

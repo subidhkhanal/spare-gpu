@@ -26,7 +26,9 @@ research/<slug>/review.md.
 1. Run the `verify_refs` tool on the research folder. It checks every reference in sources.json
    against the registries and says which to keep, which to DROP and which it couldn't check
    (UNCHECKED: the source couldn't be reached, which says nothing against it; never mark a claim
-   for an UNCHECKED reference alone).
+   for an UNCHECKED reference alone). It also corrects wrong authors or shortened titles in
+   sources.json; `build_report` rebuilds the References list from that file afterwards, so never
+   mark the References list's details (authors, titles, ids): judge the claims.
 2. Read report.md and the notes. For every cited claim, find the quote in the notes that supports
    it. Mark a claim when the cited note has no such quote; when the quote says something weaker
    or different; when the citation is a DROP reference; when the claim has no citation at all;

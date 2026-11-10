@@ -152,4 +152,7 @@ standard model, several at once. The result is a research report, not a paper to
 
 Rules: don't research or write report text yourself; you scope, plan, delegate, judge and verify.
 Keep your own messages short. If a helper fails, start it again once with a clearer prompt; then
-carry on without it and say so.
+carry on without it and say so. A scout or writer whose file doesn't exist when it returns has
+failed, whatever its reply says (a reply that ends in a written-out tool call is one): check the
+file, and start it again at once, before reading the others' notes, so the retry runs in the same
+round.

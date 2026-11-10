@@ -246,6 +246,7 @@ def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
         _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS[component]]) if k == "agent"}[f"{component}-lead"])
         flat = " ".join(body.split())
         assert "a batch counts once" in flat and "standard-model runs times" not in flat, component
+        assert "retries and later rounds included" in flat, component
         raw = pack.PACK_DIR / "agents" / f"{component}-lead.md"
         assert raw.read_text(encoding="utf-8").count(COST_FIGURES) == 1, component  # the wording lives in one place
     simplify, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}["simplify-lead"])
@@ -297,7 +298,8 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
                  "No polishing beyond the review", "01-summary.md", "at most three short questions",
                  "as `pack_cost` counted them", "say the count wasn't available",
                  "Never describe the notes file's layout", "Never write or edit sources.json yourself",
-                 "An UNCHECKED reference is not a DROP one"):
+                 "An UNCHECKED reference is not a DROP one", "whose file doesn't exist when it returns has failed",
+                 "so the retry runs in the same round"):
         assert step in body, step
     assert body.count("all in the same message") == 2  # scouts and writers both run at once
     for kind in ("academic", "technical", "market", "fact"):  # each kind of question has its own strategy
@@ -311,7 +313,9 @@ def test_scouts_rate_sources_stop_in_time_and_list_them_for_collect_sources():
     _, scout = parse(files["research-scout"])
     flat = " ".join(scout.split())
     for part in ("A: primary or authoritative", "B: reputable secondary", "C: weak", "two searches in a row find nothing new",
-                 "## In brief", "## Conflicts", "## Gaps", "```sources", '"quality"', '"date"'):
+                 "## In brief", "## Conflicts", "## Gaps", "```sources", '"quality"', '"date"',
+                 "at most three searches or reads inside one page", "a reply without the file is a failed task",
+                 "Never write a tool call out as text"):
         assert part in flat, part
     # the example lines in the scout's instructions are what collect_sources reads
     from gpu_token_utilization import refs
@@ -319,6 +323,7 @@ def test_scouts_rate_sources_stop_in_time_and_list_them_for_collect_sources():
     assert [i["key"] for i in items] == ["lecun2015", "pytorch-rel-2-5"] and bad == 0
     _, checker = parse(files["research-checker"])
     assert "Coverage" in checker and "brief.md" in checker
+    assert "never mark the References list's details" in " ".join(checker.split())
 
 
 def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else():
