@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import waits
+from . import tuning, waits
 from .waits import Estimate, View
 
 POLICY_FILE = Path(__file__).with_name("routing_policy.json")
@@ -45,8 +45,8 @@ ROUTE_ENV = "GTU_ROUTE"  # "off" disables routing
 # The model a delegated task would otherwise run on: spare_delegate is called from the user's chat,
 # typically on the heavy model. Queued jobs default to the worker's own model (Qwen) instead.
 DELEGATE_PREFERRED = "deepseek-v4.1-flash"
-DEFAULT_MIN_SAVING = 20.0
-BACK_VOTES = 2
+DEFAULT_MIN_SAVING = tuning.value("router", "min_saving", 20.0)
+BACK_VOTES = tuning.value("router", "back_votes", 2)
 FAILING_FOR = 600.0  # seconds a model that just failed is skipped
 
 

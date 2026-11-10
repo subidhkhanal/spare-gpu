@@ -14,6 +14,7 @@ import statistics
 from datetime import datetime
 from pathlib import Path
 
+from . import tuning
 from .bc_config import CHANNELS
 
 DB_ENV = "GTU_DESKTOP_DB"  # a database file to read instead of the channel's (tests, or a copy)
@@ -49,9 +50,9 @@ def _same_folder(a: str, b: Path) -> bool:
     return os.path.normcase(os.path.normpath(a.replace("/", os.sep))) == os.path.normcase(os.path.normpath(str(b)))
 
 
-START_WINDOW = 30.0  # minutes of replies start_times() looks at
-START_KEEP = 5  # the latest replies per model it uses
-START_MIN = 2  # replies a model needs before its figure counts
+START_WINDOW = tuning.value("router", "start_window", 30.0)  # minutes of replies start_times() looks at
+START_KEEP = tuning.value("router", "start_keep", 5)  # the latest replies per model it uses
+START_MIN = tuning.value("router", "start_min", 2)  # replies a model needs before its figure counts
 
 
 def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: float | None = None) -> dict[str, float]:
@@ -60,19 +61,43 @@ def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: floa
     a tool call), over its latest START_KEEP replies in the last `minutes`. Replies that failed
     are left out, and so is a model with fewer than START_MIN replies. {} without a database.
     This is what the user actually waited, which BharatCode's queue figures don't always show."""
+    since = (now if now is not None else datetime.now().timestamp()) - minutes * 60
+    return summarise_starts(reply_starts(since, db))
+
+
+def summarise_starts(replies: list[tuple[str, float, float]], keep: int | None = None,
+                     minimum: int | None = None) -> dict[str, float]:
+    """Per model, the median start of its latest `keep` replies, for a model with `minimum` or more.
+    replies: (model id, created in epoch seconds, seconds to its first output)."""
+    keep = START_KEEP if keep is None else keep
+    minimum = START_MIN if minimum is None else minimum
+    per_model: dict[str, list[tuple[float, float]]] = {}
+    for model, created, seconds in replies:
+        per_model.setdefault(model, []).append((created, seconds))
+    figures = {}
+    for model, seen in per_model.items():
+        latest = [seconds for _, seconds in sorted(seen)[-keep:]] if keep > 0 else []
+        if latest and len(latest) >= minimum:
+            figures[model] = statistics.median(latest)
+    return figures
+
+
+def reply_starts(since: float, db: Path | None = None) -> list[tuple[str, float, float]]:
+    """Every reply Desktop recorded since `since` (epoch seconds) that produced output: (model id,
+    created in epoch seconds, seconds to its first output), oldest first. Failed replies are left
+    out. [] without a database."""
     path = db or session_db()
     if path is None:
-        return {}
-    since = int(((now if now is not None else datetime.now().timestamp()) - minutes * 60) * 1000)
+        return []
     try:
         conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     except sqlite3.Error:
-        return {}
+        return []
     try:
         rows = conn.execute("select m.id, m.data, p.data from message m join part p on p.message_id = m.id "
-                            "where m.time_created >= ?", (since,)).fetchall()
+                            "where m.time_created >= ?", (int(since * 1000),)).fetchall()
     except sqlite3.Error:
-        return {}
+        return []
     finally:
         conn.close()
     replies: dict[str, tuple[str, float, float]] = {}  # message id -> (model, created, first output)
@@ -92,15 +117,8 @@ def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: floa
         known = replies.get(mid)
         if known is None or start < known[2]:
             replies[mid] = (message["modelID"], created, start)
-    per_model: dict[str, list[tuple[float, float]]] = {}
-    for model, created, start in replies.values():
-        per_model.setdefault(model, []).append((created, max(0.0, (start - created) / 1000)))
-    figures = {}
-    for model, seen in per_model.items():
-        latest = [seconds for _, seconds in sorted(seen)[-START_KEEP:]]
-        if len(latest) >= START_MIN:
-            figures[model] = statistics.median(latest)
-    return figures
+    return sorted(((model, created / 1000, max(0.0, (start - created) / 1000))
+                   for model, created, start in replies.values()), key=lambda r: r[1])
 
 
 # A helper's model: the one its session was started with (so a helper still queued counts too),
