@@ -69,7 +69,9 @@ def test_a_made_up_doi_is_dropped():
 def test_a_real_id_with_the_wrong_title_or_authors_or_year_is_dropped():
     wrong_title = refs.verify(Reference.from_dict({**DEEP, "title": "A survey of quantum particle swarms"}, 1), registries())
     assert not wrong_title.ok and "different title: 'Deep learning'" in wrong_title.reason and wrong_title.title_match < 0.5
-    wrong_authors = refs.verify(Reference.from_dict({**DEEP, "authors": ["Alan Turing", "Ada Lovelace"]}, 1), registries())
+    # other authors and no title to show it's the same paper: dropped
+    wrong_authors = refs.verify(Reference.from_dict({**DEEP, "title": "", "authors": ["Alan Turing", "Ada Lovelace"]}, 1),
+                                registries())
     assert not wrong_authors.ok and wrong_authors.reason.startswith("the id resolves to other authors: Yann LeCun")
     wrong_year = refs.verify(Reference.from_dict({**DEEP, "year": 2009}, 1), registries())
     assert not wrong_year.ok and wrong_year.reason == "the year is 2015, not 2009"
@@ -90,11 +92,12 @@ def test_a_url_only_source_must_answer_and_carry_the_title():
     assert refs.verify(Reference.from_dict({"key": "d", "url": "https://example.org/good"}, 1), http).reason == "the URL answers (no title to check)"
 
 
-def test_nothing_to_check_and_a_registry_outage_are_both_dropped_with_the_reason():
+def test_nothing_to_check_is_dropped_but_a_registry_outage_leaves_it_unchecked():
     nothing = refs.verify(Reference.from_dict({"key": "x", "title": "Some paper"}, 1), registries())
-    assert not nothing.ok and nothing.reason == "no DOI, arXiv id, OpenAlex id or URL to check"
+    assert not nothing.ok and nothing.status == "drop" and nothing.reason == "no DOI, arXiv id, OpenAlex id or URL to check"
     outage = refs.verify(Reference.from_dict({**DEEP, "doi": "10.1000/nope"}, 1), registries(down=("openalex",)))
-    assert not outage.ok and outage.reason.startswith("couldn't check it: OpenAlex")
+    assert outage.status == "unchecked" and outage.reason.startswith("couldn't check it: OpenAlex")
+    assert outage.to_dict()["verified"] is None  # neither kept nor dropped
 
 
 def test_verify_file_writes_the_verdicts_back_and_describes_what_to_drop(tmp_path):
@@ -220,7 +223,7 @@ def test_collecting_needs_notes_and_skips_lines_that_arent_sources(tmp_path):
     path.parent.mkdir()
     path.write_text('```sources\nnot json\n{"title": "no key"}\n{"key": "ok", "url": "https://a.org"}\n```\n', encoding="utf-8")
     _, summary = refs.collect_sources(tmp_path)
-    assert "1 source(s)" in summary and "2 line(s) in ```sources fences" in summary
+    assert "1 source(s)" in summary and "2 line(s) in the sources lists couldn't be read" in summary and "1.md (2)" in summary
 
 
 def test_a_preprint_cited_by_its_arxiv_doi_and_by_its_arxiv_id_is_one_source(tmp_path):
@@ -278,3 +281,78 @@ def test_old_style_arxiv_ids_in_arxivs_doi_match_and_an_unreadable_one_stays_a_d
     assert refs.identities({"doi": "10.48550/arxiv.nonsense"}) == ["doi:10.48550/arxiv.nonsense"]
     assert refs.identities({"url": "https://example.org/a"}) == ["url:example.org/a"]
     assert refs.identities({"doi": "10.1000/x", "url": "https://example.org/a"}) == ["doi:10.1000/x"]  # a page only when nothing better
+
+
+
+# --- what a real run showed: "et al.", refusing sites, wrong author lists, the scouts' own formats --
+
+def test_et_al_is_not_a_surname():
+    assert [refs._last_name(n) for n in ("Es et al.", "Hao Xin et al.", "Magesh et al. 2024", "LeCun, Y.")] == [
+        "es", "xin", "magesh", "lecun"]
+    assert refs.authors_match(["LeCun et al."], ["Yann LeCun", "Yoshua Bengio"]) is True
+    assert refs.verify(Reference.from_dict({**DEEP, "authors": ["LeCun et al."]}, 1), registries()).ok
+
+
+def test_a_real_paper_with_the_wrong_authors_or_a_shortened_title_is_kept_and_corrected(tmp_path):
+    folder = tmp_path / "r"
+    folder.mkdir()
+    (folder / "sources.json").write_text(json.dumps({"sources": [
+        {**DEEP, "key": "a", "authors": ["Alan Turing"]},  # the exact title: the paper is real, the authors are wrong
+        {**DEEP, "key": "b", "title": "Deep learning nets"},  # shortened or padded title, right authors
+        {**DEEP, "key": "c", "authors": "unlisted (arXiv)"},  # no author given is nothing to compare
+    ]}), encoding="utf-8")
+    verdicts, path = refs.verify_file(folder, http=registries())
+    assert [v.status for v in verdicts] == ["keep", "keep", "keep"]
+    saved = json.loads(path.read_text(encoding="utf-8"))["sources"]
+    assert "authors were wrong and are corrected" in saved[0]["verify_reason"] and "Yann LeCun" in str(saved[0]["authors"])
+    assert saved[1]["title"] == "Deep learning" and "title was shortened" in saved[1]["verify_reason"]
+
+
+def test_a_site_that_refuses_or_is_busy_leaves_the_source_unchecked_never_dropped(tmp_path):
+    http = http_with_pages({"https://example.org/locked": (403, "no"), "https://example.org/busy": (429, "slow down")})
+    for url in ("https://example.org/locked", "https://example.org/busy"):
+        verdict = refs.verify(Reference.from_dict({"key": "k", "title": "A review", "url": url}, 1), http)
+        assert verdict.status == "unchecked" and "says nothing about whether the page exists" in verdict.reason
+    folder = tmp_path / "r"
+    (folder / "sections").mkdir(parents=True)
+    (folder / "sections" / "01-a.md").write_text("## A\n\nA claim [k].\n", encoding="utf-8")
+    (folder / "sources.json").write_text(json.dumps({"sources": [{"key": "k", "title": "A review", "url": "https://example.org/locked"}]}),
+                                         encoding="utf-8")
+    verdicts, path = refs.verify_file(folder, http=http)
+    text = refs.describe(verdicts, path)
+    assert "0 to drop, 1 couldn't be checked." in text and "- UNCHECKED k:" in text and "are not DROP" in text
+    report, built = refs.build_report(folder, "T")
+    assert "(not checked automatically" in report.read_text(encoding="utf-8") and "DROP" not in built
+
+
+def test_collect_sources_reads_the_formats_scouts_actually_wrote(tmp_path):
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    # from a real run: pipe lines, JSON with a generic "id" and "rating", and a plain fence under a heading
+    (notes / "1-a.md").write_text(
+        "## Findings\n- x [lewis2020]\n\n```sources\n"
+        "key | title | author/year | type | id | rating\n"
+        "lewis2020 | Retrieval-Augmented Generation | Lewis, Perez, Piktus et al. / 2020 | paper | "
+        "arXiv 2005.11401 (DOI 10.48550/arxiv.2005.11401) | A\n"
+        "haleval2023 | HaluEval | Li, Cheng / 2023 | paper | https://aclanthology.org/2023.emnlp-main.397/ | A\n```\n",
+        encoding="utf-8")
+    (notes / "2-b.md").write_text(
+        "```sources\n"
+        '{"key": "rag", "title": "RAG", "author": "Lewis et al.", "year": "2020", "id": "arXiv:2005.11401", "rating": "A"}\n'
+        '{"key": "ragas", "title": "RAGAS", "author/year": "Es et al. 2023", "id": "https://arxiv.org/abs/2309.15217", "rating": "B secondary"}\n'
+        '{"key": "wrongfield", "title": "G", "doi": "arXiv:2404.07060", "quality": "a"}\n'
+        "```\n", encoding="utf-8")
+    (notes / "3-c.md").write_text("## Sources\n\n```json\n"
+                                  '{"key": "realm", "title": "REALM", "url": "https://arxiv.org/abs/2002.08909", "quality": "A"}\n'
+                                  "```\n", encoding="utf-8")
+    (notes / "4-d.md").write_text("## Findings\nnothing listed\n", encoding="utf-8")
+    path, summary = refs.collect_sources(tmp_path)
+    items = {i["key"]: i for i in refs.load_sources(path)}
+    assert set(items) == {"lewis2020", "haleval2023", "ragas", "wrongfield", "realm"}
+    assert items["lewis2020"]["aliases"] == ["rag"] and items["lewis2020"]["arxiv"] == "2005.11401"
+    assert items["lewis2020"]["authors"] == "Lewis, Perez, Piktus et al." and items["lewis2020"]["year"] == 2020
+    assert items["haleval2023"]["doi"] == "10.18653/v1/2023.emnlp-main.397"  # read from the ACL Anthology link
+    assert items["ragas"]["quality"] == "B" and items["ragas"]["arxiv"] == "2309.15217" and items["ragas"]["year"] == 2023
+    assert items["wrongfield"]["arxiv"] == "2404.07060" and "doi" not in items["wrongfield"] and items["wrongfield"]["quality"] == "A"
+    assert "No sources list found in: 4-d.md." in summary and "never edit sources.json by hand" in summary
+    assert "couldn't be read" not in summary  # the header row of the pipe table isn't a bad line

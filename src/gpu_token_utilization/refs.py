@@ -1,7 +1,10 @@
 """Reference checking for /deep-research (the verify_refs tool). A report may cite a paper only
 with an id a registry resolves (DOI, arXiv id, OpenAlex id) or a URL that answers, and the title
 and authors it gives must match what the registry says; anything else is dropped from the
-report. Models invent plausible references; this is the step that makes that harmless.
+report. Models invent plausible references; this is the step that makes that harmless. A source
+that couldn't be reached (a refusing or busy site) is "unchecked", never dropped: that says
+nothing against it. A real paper given with a shortened title or the wrong authors is kept, its
+details corrected from the registry.
 """
 
 from __future__ import annotations
@@ -18,6 +21,11 @@ from . import scholar
 from .scholar import Paper, ScholarError, normalize_arxiv, normalize_doi, normalize_openalex, title_similarity
 
 TITLE_MATCH = 0.85  # SequenceMatcher ratio at or above which two titles are the same paper
+TITLE_EXACT = 0.95  # the same title: a resolving id with this title is the paper, whatever authors were written
+TITLE_SHORTENED = 0.75  # a shortened title is still the paper when the authors match too
+# Answers that say nothing about whether the source exists: refused, rate-limited or a server fault.
+UNCHECKABLE_STATUS = {401, 403, 405, 408, 429, 451} | set(range(500, 600))
+_NO_AUTHOR = re.compile(r"^\W*(unlisted|unknown|anonymous|anon|n/?a|none|various)\b", re.I)
 SOURCES_FILE = "sources.json"
 PAGE_BYTES = 200_000
 
@@ -35,7 +43,11 @@ class Reference:
 
     @classmethod
     def from_dict(cls, data: dict, index: int) -> Reference:
-        authors = data.get("authors")
+        authors = data.get("authors") or data.get("author")
+        if isinstance(authors, list):
+            authors = [str(a) for a in authors if str(a).strip() and not _NO_AUTHOR.match(str(a))]
+        elif isinstance(authors, str) and _NO_AUTHOR.match(authors):
+            authors = None
         if isinstance(authors, str):  # "A and B", "A; B", or "A, B, C" (but "Last, First" is one name)
             authors = [a.strip() for a in re.split(r";| and ", authors) if a.strip()]
             if len(authors) == 1 and authors[0].count(",") >= 2:
@@ -59,9 +71,15 @@ class Verdict:
     reason: str
     found: Paper | None = None
     title_match: float | None = None
+    checked: bool = True  # False: the source couldn't be reached, so it's neither kept nor dropped
+    corrected: dict | None = None  # fields the registry corrected (authors, title), written back into sources.json
+
+    @property
+    def status(self) -> str:
+        return "keep" if self.ok else ("drop" if self.checked else "unchecked")
 
     def to_dict(self) -> dict:
-        return {"key": self.key, "verified": self.ok, "verify_reason": self.reason,
+        return {"key": self.key, "verified": self.ok if self.checked else None, "verify_reason": self.reason,
                 "title_match": None if self.title_match is None else round(self.title_match, 2),
                 "resolved": self.found.to_dict() if self.found else None}
 
@@ -69,7 +87,8 @@ class Verdict:
 # --- matching ------------------------------------------------------------------------------------
 
 def _last_name(name: str) -> str:
-    """'Yann LeCun', 'LeCun, Y.' and 'Y. LeCun' all give 'lecun'."""
+    """'Yann LeCun', 'LeCun, Y.', 'Y. LeCun' and 'LeCun et al. 2015' all give 'lecun'."""
+    name = re.sub(r"\b(et\.?\s*al\b\.?|and others|others)(.*)$", "", name, flags=re.I).strip()
     if "," in name:
         name = name.split(",", 1)[0]
         parts = [p for p in re.sub(r"[^a-z\- ]", "", name.lower()).split() if p]
@@ -94,10 +113,17 @@ def authors_match(claimed: list[str] | None, found: list[str]) -> bool | None:
 
 def compare(ref: Reference, found: Paper) -> Verdict:
     similarity = title_similarity(ref.title, found.title) if ref.title else None
-    if similarity is not None and similarity < TITLE_MATCH:
-        return Verdict(ref.key, False, f"the id resolves to a different title: {found.title!r}", found, similarity)
     authors = authors_match(ref.authors, found.authors)
+    if similarity is not None and similarity < TITLE_MATCH:
+        if similarity >= TITLE_SHORTENED and authors is True:  # a shortened title, by the right authors
+            return Verdict(ref.key, True, "resolves; the title was shortened and is corrected from the registry",
+                           found, similarity, corrected={"title": found.title})
+        return Verdict(ref.key, False, f"the id resolves to a different title: {found.title!r}", found, similarity)
     if authors is False:
+        if similarity is not None and similarity >= TITLE_EXACT:  # the paper is real; the author list was wrong
+            return Verdict(ref.key, True, "resolves and the title matches; the authors were wrong and are corrected "
+                           f"from the registry: {', '.join(found.authors[:4])}", found, similarity,
+                           corrected={"authors": list(found.authors)})
         return Verdict(ref.key, False, f"the id resolves to other authors: {', '.join(found.authors[:4])}", found, similarity)
     if ref.year and found.year and abs(ref.year - found.year) > 1:
         return Verdict(ref.key, False, f"the year is {found.year}, not {ref.year}", found, similarity)
@@ -132,7 +158,11 @@ def check_url(ref: Reference, http: httpx.Client) -> Verdict:
     try:
         response = http.get(ref.url, headers={"Accept": "text/html,*/*"})
     except httpx.HTTPError as exc:
-        return Verdict(ref.key, False, f"the URL couldn't be fetched ({type(exc).__name__})")
+        return Verdict(ref.key, False, f"couldn't check it: the URL couldn't be fetched ({type(exc).__name__})",
+                       checked=False)
+    if response.status_code in UNCHECKABLE_STATUS:
+        return Verdict(ref.key, False, f"couldn't check it: the site answered HTTP {response.status_code} "
+                       "(refused or busy), which says nothing about whether the page exists", checked=False)
     if response.status_code != 200:
         return Verdict(ref.key, False, f"the URL answered HTTP {response.status_code}")
     if not ref.title:
@@ -153,7 +183,7 @@ def verify(ref: Reference, http: httpx.Client) -> Verdict:
     try:
         found = resolve(ref, http)
     except ScholarError as exc:
-        return Verdict(ref.key, False, f"couldn't check it: {exc}")
+        return Verdict(ref.key, False, f"couldn't check it: {exc}", checked=False)
     if found is not None:
         return compare(ref, found)
     if ref.url and not (ref.doi or ref.arxiv or ref.openalex):
@@ -187,23 +217,32 @@ def verify_file(folder: Path, http: httpx.Client | None = None) -> tuple[list[Ve
         if own:
             http.close()
     for item, verdict in zip(items, verdicts):
+        item.update(verdict.corrected or {})
         item.update(verdict.to_dict())
     path.write_text(json.dumps({"sources": items}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return verdicts, path
 
 
 def describe(verdicts: list[Verdict], path: Path) -> str:
-    kept = [v for v in verdicts if v.ok]
-    dropped = [v for v in verdicts if not v.ok]
-    lines = [f"Checked {len(verdicts)} reference(s) in {path}: {len(kept)} verified, {len(dropped)} to drop."]
+    kept = [v for v in verdicts if v.status == "keep"]
+    dropped = [v for v in verdicts if v.status == "drop"]
+    unchecked = [v for v in verdicts if v.status == "unchecked"]
+    lines = [f"Checked {len(verdicts)} reference(s) in {path}: {len(kept)} verified, {len(dropped)} to drop"
+             + (f", {len(unchecked)} couldn't be checked." if unchecked else ".")]
     for v in dropped:
         lines.append(f"- DROP {v.key}: {v.reason}")
+    for v in unchecked:
+        lines.append(f"- UNCHECKED {v.key}: {v.reason}")
     for v in kept:
         where = v.found.url if v.found and v.found.url else ""
         lines.append(f"- keep {v.key}: {v.reason}" + (f" ({where})" if where else ""))
     if dropped:
         lines.append("Remove every DROP reference and the claims that rested on it from the report, or find a "
                      "source that resolves. Never keep a reference the registries don't have.")
+    if unchecked:
+        lines.append("UNCHECKED references are not DROP: the source couldn't be reached, so nothing is known against "
+                     "it. Keep them; the report lists them as not checked automatically. Run verify_refs again "
+                     "later to settle them.")
     return "\n".join(lines)
 
 
@@ -211,7 +250,15 @@ def describe(verdicts: list[Verdict], path: Path) -> str:
 
 NOTES_DIR = "notes"
 # A scout's machine-readable list: a ```sources fence with one JSON object per line.
-_SOURCES_FENCE = re.compile(r"```sources[ \t]*\r?\n(.*?)```", re.S)
+_SOURCES_FENCE = re.compile(r"```sources?[ \t]*\r?\n(.*?)```", re.S | re.I)
+# A plain fence right under a "Sources" heading: scouts sometimes write the list that way.
+_HEADED_FENCE = re.compile(r"^#{1,6}[ \t]*(?:sources|references)\b[^\n]*\n\s*```[\w-]*[ \t]*\r?\n(.*?)```",
+                           re.S | re.I | re.M)
+_ID_FIELDS = ("id", "ids", "identifier", "link", "source", "ref")
+_AUTHOR_FIELDS = ("authors", "author", "author/year", "authors/year", "by")
+_QUALITY_FIELDS = ("quality", "rating", "grade", "rank")
+_KEY = re.compile(r"^[\w.:\-]{2,60}$")
+_KINDS = {"paper", "web", "official", "repo", "docs", "blog", "news", "book", "report", "dataset", "preprint"}
 QUALITY = {"A": "primary or authoritative", "B": "reputable secondary", "C": "weak (blog, forum, vendor page)"}
 _TRACKING = re.compile(r"^(utm_\w+|fbclid|gclid|mc_\w+|ref|ref_src)$", re.I)
 
@@ -279,22 +326,118 @@ def identity(item: dict) -> str | None:
     return ids[0] if ids else None
 
 
+def ids_in(text: str) -> dict:
+    """The DOI, arXiv id, OpenAlex id and URL written anywhere in a piece of text."""
+    text = str(text or "")
+    found: dict = {}
+    doi = re.search(r"\b10\.\d{4,9}/[^\s|)\]>,;\"']+", text)
+    if doi:
+        found["doi"] = doi.group(0).rstrip(".")
+    arxiv = (re.search(r"arxiv(?:\.org)?[:\s/]*(?:abs/|pdf/|html/)?(\d{4}\.\d{4,5}(?:v\d+)?)", text, re.I)
+             or re.fullmatch(r"\s*(\d{4}\.\d{4,5}(?:v\d+)?)\s*", text))
+    if arxiv:
+        found["arxiv"] = arxiv.group(1)
+    url = re.search(r"https?://[^\s|)\]>\"']+", text)
+    if url:
+        found["url"] = url.group(0).rstrip(".,;")
+    openalex = re.search(r"\b(W\d{5,})\b", text)
+    if openalex:
+        found["openalex"] = openalex.group(1)
+    return found
+
+
+def _pipe_entry(line: str) -> dict | None:
+    """`key | title | author/year | type | id | rating`, or any order after the key and title."""
+    parts = [p.strip() for p in line.strip().strip("-* ").strip("|").split("|")]
+    if len(parts) < 3 or not _KEY.match(parts[0]) or parts[0].lower() in ("key", "id"):
+        return None
+    item: dict = {"key": parts[0], "title": parts[1]}
+    for part in parts[2:]:
+        ids = ids_in(part)
+        if re.fullmatch(r"[ABC]", part, re.I):
+            item["quality"] = part.upper()
+        elif ids:
+            for name, value in ids.items():
+                item.setdefault(name, value)
+        elif part.lower() in _KINDS:
+            item["type"] = part.lower()
+        elif part and "authors" not in item:
+            item["authors"] = part
+    return item
+
+
+def normalize_entry(item: dict) -> dict:
+    """One scout's source entry in the shape the rest expects: ids in doi/arxiv/openalex/url, the
+    rating in quality, the authors in authors and the year as a number, whatever names it used."""
+    item = dict(item)
+    for name in _ID_FIELDS:
+        value = item.get(name)
+        if name != "id" or not _KEY.match(str(value or "")) or ids_in(str(value)):  # "id" may be the key itself
+            for found, text in ids_in(" ".join(value) if isinstance(value, list) else str(value or "")).items():
+                item.setdefault(found, text)
+    for name in ("doi", "arxiv", "url", "openalex"):  # an id written in the wrong field ("doi": "arXiv:2404.07060")
+        if isinstance(item.get(name), str) and name == "doi" and not normalize_doi(item[name]):
+            moved = ids_in(item.pop(name))
+            for found, text in moved.items():
+                item.setdefault(found, text)
+    if not item.get("quality"):
+        for name in _QUALITY_FIELDS[1:]:
+            grade = re.match(r"\s*([ABC])\b", str(item.get(name) or ""), re.I)
+            if grade:
+                item["quality"] = grade.group(1).upper()
+                break
+    elif isinstance(item["quality"], str):
+        item["quality"] = item["quality"].strip()[:1].upper()
+    if not item.get("authors"):
+        for name in _AUTHOR_FIELDS[1:]:
+            if item.get(name):
+                item["authors"] = item[name]
+                break
+    acl = re.search(r"aclanthology\.org/(\d{4}\.[a-z\-]+\.\d+)(?:\.pdf)?/?$", str(item.get("url") or ""), re.I)
+    if acl and not item.get("doi"):  # an ACL Anthology page's id is its DOI's suffix
+        item["doi"] = f"10.18653/v1/{acl.group(1)}"
+    if isinstance(item.get("authors"), str):  # "Lewis, Perez et al. / 2020": the year goes in year
+        year = re.search(r"\s*[/,(]?\s*((?:19|20)\d{2})\)?\s*$", item["authors"])
+        if year:
+            item.setdefault("year", int(year.group(1)))
+            item["authors"] = item["authors"][:year.start()].strip() or item["authors"]
+    if not item.get("year"):
+        year = re.search(r"\b(19|20)\d{2}\b", str(item.get("authors") or "") + " " + str(item.get("date") or ""))
+        if year:
+            item["year"] = int(year.group(0))
+    elif isinstance(item["year"], str) and item["year"].strip().isdigit():
+        item["year"] = int(item["year"].strip())
+    return item
+
+
 def _note_sources(text: str) -> tuple[list[dict], int]:
-    """The source objects in a notes file's ```sources fences, and how many lines didn't parse."""
+    """The source entries in a notes file's sources lists (a ```sources fence, or a fence right under
+    a "Sources" heading), as JSON objects or `key | title | ... | id | rating` lines; and how many
+    lines in those lists couldn't be read as a source."""
+    blocks = [m for m in _SOURCES_FENCE.finditer(text)]
+    spans = [m.span() for m in blocks]
+    blocks += [m for m in _HEADED_FENCE.finditer(text)
+               if not any(a <= m.start(1) < b for a, b in spans)]
     found, bad = [], 0
-    for block in _SOURCES_FENCE.findall(text):
-        for line in block.splitlines():
+    for block in blocks:
+        for line in block.group(1).splitlines():
             line = line.strip().rstrip(",")
-            if not line:
+            if not line or re.fullmatch(r"[|\-:\s]+", line):
                 continue
-            try:
-                item = json.loads(line)
-            except ValueError:
-                bad += 1
-                continue
+            item = None
+            if line.startswith("{"):
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    item = None
+                if isinstance(item, dict) and not item.get("key") and isinstance(item.get("id"), str) \
+                        and _KEY.match(item["id"]) and not ids_in(item["id"]):
+                    item["key"] = item["id"]  # some scouts call the key "id"
+            elif "|" in line:
+                item = _pipe_entry(line)
             if isinstance(item, dict) and item.get("key"):
-                found.append(item)
-            else:
+                found.append(normalize_entry(item))
+            elif not re.match(r"^\|?\s*key\s*\|", line, re.I):  # a table's header row isn't a bad line
                 bad += 1
     return found, bad
 
@@ -329,11 +472,17 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
     by_page: dict[str, dict] = {}  # page -> the first source seen there
     by_key: dict[str, dict] = {}
     seen = duplicates = bad = 0
+    unreadable: list[str] = []
+    no_list: list[str] = []
     no_id: list[str] = []
     renamed: list[str] = []
     for path in notes:
         items, unparsed = _note_sources(path.read_text(encoding="utf-8-sig"))
         bad += unparsed
+        if unparsed:
+            unreadable.append(f"{path.name} ({unparsed})")
+        if not items and not unparsed:
+            no_list.append(path.name)
         for item in items:
             seen += 1
             key = str(item["key"])
@@ -396,7 +545,12 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
     if no_id:
         lines.append(f"Left out, no DOI, arXiv id, OpenAlex id or URL: {', '.join(no_id)}.")
     if bad:
-        lines.append(f"{bad} line(s) in ```sources fences weren't a JSON object with a key, and were skipped.")
+        lines.append(f"{bad} line(s) in the sources lists couldn't be read as a source and were skipped: "
+                     f"{', '.join(unreadable)}. Each needs a key and an id (DOI, arXiv id, OpenAlex id or URL).")
+    if no_list:
+        lines.append(f"No sources list found in: {', '.join(no_list)}. A scout's notes end with a ```sources fence.")
+    lines.append("This file is rebuilt from the notes on every call: fix a notes file and call collect_sources "
+                 "again, never edit sources.json by hand.")
     return out, "\n".join(lines)
 
 
@@ -478,7 +632,9 @@ def _reference_line(item: dict) -> str:
     head = " ".join(p for p in (str(authors or "").strip(), f"({item['year']})." if item.get("year") else "") if p)
     ids = "; ".join(f"{label} {item[name]}" for name, label in (("doi", "DOI"), ("arxiv", "arXiv"),
                                                               ("openalex", "OpenAlex"), ("url", "URL")) if item.get(name))
-    parts = [f"[{item['key']}]", head, f"*{item.get('title') or 'untitled'}*." if item.get("title") else "", ids]
+    unchecked = ("(not checked automatically: the source couldn't be reached)"
+                 if item.get("verified") is None and item.get("verify_reason") else "")
+    parts = [f"[{item['key']}]", head, f"*{item.get('title') or 'untitled'}*." if item.get("title") else "", ids, unchecked]
     return "- " + " ".join(p for p in parts if p)
 
 

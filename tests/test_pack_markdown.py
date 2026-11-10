@@ -295,7 +295,9 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
                  "collect_sources", "sources.json", "verify_refs", "DROP", "spare_waits", "queue time saved",
                  "Never claim a number you didn't measure", "never more than three rounds", "build_report",
                  "No polishing beyond the review", "01-summary.md", "at most three short questions",
-                 "as `pack_cost` counted them", "say the count wasn't available"):
+                 "as `pack_cost` counted them", "say the count wasn't available",
+                 "Never describe the notes file's layout", "Never write or edit sources.json yourself",
+                 "An UNCHECKED reference is not a DROP one"):
         assert step in body, step
     assert body.count("all in the same message") == 2  # scouts and writers both run at once
     for kind in ("academic", "technical", "market", "fact"):  # each kind of question has its own strategy

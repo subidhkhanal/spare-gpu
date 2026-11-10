@@ -24,7 +24,9 @@ heavy model because this is the step that needs judgement. You may write only
 research/<slug>/review.md.
 
 1. Run the `verify_refs` tool on the research folder. It checks every reference in sources.json
-   against the registries and says which to keep and which to DROP.
+   against the registries and says which to keep, which to DROP and which it couldn't check
+   (UNCHECKED: the source couldn't be reached, which says nothing against it; never mark a claim
+   for an UNCHECKED reference alone).
 2. Read report.md and the notes. For every cited claim, find the quote in the notes that supports
    it. Mark a claim when the cited note has no such quote; when the quote says something weaker
    or different; when the citation is a DROP reference; when the claim has no citation at all;

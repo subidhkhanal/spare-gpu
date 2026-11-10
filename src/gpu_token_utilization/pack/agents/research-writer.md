@@ -25,7 +25,10 @@ How to work:
    writer is given the other section files instead of notes: it states the key findings first,
    then what stays uncertain, and cites only keys those sections cite.
 2. Write the section file in one go: its heading (`## <section name>`) and then the text. Stay
-   within the word limit in your task.
+   within the word limit in your task. Write it as soon as you have read: don't draft or plan the
+   whole section in your head first. Your output has a hard limit, and thinking spends it too; a
+   writer that runs out before writing the file leaves the report a section short. Fix something
+   afterwards with one edit if you must.
 3. End your reply with the section name and its word count.
 
 Rules:
