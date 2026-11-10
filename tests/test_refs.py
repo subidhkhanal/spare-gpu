@@ -305,6 +305,7 @@ def test_a_real_paper_with_the_wrong_authors_or_a_shortened_title_is_kept_and_co
     assert [v.status for v in verdicts] == ["keep", "keep", "keep"]
     saved = json.loads(path.read_text(encoding="utf-8"))["sources"]
     assert "authors were wrong and are corrected" in saved[0]["verify_reason"] and "Yann LeCun" in str(saved[0]["authors"])
+    assert "Corrected in sources.json from the registries: a, b." in refs.describe(verdicts, path)
     assert saved[1]["title"] == "Deep learning" and "title was shortened" in saved[1]["verify_reason"]
 
 
@@ -356,3 +357,29 @@ def test_collect_sources_reads_the_formats_scouts_actually_wrote(tmp_path):
     assert items["wrongfield"]["arxiv"] == "2404.07060" and "doi" not in items["wrongfield"] and items["wrongfield"]["quality"] == "A"
     assert "No sources list found in: 4-d.md." in summary and "never edit sources.json by hand" in summary
     assert "couldn't be read" not in summary  # the header row of the pipe table isn't a bad line
+
+
+def test_an_acl_anthology_link_is_checked_by_its_doi_and_an_unreadable_pdf_is_unchecked():
+    ref = Reference.from_dict({"key": "r", "title": "RAGTruth", "url": "https://aclanthology.org/2024.acl-long.585.pdf"}, 1)
+    assert ref.doi == "10.18653/v1/2024.acl-long.585"
+    http = http_with_pages({"https://example.org/paper.pdf": (200, "%PDF-1.5 binary stream"),
+                            "https://example.org/plain.pdf": (200, "%PDF-1.4 Deep learning allows computational models")})
+    locked = refs.verify(Reference.from_dict({"key": "a", "title": "A study of things", "url": "https://example.org/paper.pdf"}, 1), http)
+    assert locked.status == "unchecked" and "PDF" in locked.reason
+    readable = refs.verify(Reference.from_dict({"key": "b", "title": "Deep learning allows models", "url": "https://example.org/plain.pdf"}, 1), http)
+    assert readable.ok  # a PDF whose text carries the title is checked like any page
+
+
+def test_a_preprint_and_its_published_doi_with_the_same_title_are_one_source_but_two_dois_are_two(tmp_path):
+    notes_file(tmp_path, "1-a.md", [{"key": "clash-eval", "title": "ClashEval: Quantifying the tug-of-war between an LLM's internal prior",
+                                     "doi": "10.52202/079017-1053"}])
+    notes_file(tmp_path, "2-b.md", [{"key": "wu2024clash", "title": "ClashEval: quantifying the tug of war between an LLM's internal prior",
+                                     "arxiv": "2404.10198"},
+                                    {"key": "other", "title": "ClashEval: Quantifying the tug-of-war between an LLM's internal prior",
+                                     "doi": "10.9999/a-different-work"},
+                                    {"key": "short", "title": "Deep learning", "url": "https://example.org/x"},
+                                    {"key": "short2", "title": "Deep learning", "url": "https://example.org/y"}])
+    path, _ = refs.collect_sources(tmp_path)
+    items = {i["key"]: i for i in refs.load_sources(path)}
+    assert items["clash-eval"]["aliases"] == ["wu2024clash"] and items["clash-eval"]["arxiv"] == "2404.10198"
+    assert "other" in items and "short2" in items  # another DOI is another work; a short title proves nothing

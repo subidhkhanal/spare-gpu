@@ -17,12 +17,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 
-from . import scholar
+from . import scholar, tuning
 from .scholar import Paper, ScholarError, normalize_arxiv, normalize_doi, normalize_openalex, title_similarity
 
-TITLE_MATCH = 0.85  # SequenceMatcher ratio at or above which two titles are the same paper
-TITLE_EXACT = 0.95  # the same title: a resolving id with this title is the paper, whatever authors were written
-TITLE_SHORTENED = 0.75  # a shortened title is still the paper when the authors match too
+TITLE_MATCH = tuning.value("verify_refs", "title_match", 0.85)  # SequenceMatcher ratio at or above which two titles are the same paper
+TITLE_EXACT = tuning.value("verify_refs", "title_exact", 0.95)  # the same title: a resolving id with this title is the paper, whatever authors were written
+TITLE_SHORTENED = tuning.value("verify_refs", "title_shortened", 0.75)  # a shortened title is still the paper when the authors match too
 # Answers that say nothing about whether the source exists: refused, rate-limited or a server fault.
 UNCHECKABLE_STATUS = {401, 403, 405, 408, 429, 451} | set(range(500, 600))
 _NO_AUTHOR = re.compile(r"^\W*(unlisted|unknown|anonymous|anon|n/?a|none|various)\b", re.I)
@@ -52,12 +52,14 @@ class Reference:
             authors = [a.strip() for a in re.split(r";| and ", authors) if a.strip()]
             if len(authors) == 1 and authors[0].count(",") >= 2:
                 authors = [a.strip() for a in authors[0].split(",") if a.strip()]
+        acl = re.search(r"aclanthology\.org/(\d{4}\.[a-z\-]+\.\d+)(?:\.pdf)?/?$", str(data.get("url") or ""), re.I)
         return cls(
             key=str(data.get("key") or data.get("id") or f"ref{index}"),
             title=str(data.get("title") or ""),
             authors=list(authors) if authors else None,
             year=data.get("year") if isinstance(data.get("year"), int) else None,
-            doi=normalize_doi(data.get("doi")) or normalize_doi(data.get("url")),
+            doi=normalize_doi(data.get("doi")) or normalize_doi(data.get("url"))
+            or (normalize_doi(f"10.18653/v1/{acl.group(1)}") if acl else None),  # an ACL Anthology page's DOI
             arxiv=normalize_arxiv(data.get("arxiv")) or (normalize_arxiv(data.get("url")) if "arxiv.org" in str(data.get("url") or "") else None),
             openalex=normalize_openalex(data.get("openalex")),
             url=data.get("url"),
@@ -173,6 +175,9 @@ def check_url(ref: Reference, http: httpx.Client) -> Verdict:
         return Verdict(ref.key, True, "the URL answers")
     hits = sum(1 for w in words if w in page)
     if hits * 10 < len(words) * 6:
+        if "pdf" in response.headers.get("content-type", "").lower() or response.text[:5] == "%PDF-":
+            return Verdict(ref.key, False, "couldn't check it: the URL is a PDF whose text can't be read here",
+                           checked=False)  # compressed PDF text says nothing either way
         return Verdict(ref.key, False, f"the page doesn't carry the title ({hits} of {len(words)} title words found)")
     return Verdict(ref.key, True, "the URL answers and carries the title")
 
@@ -239,6 +244,10 @@ def describe(verdicts: list[Verdict], path: Path) -> str:
     if dropped:
         lines.append("Remove every DROP reference and the claims that rested on it from the report, or find a "
                      "source that resolves. Never keep a reference the registries don't have.")
+    corrected = [v.key for v in kept if v.corrected]
+    if corrected:
+        lines.append(f"Corrected in sources.json from the registries: {', '.join(corrected)}. build_report lists "
+                     "the corrected details; the References list needs no edits for them.")
     if unchecked:
         lines.append("UNCHECKED references are not DROP: the source couldn't be reached, so nothing is known against "
                      "it. Keep them; the report lists them as not checked automatically. Run verify_refs again "
@@ -457,8 +466,9 @@ def _rename_key(path: Path, old: str, new: str) -> None:
 
 def collect_sources(folder: Path) -> tuple[Path, str]:
     """Merge the ```sources lists of <folder>/notes/*.md into <folder>/sources.json. The same source
-    found by several scouts (sharing a DOI, arXiv id or OpenAlex id; or the same URL, when one of
-    the two has no paper id) becomes one entry, its other keys kept as "aliases" so citations under
+    found by several scouts (sharing a DOI, arXiv id or OpenAlex id; the same URL, when one of
+    the two has no paper id; or the same title of five words or more, when no kind of id differs)
+    becomes one entry, its other keys kept as "aliases" so citations under
     any of them still work; an entry that shares ids with two kept sources joins them into one. Two
     different sources a scout gave the same key get the later one renamed, in that notes file too.
     A source with no id is left out: a fact needs one. Returns the file and a summary, with the
@@ -470,6 +480,7 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
     merged: list[dict] = []
     by_identity: dict[str, dict] = {}  # paper id -> its source
     by_page: dict[str, dict] = {}  # page -> the first source seen there
+    by_title: dict[str, dict] = {}  # a long enough title -> the first source seen with it
     by_key: dict[str, dict] = {}
     seen = duplicates = bad = 0
     unreadable: list[str] = []
@@ -496,6 +507,9 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
             found = list({id(e): e for e in (by_identity[i] for i in strong if i in by_identity)}.values())
             if not found and page in by_page and (not strong or not strong_ids(by_page[page])):
                 found = [by_page[page]]
+            title = _title_id(item)
+            if not found and title in by_title and _ids_compatible(by_title[title], item):
+                found = [by_title[title]]  # the same paper by another kind of id: a preprint and its DOI
             found.sort(key=lambda e: next(n for n, m in enumerate(merged) if m is e))
             if found:
                 kept = found[0]
@@ -528,6 +542,8 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
             merged.append(entry)
             for ident in strong:
                 by_identity[ident] = entry
+            if title and title not in by_title:
+                by_title[title] = entry
             if page and page not in by_page:
                 by_page[page] = entry
             by_key[key] = entry
@@ -552,6 +568,19 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
     lines.append("This file is rebuilt from the notes on every call: fix a notes file and call collect_sources "
                  "again, never edit sources.json by hand.")
     return out, "\n".join(lines)
+
+
+def _title_id(item: dict) -> str | None:
+    """A title long enough (five words or more) that two entries carrying it are the same work."""
+    title = scholar.normalize_title(str(item.get("title") or ""))
+    return title if len(title.split()) >= 5 else None
+
+
+def _ids_compatible(kept: dict, item: dict) -> bool:
+    """True when no kind of paper id differs between the two (a DOI against an arXiv id is fine; two
+    different DOIs are two works, whatever their titles say)."""
+    mine = {i.split(":", 1)[0]: i for i in strong_ids(kept)}
+    return all(mine.get(i.split(":", 1)[0], i) == i for i in strong_ids(item))
 
 
 def _fill(kept: dict, item: dict, ids: bool) -> None:
