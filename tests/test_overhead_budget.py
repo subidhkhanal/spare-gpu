@@ -21,7 +21,7 @@ def test_the_installed_pack_adds_nothing_to_a_normal_request_by_construction():
     doc = pack.config(pack.select(None), MODELS)
     assert pack.pack_added_tokens(doc) == 0
     tools = {t for c in pack.COMPONENTS.values() for t in c.tools}
-    assert len(tools) == 11 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
+    assert len(tools) == 12 and all(doc["permission"][f"spare-gpu_{t}"] == "deny" for t in tools)
     assert {"apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"} <= tools  # /apply ... /doctor's
     assert set(doc["permission"]["task"]) == set(pack.helpers(pack.COMPONENTS.values()))
     assert "spare-helper" not in doc["permission"]["task"]  # a hidden primary agent: never in the subagent list

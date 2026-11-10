@@ -8,6 +8,7 @@ Research request, between the markers:
 <<<$ARGUMENTS>>>
 
 Options may appear anywhere in it and are not part of the question: `--depth quick|standard|deep`
-(default standard) and `--sources web|papers|both` (default both). Carry out the research-lead
+(default standard; quick for a single fact), `--sources web|papers|both` (default: from the kind
+of question) and `--plan`. Carry out the research-lead
 procedure from its first step, keeping every file under research/<slug>/ in this project. If the
 request is empty, ask for the question and stop.

@@ -432,6 +432,18 @@ class SpareTools:
             return f"Couldn't read {refs.SOURCES_FILE}: {exc}."
         return refs.describe(verdicts, file)
 
+    def collect_sources(self, folder: str) -> str:
+        root = self._root()
+        path = Path(folder.strip() or ".")
+        path = (path if path.is_absolute() else root / path).resolve()
+        if root not in path.parents and path != root:
+            return f"Didn't collect them: {folder} is outside this project ({root})."
+        try:
+            _, summary = refs.collect_sources(path)
+        except FileNotFoundError:
+            return f"No notes files in {path / refs.NOTES_DIR}: the scouts write them there."
+        return summary
+
     def build_report(self, folder: str, title: str = "") -> str:
         root = self._root()
         path = Path(folder.strip() or ".")
@@ -642,6 +654,19 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
                     the project, or the file itself.
             """
             return tools.verify_refs(folder)
+
+        @server.tool(annotations=notes(False))
+        def collect_sources(folder: str) -> str:
+            """Merge the scouts' sources for /deep-research: reads the ```sources list in every
+            <folder>/notes/*.md and writes <folder>/sources.json. A source two scouts found (same
+            DOI, arXiv id, OpenAlex id or URL) becomes one entry and both keys keep working in
+            citations; two different sources under one key get the later renamed, in its notes file
+            too. Says how many were merged and the quality mix (A primary, B secondary, C weak).
+
+            Args:
+                folder: The research folder, e.g. "research/rag-evaluation".
+            """
+            return tools.collect_sources(folder)
 
         @server.tool(annotations=notes(False))
         def build_report(folder: str, title: str = "") -> str:

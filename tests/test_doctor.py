@@ -172,7 +172,7 @@ def test_with_the_pack_the_pack_checks_are_included(config_dir, pack_dir, projec
     assert verdict(text) == "PASS", text
     assert "PASS: pack: spare-gpu's MCP server starts with --pack" in text
     assert "PASS: pack: installed components: split, research" in text
-    assert ("PASS: spare-gpu's MCP server starts and offers 16 tools (the pack's: apply_result, build_report, cost_summary, "
+    assert ("PASS: spare-gpu's MCP server starts and offers 17 tools (the pack's: apply_result, build_report, collect_sources, cost_summary, "
             "doctor_check, pack_cost, prompt_rules, scholar_search, security_filter, tally_findings, undo_result, verify_refs)") in text
     (config_dir / "config.json").unlink()  # the pack's settings file gone, the --pack flag left behind
     text = ask_doctor(project)

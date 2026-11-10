@@ -65,7 +65,7 @@ COMPONENTS: dict[str, Component] = {
     "split": Component("split", "titles and the explore subagent on the standard model"),
     "research": Component("research", "/deep-research", ("deep-research",),
                           ("research-lead", "research-scout", "research-writer", "research-checker"),
-                          ("scholar_search", "verify_refs", "build_report", *SHARED_TOOLS), {"exa": EXA_MCP}),
+                          ("scholar_search", "verify_refs", "collect_sources", "build_report", *SHARED_TOOLS), {"exa": EXA_MCP}),
     "review": Component("review", "/code-review", ("code-review",),
                         ("review-lead", "review-finder", "review-verifier"), ("tally_findings", *SHARED_TOOLS)),
     "security": Component("security", "/security-review", ("security-review",),

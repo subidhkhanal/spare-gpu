@@ -162,3 +162,62 @@ def test_a_section_written_with_a_top_level_heading_is_moved_under_the_title(tmp
     text = refs.build_report(tmp_path, "PSO")[0].read_text(encoding="utf-8")
     assert [line for line in text.splitlines() if line.startswith("#")] == [
         "# PSO", "## Abstract", "### Detail", "# a comment", "## Background", "## References"]  # code left alone
+
+
+# --- collect_sources: the scouts' lists merged into sources.json ----------------------------------
+
+def notes_file(folder, name, lines, body=""):
+    path = folder / "notes" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body + "```sources\n" + "\n".join(json.dumps(line) for line in lines) + "\n```\n", encoding="utf-8")
+    return path
+
+
+def test_the_same_source_from_two_scouts_becomes_one_entry_and_both_keys_still_cite_it(tmp_path):
+    notes_file(tmp_path, "1-a.md", [
+        {"key": "lecun2015", "title": "Deep learning", "doi": "https://doi.org/10.1038/NATURE14539", "quality": "A"},
+        {"key": "blog", "title": "A blog", "url": "https://www.example.com/post/?utm_source=x#top", "quality": "C"}])
+    notes_file(tmp_path, "2-b.md", [
+        {"key": "deeplearning", "doi": "10.1038/nature14539", "year": 2015},  # same paper, another key
+        {"key": "blog2", "url": "http://example.com/post", "date": "2026-01-02"},  # same page
+        {"key": "nothing", "title": "No id at all"}])
+    path, summary = refs.collect_sources(tmp_path)
+    items = refs.load_sources(path)
+    assert [i["key"] for i in items] == ["lecun2015", "blog"]
+    assert items[0]["aliases"] == ["deeplearning"] and items[0]["year"] == 2015  # filled from the second scout
+    assert items[1]["aliases"] == ["blog2"] and items[1]["date"] == "2026-01-02"
+    assert "2 source(s) from 5 entr(ies) in 2 notes file(s); 2 duplicate(s) merged." in summary
+    assert "Quality: 1 A (primary or authoritative), 0 B (reputable secondary), 1 C (weak" in summary
+    assert "Left out, no DOI, arXiv id, OpenAlex id or URL: nothing (2-b.md)." in summary
+    (tmp_path / "sections").mkdir()
+    (tmp_path / "sections" / "01-a.md").write_text("## A\n\nNets learn [deeplearning; blog2].\n", encoding="utf-8")
+    report, built = refs.build_report(tmp_path, "T")
+    text = report.read_text(encoding="utf-8")
+    assert "Nets learn [lecun2015; blog]." in text and "- [lecun2015]" in text and "not in sources.json" not in built
+
+
+def test_one_key_for_two_different_sources_gets_the_later_renamed_in_its_notes_too(tmp_path):
+    notes_file(tmp_path, "1-a.md", [{"key": "smith2024", "doi": "10.1000/aaa"}])
+    later = notes_file(tmp_path, "2-b.md", [{"key": "smith2024", "doi": "10.1000/bbb"}],
+                       body="## Findings\n- A quote [smith2024] and [x, smith2024].\n\n")
+    path, summary = refs.collect_sources(tmp_path)
+    assert [i["key"] for i in refs.load_sources(path)] == ["smith2024", "smith2024-2"]
+    assert "smith2024 -> smith2024-2 in 2-b.md" in summary
+    text = later.read_text(encoding="utf-8")
+    assert "A quote [smith2024-2] and [x, smith2024-2]." in text and '"key": "smith2024-2"' in text
+
+
+def test_urls_are_compared_without_their_noise():
+    assert refs.normalize_url("https://WWW.Example.com/a/b/?utm_campaign=z&id=3#frag") == "example.com/a/b?id=3"
+    assert refs.normalize_url("ftp://example.com/x") is None and refs.normalize_url(None) is None
+    assert refs.identity({"url": "https://arxiv.org/abs/1706.03762v5"}) == refs.identity({"arxiv": "1706.03762"})
+
+
+def test_collecting_needs_notes_and_skips_lines_that_arent_sources(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        refs.collect_sources(tmp_path)
+    path = tmp_path / "notes" / "1.md"
+    path.parent.mkdir()
+    path.write_text('```sources\nnot json\n{"title": "no key"}\n{"key": "ok", "url": "https://a.org"}\n```\n', encoding="utf-8")
+    _, summary = refs.collect_sources(tmp_path)
+    assert "1 source(s)" in summary and "2 line(s) in ```sources fences" in summary

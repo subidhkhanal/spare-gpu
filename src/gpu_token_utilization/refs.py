@@ -10,6 +10,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 
@@ -206,6 +207,150 @@ def describe(verdicts: list[Verdict], path: Path) -> str:
     return "\n".join(lines)
 
 
+# --- the scouts' sources, merged into one file ------------------------------------------------------
+
+NOTES_DIR = "notes"
+# A scout's machine-readable list: a ```sources fence with one JSON object per line.
+_SOURCES_FENCE = re.compile(r"```sources[ \t]*\r?\n(.*?)```", re.S)
+QUALITY = {"A": "primary or authoritative", "B": "reputable secondary", "C": "weak (blog, forum, vendor page)"}
+_TRACKING = re.compile(r"^(utm_\w+|fbclid|gclid|mc_\w+|ref|ref_src)$", re.I)
+
+
+def normalize_url(url: str | None) -> str | None:
+    """A URL reduced to what names the page: no scheme, no www., no fragment, no tracking
+    parameters, no trailing slash, host in lower case. None for anything that isn't a web URL."""
+    if not url or not isinstance(url, str):
+        return None
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    host = parts.netloc.lower().removeprefix("www.")
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _TRACKING.match(k)])
+    path = parts.path.rstrip("/")
+    return host + path + (f"?{query}" if query else "")
+
+
+def identity(item: dict) -> str | None:
+    """What makes two scouts' entries the same source: the first id of DOI, arXiv, OpenAlex, URL."""
+    for label, value in (("doi", normalize_doi(item.get("doi")) or normalize_doi(item.get("url"))),
+                         ("arxiv", normalize_arxiv(item.get("arxiv"))
+                          or (normalize_arxiv(item.get("url")) if "arxiv.org" in str(item.get("url") or "") else None)),
+                         ("openalex", normalize_openalex(item.get("openalex"))),
+                         ("url", normalize_url(item.get("url")))):
+        if value:
+            return f"{label}:{str(value).lower()}"
+    return None
+
+
+def _note_sources(text: str) -> tuple[list[dict], int]:
+    """The source objects in a notes file's ```sources fences, and how many lines didn't parse."""
+    found, bad = [], 0
+    for block in _SOURCES_FENCE.findall(text):
+        for line in block.splitlines():
+            line = line.strip().rstrip(",")
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except ValueError:
+                bad += 1
+                continue
+            if isinstance(item, dict) and item.get("key"):
+                found.append(item)
+            else:
+                bad += 1
+    return found, bad
+
+
+def _rename_key(path: Path, old: str, new: str) -> None:
+    """Give a source another key in one notes file: in its sources fence and every [citation]."""
+    text = path.read_text(encoding="utf-8-sig")
+    text = re.sub(r'("key"\s*:\s*)"' + re.escape(old) + '"', lambda m: m.group(1) + json.dumps(new), text)
+
+    def cite(match: re.Match) -> str:
+        keys = re.split(r"(\s*[,;]\s*)", match.group(1))
+        return "[" + "".join(new if k == old else k for k in keys) + "]"
+
+    text = _CITATION.sub(cite, text)
+    path.write_text(text, encoding="utf-8")
+
+
+def collect_sources(folder: Path) -> tuple[Path, str]:
+    """Merge the ```sources lists of <folder>/notes/*.md into <folder>/sources.json. The same source
+    found by several scouts (same DOI, arXiv id, OpenAlex id or URL) becomes one entry, its other
+    keys kept as "aliases" so citations under any of them still work; two different sources a
+    scout gave the same key get the later one renamed, in that notes file too. A source with no id
+    is left out: a fact needs one. Returns the file and a summary, with the quality mix."""
+    folder = Path(folder)
+    notes = sorted((folder / NOTES_DIR).glob("*.md"), key=_section_order)
+    if not notes:
+        raise FileNotFoundError(folder / NOTES_DIR)
+    merged: list[dict] = []
+    by_identity: dict[str, dict] = {}
+    by_key: dict[str, dict] = {}
+    seen = duplicates = bad = 0
+    no_id: list[str] = []
+    renamed: list[str] = []
+    for path in notes:
+        items, unparsed = _note_sources(path.read_text(encoding="utf-8-sig"))
+        bad += unparsed
+        for item in items:
+            seen += 1
+            key = str(item["key"])
+            ident = identity(item)
+            if ident is None:
+                no_id.append(f"{key} ({path.name})")
+                continue
+            if ident in by_identity:
+                kept = by_identity[ident]
+                duplicates += 1
+                if key != kept["key"] and key not in kept.setdefault("aliases", []):
+                    if key in by_key and by_key[key] is not kept:  # the key already names another source
+                        new = _free_key(key, by_key)
+                        _rename_key(path, key, new)
+                        renamed.append(f"{key} -> {new} in {path.name}")
+                        key = new
+                    kept["aliases"].append(key)
+                    by_key[key] = kept
+                for field in ("quality", "date", "title", "authors", "year"):  # fill what the first scout left out
+                    if not kept.get(field) and item.get(field):
+                        kept[field] = item[field]
+                continue
+            if key in by_key:  # a key already used for a different source
+                new = _free_key(key, by_key)
+                _rename_key(path, key, new)
+                renamed.append(f"{key} -> {new} in {path.name}")
+                item = {**item, "key": new}
+                key = new
+            entry = {k: v for k, v in item.items() if k != "aliases"}
+            merged.append(entry)
+            by_identity[ident] = entry
+            by_key[key] = entry
+    out = folder / SOURCES_FILE
+    out.write_text(json.dumps({"sources": merged}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    mix = {grade: sum(1 for e in merged if str(e.get("quality") or "").upper() == grade) for grade in QUALITY}
+    unrated = len(merged) - sum(mix.values())
+    lines = [f"Wrote {out}: {len(merged)} source(s) from {seen} entr(ies) in {len(notes)} notes file(s); "
+             f"{duplicates} duplicate(s) merged."]
+    lines.append("Quality: " + ", ".join(f"{n} {grade} ({QUALITY[grade]})" for grade, n in mix.items())
+                 + (f", {unrated} unrated" if unrated else "") + ".")
+    if renamed:
+        lines.append("Keys renamed because two different sources shared them (the notes were updated): "
+                     + "; ".join(renamed) + ".")
+    if no_id:
+        lines.append(f"Left out, no DOI, arXiv id, OpenAlex id or URL: {', '.join(no_id)}.")
+    if bad:
+        lines.append(f"{bad} line(s) in ```sources fences weren't a JSON object with a key, and were skipped.")
+    return out, "\n".join(lines)
+
+
+def _free_key(key: str, used: dict) -> str:
+    n = 2
+    while f"{key}-{n}" in used:
+        n += 1
+    return f"{key}-{n}"
+
+
 # --- the report, put together from its section files ------------------------------------------------
 
 SECTIONS_DIR = "sections"
@@ -268,9 +413,14 @@ def build_report(folder: Path, title: str = "") -> tuple[Path, str]:
         raise FileNotFoundError(folder / SECTIONS_DIR)
     body = "\n\n".join(_as_section(s.read_text(encoding="utf-8-sig")) for s in sections)
     try:
-        items = {str(i.get("key")): i for i in load_sources(folder / SOURCES_FILE)}
+        sources = load_sources(folder / SOURCES_FILE)
     except FileNotFoundError:
-        items = {}
+        sources = []
+    items = {str(i.get("key")): i for i in sources}
+    alias = {str(a): str(i.get("key")) for i in sources for a in (i.get("aliases") or [])}
+    if alias:  # cite every source by one key: the one its entry has
+        body = _CITATION.sub(lambda m: "[" + "".join(alias.get(k, k) for k in re.split(r"(\s*[,;]\s*)", m.group(1))) + "]",
+                             body)
     cited = cited_keys(body)
     unknown = [k for k in cited if k not in items]
     dropped = [k for k in cited if k in items and items[k].get("verified") is False]

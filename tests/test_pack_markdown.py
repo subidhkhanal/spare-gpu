@@ -285,13 +285,31 @@ def test_every_leads_cost_summary_names_the_installed_models():
 def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}["research-lead"])
     body = " ".join(body.split())
-    for step in ("plan.md", "all in the same message", "outline.md", "sources.json", "one section", "verify_refs",
-                 "DROP", "spare_waits", "queue time saved", "Never claim a number you didn't measure", "two rounds",
-                 "build_report", "No polishing beyond the review"):
+    for step in ("brief.md", "checklist", "plan.md", "perspectives", "all in the same message", "outline.md",
+                 "collect_sources", "sources.json", "verify_refs", "DROP", "spare_waits", "queue time saved",
+                 "Never claim a number you didn't measure", "never more than three rounds", "build_report",
+                 "No polishing beyond the review", "01-summary.md", "at most three short questions"):
         assert step in body, step
     assert body.count("all in the same message") == 2  # scouts and writers both run at once
+    for kind in ("academic", "technical", "market", "fact"):  # each kind of question has its own strategy
+        assert f"| {kind}" in body, kind
     quick = body.split("| quick")[1]  # the depth table's quick row onwards
-    assert [c.strip() for c in quick.split("|")[1:6]] == ["3", "1", "3 searches, 6 sources, 600 words", "250 words", "1"]
+    assert [c.strip() for c in quick.split("|")[1:6]] == ["3", "1", "4 searches, 6 sources, 500 words", "250 words", "1"]
+
+
+def test_scouts_rate_sources_stop_in_time_and_list_them_for_collect_sources():
+    files = {n: p for k, n, p in pack.markdown_files([COMPONENTS["research"]]) if k == "agent"}
+    _, scout = parse(files["research-scout"])
+    flat = " ".join(scout.split())
+    for part in ("A: primary or authoritative", "B: reputable secondary", "C: weak", "two searches in a row find nothing new",
+                 "## In brief", "## Conflicts", "## Gaps", "```sources", '"quality"', '"date"'):
+        assert part in flat, part
+    # the example lines in the scout's instructions are what collect_sources reads
+    from gpu_token_utilization import refs
+    items, bad = refs._note_sources(scout)
+    assert [i["key"] for i in items] == ["lecun2015", "pytorch-rel-2-5"] and bad == 0
+    _, checker = parse(files["research-checker"])
+    assert "Coverage" in checker and "brief.md" in checker
 
 
 def test_the_pack_config_hides_the_research_helpers_and_tools_from_everyone_else():

@@ -21,7 +21,7 @@ from conftest import desktop_db, git, quick_plans, quick_tools
 
 TOOLS = {"spare_delegate", "spare_waits", "spare_work_status", "spare_cancel_work", "spare_auto"}
 MANAGE_TOOLS = {"apply_result", "undo_result", "cost_summary", "prompt_rules", "doctor_check"}  # /apply ... /doctor
-PACK_TOOLS = {"scholar_search", "verify_refs", "build_report", "security_filter", "tally_findings",
+PACK_TOOLS = {"scholar_search", "verify_refs", "collect_sources", "build_report", "security_filter", "tally_findings",
               "pack_cost"} | MANAGE_TOOLS  # only for `gtu mcp --pack`
 REMOVED = {"spare_queue_work", "spare_last_night", "spare_run_when_free"}  # tools that no longer exist
 
@@ -376,6 +376,12 @@ def test_scholar_search_and_verify_refs_through_the_tools(git_repo, live):
     assert report.startswith("# Transformers\n\n## Intro") and "- [lecun2015] Yann LeCun" in report and "[fake] " not in report
     assert tools.build_report("research/nothing").startswith("No section files in ")
     assert "outside this project" in tools.build_report("../elsewhere")
+    assert tools.collect_sources("research/nothing").startswith("No notes files in ")
+    assert "outside this project" in tools.collect_sources("../elsewhere")
+    (folder / "notes").mkdir()
+    (folder / "notes" / "1-a.md").write_text('```sources\n{"key": "lecun2015", "doi": "10.1038/nature14539", "quality": "A"}\n```\n',
+                                             encoding="utf-8")
+    assert "1 source(s) from 1 entr(ies)" in tools.collect_sources("research/transformers")
 
 
 def test_protocol_calls_return_plain_text(tools, git_repo):

@@ -89,7 +89,7 @@ Eleven features, each a chat command. They are listed in the order a project usu
 | 1 | [Apply and undo](#1-apply-and-undo-apply-undo) | `/apply`, `/undo` | A fix job's files copied into your project, and taken back |
 | 2 | [Code review](#2-code-review-code-review) | `/code-review`, `/code-review 42` | Bugs with evidence in your changes, a commit, a branch or a pull request |
 | 3 | [Security review](#3-security-review-security-review) | `/security-review` | High-confidence security findings, false alarms dropped |
-| 4 | [Deep research](#4-deep-research-deep-research) | `/deep-research <question>` | A report whose every source is checked to exist |
+| 4 | [Deep research](#4-deep-research-deep-research) | `/deep-research <question>` | A checked, cited report on papers, tools, markets or a single fact |
 | 5 | [Simplify](#5-simplify-simplify) | `/simplify src` | Cleanups that keep behaviour, kept only if your tests pass |
 | 6 | [App check](#6-app-check-verify-app) | `/verify-app <url> <what>` | Your running app checked in a real browser |
 | 7 | [Memory](#7-memory-across-chats-remember-handoff-pickup) | `/remember`, `/handoff`, `/pickup` | Notes every chat knows; work passed to a new chat |
@@ -167,15 +167,23 @@ A read-only security review. Five Qwen helpers each look for one kind of problem
 
 ## 4. Deep research: `/deep-research`
 
-Writes a report with sources into `research/<topic>/`. Qwen scouts search research papers (OpenAlex, Crossref, arXiv) and the web at the same time; writers draft the sections; DeepSeek checks every source and removes fake or wrong ones.
+Writes a report with sources into `research/<topic>/`, for literature reviews, technical comparisons (libraries, tools, approaches), market and company research, and single factual questions.
+
+1. **Scope.** DeepSeek works out what kind of question it is and writes a brief: the scope, its assumptions, and a checklist of what a complete answer must cover. It asks you first only when the question can't be researched without your choice.
+2. **Scout, in rounds.** Qwen scouts search at the same time, each from where its kind of question is best answered: papers (OpenAlex, Crossref, arXiv), official docs and repositories, company filings and news. They rate every source (A primary, B reputable secondary, C weak), quote it exactly, and stop once two good sources agree. DeepSeek checks the notes against the checklist and sends scouts after what is thin, missing or contested, for up to three rounds.
+3. **Write.** Qwen writers draft one section each from the notes, then one more writes the summary from the finished sections. Conflicting sources are shown, not hidden, and time-sensitive figures carry their date.
+4. **Check.** DeepSeek checks every claim against the quote it cites and every source against the registries, and lists the checklist items the report doesn't cover.
 
 | Type | What you get |
 |---|---|
-| `/deep-research how do vector databases index embeddings?` | A standard report |
-| `/deep-research <question> --depth quick` | A short one, fewer sources |
-| `/deep-research <question> --depth deep` | A longer one, more sources |
+| `/deep-research how do vector databases index embeddings?` | A standard report: 5 sub-questions, up to 2 rounds of scouting |
+| `/deep-research <question> --depth quick` | A short one: 3 sub-questions, 1 round (the default for a single fact) |
+| `/deep-research <question> --depth deep` | A longer one: 8 sub-questions, up to 3 rounds, a scout that looks for counter-evidence, and a second check |
+| `/deep-research <question> --sources papers` | Only papers (`web`, `papers` or `both`; by default it picks from the kind of question) |
+| `/deep-research <question> --plan` | The brief and the plan, without starting anything |
 
-- Every reference is checked against the registries: its id must resolve and its title, authors and year must match.
+- Every reference is checked against the registries: its id must resolve and its title, authors and year must match. A claim must match the quote it cites, and a key claim never rests only on weak sources.
+- The same source found by several scouts is merged into one reference.
 - Web search goes through Exa, with no key needed; your searches go to Exa.
 
 ---
@@ -357,7 +365,7 @@ Jobs work without any settings. To change how they run, write `.gtu/settings.jso
 | `/apply [result] [--dry-run] [--force]`, `/undo [result]` | [Apply and undo](#1-apply-and-undo-apply-undo) |
 | `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post] [--plan]` | [Code review](#2-code-review-code-review) |
 | `/security-review [commit or branch] [deep] [--plan]` | [Security review](#3-security-review-security-review) |
-| `/deep-research <question> [--depth quick\|standard\|deep] [--plan]` | [Deep research](#4-deep-research-deep-research) |
+| `/deep-research <question> [--depth quick\|standard\|deep] [--sources web\|papers\|both] [--plan]` | [Deep research](#4-deep-research-deep-research) |
 | `/simplify [file or folder] [--plan]` | [Simplify](#5-simplify-simplify) |
 | `/verify-app <url> <what to check> [--plan]` | [App check](#6-app-check-verify-app) |
 | `/remember [note]`, `/handoff`, `/pickup` | [Memory](#7-memory-across-chats-remember-handoff-pickup) |
