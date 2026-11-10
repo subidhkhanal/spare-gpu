@@ -244,3 +244,37 @@ def test_entries_sharing_any_one_id_are_one_source_and_the_kept_one_gains_the_ot
     assert [i["key"] for i in items] == ["lewis2020"] and items[0]["arxiv"] == "2005.11401"
     assert items[0]["aliases"] == ["rag-paper", "rag-arxiv"] and "1 source(s) from 3 entr(ies)" in summary
     assert refs.identities({"doi": "10.48550/arXiv.2005.11401"}) == ["arxiv:2005.11401"]
+
+
+def test_two_papers_on_one_page_stay_two_sources_and_keep_their_own_dois(tmp_path):
+    volume = "https://aclanthology.org/volumes/2023.acl-long/"
+    notes_file(tmp_path, "1-a.md", [{"key": "p1", "doi": "10.18653/v1/2023.acl-long.1", "url": volume},
+                                    {"key": "page", "url": "https://example.org/paper"}])
+    notes_file(tmp_path, "2-b.md", [{"key": "p2", "doi": "10.18653/v1/2023.acl-long.7", "url": volume},
+                                    {"key": "page-doi", "doi": "10.1000/xyz", "url": "https://example.org/paper"},
+                                    {"key": "page-again", "url": "https://example.org/paper?utm_source=x"}])
+    path, summary = refs.collect_sources(tmp_path)
+    items = {i["key"]: i for i in refs.load_sources(path)}
+    assert set(items) == {"p1", "p2", "page"}  # same page, different DOIs: two papers
+    assert items["p1"]["doi"].endswith(".1") and items["p2"]["doi"].endswith(".7")
+    # a source known only by its page takes the paper id of an entry for that page, and later page-only entries join it
+    assert items["page"]["aliases"] == ["page-doi", "page-again"] and items["page"]["doi"] == "10.1000/xyz"
+
+
+def test_an_entry_that_shows_two_kept_sources_are_one_paper_joins_them(tmp_path):
+    notes_file(tmp_path, "1-a.md", [{"key": "byDoi", "doi": "10.1000/rag", "quality": "A"}])
+    notes_file(tmp_path, "2-b.md", [{"key": "byArxiv", "arxiv": "2005.11401", "year": 2020}])
+    notes_file(tmp_path, "3-c.md", [{"key": "both", "doi": "10.1000/rag", "arxiv": "2005.11401"}])
+    path, summary = refs.collect_sources(tmp_path)
+    items = refs.load_sources(path)
+    assert [i["key"] for i in items] == ["byDoi"] and items[0]["aliases"] == ["byArxiv", "both"]
+    assert items[0]["arxiv"] == "2005.11401" and items[0]["year"] == 2020 and items[0]["quality"] == "A"
+    assert "1 source(s) from 3 entr(ies)" in summary and "2 duplicate(s) merged" in summary
+
+
+def test_old_style_arxiv_ids_in_arxivs_doi_match_and_an_unreadable_one_stays_a_doi():
+    assert refs.identities({"doi": "10.48550/arXiv.math.AG/0101001"}) == refs.identities({"arxiv": "math.AG/0101001"})
+    assert refs.identities({"doi": "https://doi.org/10.48550/arXiv.2310.11511"}) == ["arxiv:2310.11511"]
+    assert refs.identities({"doi": "10.48550/arxiv.nonsense"}) == ["doi:10.48550/arxiv.nonsense"]
+    assert refs.identities({"url": "https://example.org/a"}) == ["url:example.org/a"]
+    assert refs.identities({"doi": "10.1000/x", "url": "https://example.org/a"}) == ["doi:10.1000/x"]  # a page only when nothing better

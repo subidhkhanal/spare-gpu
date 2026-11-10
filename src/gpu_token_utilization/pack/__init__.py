@@ -7,7 +7,8 @@ Installed by `gtu integrate --pack`; `gtu integrate --pack --uninstall` removes 
 added. For BharatCode; not affiliated with BharatCode or Anthropic.
 
 Model ids are never hard-coded here: the Markdown carries {{HEAVY_MODEL}} and {{STANDARD_MODEL}},
-filled in at install time from bharatcode.ai's model list (or GTU_MODELS).
+filled in at install time from bharatcode.ai's model list (or GTU_MODELS), and the leads'
+shared cost-report wording as {{COST_FIGURES}}.
 """
 
 from __future__ import annotations
@@ -23,6 +24,15 @@ from .. import api, waits
 PACK_DIR = Path(__file__).parent
 MARKER = "# Installed by spare-gpu"  # in a Markdown file's frontmatter: ours, until the user removes it
 HEAVY, STANDARD = "{{HEAVY_MODEL}}", "{{STANDARD_MODEL}}"
+# The cost figures every lead reports, written once here and filled into each lead at install time.
+COST_FIGURES = "{{COST_FIGURES}}"
+COST_FIGURES_TEXT = (
+    "the helper runs per model as `pack_cost` counted them (report its numbers, never your own count; if it "
+    "gave none, say the count wasn't available); the tokens per model from `pack_cost` (or that they weren't "
+    "available); and the queue time saved, estimated as the number of batches of standard-model helpers you "
+    "started (helpers started in the same message wait in the queue together, so a batch counts once) times "
+    "the difference between the heavy and the standard model's wait in the `spare_waits` answer from the "
+    "start. Say so when that answer had too little data. Never claim a number you didn't measure.")
 SCHEMA = "https://opencode.ai/config.json"
 # Web search for /deep-research: queries go to Exa. Keyless, so OAuth auto-detection is off, as the
 # marketplace's Cloudflare-docs entry does it.
@@ -106,7 +116,7 @@ class Models:
     standard: str
 
     def fill(self, text: str) -> str:
-        return text.replace(HEAVY, self.heavy).replace(STANDARD, self.standard)
+        return text.replace(COST_FIGURES, COST_FIGURES_TEXT).replace(HEAVY, self.heavy).replace(STANDARD, self.standard)
 
 
 def resolve_models(client=None, lite: bool = False) -> tuple[Models, str]:

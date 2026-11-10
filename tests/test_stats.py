@@ -113,6 +113,7 @@ def test_start_times_are_each_models_median_first_output_lately(tmp_path):
 
 
 def test_helper_runs_are_the_sessions_another_session_started_counted_per_model(tmp_path):
+    # an older database: no model kept on the session, so each helper's first message with one names it
     project = str(tmp_path / "project")
     path = tmp_path / "bharatcode.db"
     db = sqlite3.connect(path)
@@ -136,3 +137,35 @@ def test_helper_runs_are_the_sessions_another_session_started_counted_per_model(
     assert stats.helper_runs(START, db=path) == {QWEN: 4, DEEPSEEK: 1}
     old = desktop_db(tmp_path / "old.db", [(project, MS + 1, QWEN, tokens(1, 1))])  # no parent_id recorded
     assert stats.helper_runs(START, db=old) is None
+
+
+def test_helper_runs_are_the_calling_leads_own_helpers_queued_and_failed_ones_too(tmp_path):
+    project, worktree = str(tmp_path / "project"), str(tmp_path / "copy")
+    path = tmp_path / "bharatcode.db"
+    db = sqlite3.connect(path)
+    db.execute("create table session (id text primary key, parent_id text, directory text, model text, time_created integer)")
+    db.execute("create table message (id text primary key, session_id text, time_created integer, data text)")
+    db.execute("create table part (id text primary key, session_id text, time_created integer, data text)")
+
+    def model(name):
+        provider, _, model_id = name.partition("/")
+        return json.dumps({"id": model_id, "providerID": provider, "variant": "default"})
+
+    for sid, parent, folder, name in [
+            ("lead", None, project, DEEPSEEK),
+            ("s1", "lead", project, QWEN), ("s2", "lead", project, QWEN),  # s2: still queued, no message yet
+            ("s3", "lead", worktree, QWEN),  # works in a private copy: still this lead's helper
+            ("chk", "lead", project, DEEPSEEK),
+            ("sub", "s1", project, QWEN),  # a helper's own helper: not the lead's
+            ("other", None, project, DEEPSEEK), ("o1", "other", project, QWEN)]:  # another command at the same time
+        db.execute("insert into session values (?, ?, ?, ?, ?)", (sid, parent, folder, model(name), MS + 10))
+    for sid, status in (("other", "completed"), ("lead", "running")):  # the lead is calling pack_cost now
+        db.execute("insert into part values (?, ?, ?, ?)", (f"p-{sid}", sid, MS + 100,
+                                                         json.dumps({"tool": "spare-gpu_pack_cost", "state": {"status": status}})))
+    db.commit()
+    db.close()
+    assert stats.helper_runs(START, Path(project), db=path, caller_tool="spare-gpu_pack_cost") == {QWEN: 3, DEEPSEEK: 1}
+    # no call running (a caller that isn't a lead): every helper in the project, as before
+    assert stats.helper_runs(START, Path(project), db=path) == {QWEN: 4, DEEPSEEK: 1}
+    tokens_seen, runs = stats.usage_since(START, Path(project), db=path, caller_tool="spare-gpu_pack_cost")
+    assert tokens_seen == {} and runs == {QWEN: 3, DEEPSEEK: 1}  # both from one read

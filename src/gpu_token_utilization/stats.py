@@ -103,61 +103,88 @@ def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: floa
     return figures
 
 
-def helper_runs(since: datetime, directory: Path | None = None, db: Path | None = None) -> dict[str, int] | None:
+# A helper's model: the one its session was started with (so a helper still queued counts too),
+# else its first message's, for databases that don't keep the session's model.
+_FIRST_MESSAGE_MODEL = """(select coalesce(json_extract(m.data, '$.model.providerID'), json_extract(m.data, '$.providerID'))
+        || '/' || coalesce(json_extract(m.data, '$.model.modelID'), json_extract(m.data, '$.modelID'))
+    from message m where m.session_id = s.id
+      and coalesce(json_extract(m.data, '$.model.modelID'), json_extract(m.data, '$.modelID')) is not null
+    order by m.time_created limit 1)"""
+_HELPER_MODEL = f"coalesce(json_extract(s.model, '$.providerID') || '/' || json_extract(s.model, '$.id'), {_FIRST_MESSAGE_MODEL})"
+
+
+def _helpers(conn: sqlite3.Connection, started: int, directory: Path | None, caller_tool: str | None) -> dict[str, int]:
+    """Helper sessions started since `started`, per model, counted from the moment each was started
+    (queued and failed ones too). With `caller_tool`, only the helpers of the session that is running
+    that tool right now (the lead calling it), wherever they work; else every helper in `directory`."""
+    lead = None
+    if caller_tool:
+        for sid, folder in conn.execute(
+                "select p.session_id, s.directory from part p join session s on s.id = p.session_id "
+                "where p.time_created >= ? and json_extract(p.data, '$.tool') = ? "
+                "and json_extract(p.data, '$.state.status') in ('pending', 'running') order by p.time_created desc",
+                (started, caller_tool)):
+            if directory is None or (folder and _same_folder(folder, Path(directory))):
+                lead = sid
+                break
+    columns = {row[1] for row in conn.execute("pragma table_info(session)")}
+    model_sql = _HELPER_MODEL if "model" in columns else _FIRST_MESSAGE_MODEL
+    if lead is not None:
+        rows = conn.execute(f"select s.directory, {model_sql} from session s where s.parent_id = ? and s.time_created >= ?",
+                            (lead, started)).fetchall()
+    else:
+        rows = [(folder, model) for folder, model in conn.execute(
+            f"select s.directory, {model_sql} from session s where s.parent_id is not null and s.time_created >= ?",
+            (started,)) if directory is None or (folder and _same_folder(folder, Path(directory)))]
+    runs: dict[str, int] = {}
+    for _, model in rows:
+        runs[model or "unknown"] = runs.get(model or "unknown", 0) + 1
+    return runs
+
+
+def helper_runs(since: datetime, directory: Path | None = None, db: Path | None = None,
+                caller_tool: str | None = None) -> dict[str, int] | None:
     """How many helper sessions (sessions started by another session, such as a task's subagent)
-    began since `since`, per model of their replies; in `directory` only when it's given. None when
-    there's no database, or it doesn't record which session started which."""
+    began since `since`, per model. None when there's no database, or it doesn't record which
+    session started which."""
+    return usage_since(since, directory, db, caller_tool)[1]
+
+
+def usage_since(since: datetime, directory: Path | None = None, db: Path | None = None,
+                caller_tool: str | None = None) -> tuple[dict[str, dict] | None, dict[str, int] | None]:
+    """tokens_since and helper_runs from one read of the database."""
     path = db or session_db()
     if path is None:
-        return None
+        return None, None
     started = int(since.timestamp() * 1000)
     try:
         conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     except sqlite3.Error:
-        return None
+        return None, None
     try:
-        rows = conn.execute("select s.id, s.directory, m.data from session s join message m on m.session_id = s.id "
-                            "where s.parent_id is not null and s.time_created >= ? order by m.time_created",
-                            (started,)).fetchall()
-    except sqlite3.Error:
-        return None
+        try:
+            tokens = _tokens(conn, started, directory)
+        except sqlite3.Error:
+            tokens = None
+        try:
+            runs = _helpers(conn, started, directory, caller_tool)
+        except sqlite3.Error:
+            runs = None
     finally:
         conn.close()
-    model_of: dict[str, str] = {}
-    for sid, folder, data in rows:
-        if sid in model_of or (directory is not None and not (folder and _same_folder(folder, Path(directory)))):
-            continue
-        try:
-            message = json.loads(data)
-        except ValueError:
-            continue
-        if message.get("role") == "assistant" and message.get("modelID"):
-            model_of[sid] = f"{message.get('providerID') or 'bharatcode'}/{message['modelID']}"
-    runs: dict[str, int] = {}
-    for model in model_of.values():
-        runs[model] = runs.get(model, 0) + 1
-    return runs
+    return tokens, runs
 
 
 def tokens_since(since: datetime, directory: Path | None = None, db: Path | None = None) -> dict[str, dict] | None:
     """Tokens per model ("bharatcode/qwen-3.8-27b": {messages, input, output, reasoning,
     cache_read, cache_write, tokens}) in the replies Desktop recorded since `since`, in the
     sessions of `directory` only when it's given. None when there's no database to read."""
-    path = db or session_db()
-    if path is None:
-        return None
-    started = int(since.timestamp() * 1000)
-    try:
-        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return None
-    try:
-        rows = conn.execute("select m.data, s.directory from message m join session s on s.id = m.session_id "
-                            "where m.time_created >= ?", (started,)).fetchall()
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
+    return usage_since(since, directory, db)[0]
+
+
+def _tokens(conn: sqlite3.Connection, started: int, directory: Path | None) -> dict[str, dict]:
+    rows = conn.execute("select m.data, s.directory from message m join session s on s.id = m.session_id "
+                        "where m.time_created >= ?", (started,)).fetchall()
     models: dict[str, dict] = {}
     for data, folder in rows:
         if directory is not None and not (folder and _same_folder(folder, Path(directory))):

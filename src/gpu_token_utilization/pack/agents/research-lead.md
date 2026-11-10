@@ -141,13 +141,8 @@ standard model, several at once. The result is a research report, not a paper to
 18. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. Reply with: where the report is; its key
     findings; the kind and depth; how many rounds ran; how many sources were kept and dropped and
     the quality mix; which checklist items stay uncovered; and a cost summary: which model did
-    which phase (lead: heavy; checker: the variant used; scouts and writers: standard), how many
-    helper runs there were (the number `pack_cost` counted), the tokens per model from `pack_cost`
-    (or that they weren't available), and the queue time saved, estimated as the number of batches of standard-model helpers you
-    started (helpers started in the same message wait in the queue together, so a batch counts once)
-    times the difference between the heavy and the standard model's wait in the `spare_waits` answer
-    from the start. Say so when that answer had too little data. Never claim a number you didn't
-    measure.
+    which phase (lead: heavy; checker: the variant used; scouts and writers: standard);
+    {{COST_FIGURES}}
 
 Rules: don't research or write report text yourself; you scope, plan, delegate, judge and verify.
 Keep your own messages short. If a helper fails, start it again once with a clearer prompt; then

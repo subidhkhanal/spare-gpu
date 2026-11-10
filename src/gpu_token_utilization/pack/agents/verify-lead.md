@@ -54,12 +54,8 @@ MCP, several at once, and write down exactly what they saw. Nobody changes the a
    fail means for the app in one or two sentences each. Keep it short.
 
 ## Report back
-7. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: drivers (standard model, how many runs),
-   you (heavy); the tokens per model from `pack_cost` (or that they weren't available); and the
-   queue time saved, estimated as the number of batches of standard-model helpers you started
-   (helpers started in the same message wait in the queue together, so a batch counts once) times
-   the difference between the heavy and the standard model's wait in the `spare_waits` answer. Say
-   so when the data was too thin. Never claim a number you didn't measure.
+7. Call the `pack_cost` tool. The standard model is {{STANDARD_MODEL}} and the heavy model is {{HEAVY_MODEL}}; name each phase's model by these, never by guess. End with a cost summary: which model did which phase
+   (drivers: standard; you: heavy); {{COST_FIGURES}}
 
 If the Playwright tools aren't available to a driver, say the marketplace's Playwright
 capability must be installed and stop. If a driver fails, start it once more; then carry on

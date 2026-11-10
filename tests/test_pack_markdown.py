@@ -9,7 +9,7 @@ import yaml
 import pytest
 
 from gpu_token_utilization import pack
-from gpu_token_utilization.pack import COMPONENTS, HEAVY, MARKER, STANDARD, Models
+from gpu_token_utilization.pack import COMPONENTS, COST_FIGURES, HEAVY, MARKER, STANDARD, Models
 
 FILLED = Models("bharatcode/deepseek-v4.1-flash", "bharatcode/qwen-3.8-27b")
 AUTO_TOOLS = ("spare-gpu_spare_delegate", "spare-gpu_spare_auto", "spare-gpu_spare_work_status", "spare-gpu_spare_cancel_work")
@@ -32,9 +32,9 @@ def test_there_is_something_to_install():
 
 
 @pytest.mark.parametrize("kind, name, path", present(), ids=lambda x: str(x) if isinstance(x, str) else "")
-def test_every_file_parses_carries_the_marker_and_only_the_two_placeholders(kind, name, path):
+def test_every_file_parses_carries_the_marker_and_only_the_known_placeholders(kind, name, path):
     raw = path.read_text(encoding="utf-8")
-    assert "{{" not in raw.replace(HEAVY, "").replace(STANDARD, "")
+    assert "{{" not in raw.replace(HEAVY, "").replace(STANDARD, "").replace(COST_FIGURES, "")
     data, body = parse(path)
     assert "{{" not in FILLED.fill(raw) and data["description"] and body.strip()
     if kind == "agent":
@@ -246,6 +246,8 @@ def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
         _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS[component]]) if k == "agent"}[f"{component}-lead"])
         flat = " ".join(body.split())
         assert "a batch counts once" in flat and "standard-model runs times" not in flat, component
+        raw = pack.PACK_DIR / "agents" / f"{component}-lead.md"
+        assert raw.read_text(encoding="utf-8").count(COST_FIGURES) == 1, component  # the wording lives in one place
     simplify, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}["simplify-lead"])
     assert simplify["permission"]["spare-gpu_pack_cost"] == "allow" and "`pack_cost` tool" in " ".join(body.split())
 
@@ -293,7 +295,7 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
                  "collect_sources", "sources.json", "verify_refs", "DROP", "spare_waits", "queue time saved",
                  "Never claim a number you didn't measure", "never more than three rounds", "build_report",
                  "No polishing beyond the review", "01-summary.md", "at most three short questions",
-                 "the number `pack_cost` counted"):
+                 "as `pack_cost` counted them", "say the count wasn't available"):
         assert step in body, step
     assert body.count("all in the same message") == 2  # scouts and writers both run at once
     for kind in ("academic", "technical", "market", "fact"):  # each kind of question has its own strategy

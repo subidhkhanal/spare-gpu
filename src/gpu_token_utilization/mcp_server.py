@@ -25,6 +25,7 @@ import httpx
 from mcp.server.mcpserver import Context  # at module level: the tool's annotation must resolve
 
 from . import __version__, actions, desktop, pack, refs, router, runstate, scholar, security, stats, tally, waits, workers, worktree
+from .bc_config import SERVER_NAME
 from .budget import Budgets
 from .jobs import PLANS, JobConfig
 from .scheduler import Scheduler
@@ -213,7 +214,7 @@ class SpareTools:
         except (OSError, ValueError, KeyError, TypeError):
             return ("No start time: call spare_waits at the start of the command, then pack_cost at the end. "
                     "Say the token figures weren't available.")
-        figures = stats.tokens_since(started, self._root())
+        figures, runs = stats.usage_since(started, self._root(), caller_tool=f"{SERVER_NAME}_pack_cost")
         if figures is None:
             return ("BharatCode Desktop's session data wasn't found on this machine, so there are no token figures. "
                     "Say so instead of estimating.")
@@ -226,11 +227,13 @@ class SpareTools:
                          f"{used['cache_read']:,} read from cache)")
         if len(lines) == 1:
             lines.append("- no replies recorded yet.")
-        runs = stats.helper_runs(started, self._root())
-        if runs is not None:
+        if runs is None:
+            lines.append("Helper runs: not available (this Desktop doesn't record which session started which); "
+                         "say the count wasn't available.")
+        else:
             counted = ", ".join(f"{n} on {waits.name(model)}" for model, n in sorted(runs.items())) or "none"
-            lines.append(f"Helper runs started since then (counted from Desktop's record; report this number, "
-                         f"don't count them yourself): {sum(runs.values())} ({counted}).")
+            lines.append(f"Helper runs started since then (counted from Desktop's record, queued and failed ones "
+                         f"included; report this number, don't count them yourself): {sum(runs.values())} ({counted}).")
         return "\n".join(lines)
 
     def auto(self, request: str, your_model: str | None = None, new: bool = False,

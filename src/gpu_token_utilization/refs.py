@@ -230,32 +230,47 @@ def normalize_url(url: str | None) -> str | None:
     return host + path + (f"?{query}" if query else "")
 
 
-_ARXIV_DOI = re.compile(r"^10\.48550/arxiv\.(.+)$")
+_ARXIV_DOI = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)?10\.48550/arxiv\.(.+)$", re.I)
+ID_FIELDS = ("doi", "arxiv", "openalex", "url")
 
 
-def identities(item: dict) -> list[str]:
-    """Every id an entry gives (DOI, arXiv, OpenAlex, URL), each as "label:value". Two entries
-    sharing any one of them are the same source. arXiv's own DOI (10.48550/arXiv.<id>) counts as
-    the arXiv id, so the same preprint cited by its DOI and by its id still matches."""
+def _arxiv_from_doi(text) -> str | None:
+    """The arXiv id inside arXiv's own DOI (10.48550/arXiv.<id>), its case kept for old-style ids."""
+    found = _ARXIV_DOI.match(str(text or "").strip())
+    return normalize_arxiv(found.group(1)) if found else None
+
+
+def strong_ids(item: dict) -> list[str]:
+    """The entry's paper ids (DOI, arXiv, OpenAlex), each as "label:value". arXiv's own DOI counts
+    as the arXiv id, so a preprint cited by its DOI and by its id matches."""
     found: list[str] = []
 
     def add(label: str, value) -> None:
         if value and f"{label}:{str(value).lower()}" not in found:
             found.append(f"{label}:{str(value).lower()}")
 
-    url = str(item.get("url") or "")
-    for doi in (normalize_doi(item.get("doi")), normalize_doi(item.get("url"))):
-        arxiv_doi = _ARXIV_DOI.match(doi or "")
-        if arxiv_doi:
-            add("arxiv", normalize_arxiv(arxiv_doi.group(1)))
-        else:
-            add("doi", doi)
+    url = item.get("url")
+    for raw in (item.get("doi"), url):
+        arxiv = _arxiv_from_doi(raw)
+        add("arxiv", arxiv) if arxiv else add("doi", normalize_doi(raw))
     add("arxiv", normalize_arxiv(item.get("arxiv")))
-    if "arxiv.org" in url:
+    if "arxiv.org" in str(url or ""):
         add("arxiv", normalize_arxiv(url))
     add("openalex", normalize_openalex(item.get("openalex")))
-    add("url", normalize_url(item.get("url")))
     return found
+
+
+def url_id(item: dict) -> str | None:
+    """The entry's page, as "url:<normalised url>"."""
+    url = normalize_url(item.get("url"))
+    return f"url:{url.lower()}" if url else None
+
+
+def identities(item: dict) -> list[str]:
+    """What makes two entries the same source: the paper ids when it has any, else its page. A page
+    alone never joins two entries with paper ids: different papers can share a page (a proceedings
+    volume, a listing), so only an entry with nothing better is matched by it."""
+    return strong_ids(item) or [i for i in (url_id(item),) if i]
 
 
 def identity(item: dict) -> str | None:
@@ -299,16 +314,19 @@ def _rename_key(path: Path, old: str, new: str) -> None:
 
 def collect_sources(folder: Path) -> tuple[Path, str]:
     """Merge the ```sources lists of <folder>/notes/*.md into <folder>/sources.json. The same source
-    found by several scouts (same DOI, arXiv id, OpenAlex id or URL) becomes one entry, its other
-    keys kept as "aliases" so citations under any of them still work; two different sources a
-    scout gave the same key get the later one renamed, in that notes file too. A source with no id
-    is left out: a fact needs one. Returns the file and a summary, with the quality mix."""
+    found by several scouts (sharing a DOI, arXiv id or OpenAlex id; or the same URL, when one of
+    the two has no paper id) becomes one entry, its other keys kept as "aliases" so citations under
+    any of them still work; an entry that shares ids with two kept sources joins them into one. Two
+    different sources a scout gave the same key get the later one renamed, in that notes file too.
+    A source with no id is left out: a fact needs one. Returns the file and a summary, with the
+    quality mix."""
     folder = Path(folder)
     notes = sorted((folder / NOTES_DIR).glob("*.md"), key=_section_order)
     if not notes:
         raise FileNotFoundError(folder / NOTES_DIR)
     merged: list[dict] = []
-    by_identity: dict[str, dict] = {}
+    by_identity: dict[str, dict] = {}  # paper id -> its source
+    by_page: dict[str, dict] = {}  # page -> the first source seen there
     by_key: dict[str, dict] = {}
     seen = duplicates = bad = 0
     no_id: list[str] = []
@@ -319,15 +337,24 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
         for item in items:
             seen += 1
             key = str(item["key"])
-            idents = identities(item)
-            if not idents:
+            strong = strong_ids(item)
+            page = url_id(item)
+            if not strong and not page:
                 no_id.append(f"{key} ({path.name})")
                 continue
-            kept = next((by_identity[i] for i in idents if i in by_identity), None)
-            if kept is not None:
+            # every source that shares a paper id with this entry is one source from now on, the
+            # earliest first; a page alone matches only a source known by nothing more than its page
+            found = list({id(e): e for e in (by_identity[i] for i in strong if i in by_identity)}.values())
+            if not found and page in by_page and (not strong or not strong_ids(by_page[page])):
+                found = [by_page[page]]
+            found.sort(key=lambda e: next(n for n, m in enumerate(merged) if m is e))
+            if found:
+                kept = found[0]
                 duplicates += 1
-                for ident in idents:  # the ids only this entry gave now find the kept source too
-                    by_identity.setdefault(ident, kept)
+                for other in found[1:]:  # this entry links two sources the earlier notes kept apart
+                    _absorb(kept, other, by_identity, by_page, by_key)
+                    merged.remove(other)
+                    duplicates += 1
                 if key != kept["key"] and key not in kept.setdefault("aliases", []):
                     if key in by_key and by_key[key] is not kept:  # the key already names another source
                         new = _free_key(key, by_key)
@@ -336,10 +363,11 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
                         key = new
                     kept["aliases"].append(key)
                     by_key[key] = kept
-                for field in ("quality", "date", "title", "authors", "year", "doi", "arxiv", "openalex", "url"):
-                    # fill what the first scout left out
-                    if not kept.get(field) and item.get(field):
-                        kept[field] = item[field]
+                _fill(kept, item, ids=bool(strong))
+                for ident in strong_ids(kept):
+                    by_identity[ident] = kept
+                if page and page not in by_page:
+                    by_page[page] = kept
                 continue
             if key in by_key:  # a key already used for a different source
                 new = _free_key(key, by_key)
@@ -349,8 +377,10 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
                 key = new
             entry = {k: v for k, v in item.items() if k != "aliases"}
             merged.append(entry)
-            for ident in idents:
-                by_identity.setdefault(ident, entry)
+            for ident in strong:
+                by_identity[ident] = entry
+            if page and page not in by_page:
+                by_page[page] = entry
             by_key[key] = entry
     out = folder / SOURCES_FILE
     out.write_text(json.dumps({"sources": merged}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -368,6 +398,30 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
     if bad:
         lines.append(f"{bad} line(s) in ```sources fences weren't a JSON object with a key, and were skipped.")
     return out, "\n".join(lines)
+
+
+def _fill(kept: dict, item: dict, ids: bool) -> None:
+    """Fill what the kept entry left out from a duplicate of it. Ids are copied only from an entry
+    with paper ids, which matched on one or joined a source known only by its page; so a page shared
+    by different papers never lends one paper's DOI to another."""
+    for field in ("quality", "date", "title", "authors", "year", *(ID_FIELDS if ids else ())):
+        if not kept.get(field) and item.get(field):
+            kept[field] = item[field]
+
+
+def _absorb(kept: dict, other: dict, by_identity: dict, by_page: dict, by_key: dict) -> None:
+    """Fold a source kept earlier into another, when a later entry shows the two are one paper."""
+    for alias in [other["key"], *other.get("aliases", [])]:
+        if alias != kept["key"] and alias not in kept.setdefault("aliases", []):
+            kept["aliases"].append(alias)
+        by_key[alias] = kept
+    _fill(kept, other, ids=True)
+    for index in (by_identity, by_page):
+        for ident, entry in list(index.items()):
+            if entry is other:
+                index[ident] = kept
+    for ident in strong_ids(kept):
+        by_identity[ident] = kept
 
 
 def _free_key(key: str, used: dict) -> str:

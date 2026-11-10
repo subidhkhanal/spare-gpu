@@ -312,11 +312,18 @@ def test_spare_waits_names_the_variant_per_role_and_pack_cost_reports_this_proje
     assert cost.startswith("Tokens used in this project's BharatCode Desktop sessions since the spare_waits call 0 min ago")
     assert "- DeepSeek V4.1 Flash: 26,549 tokens in 1 message(s) (180 input, 769 output, 25,600 read from cache)" in cost
     assert "- Qwen 3.8 27B: 17,080 tokens in 2 message(s)" in cost  # not the other project's, not the earlier one
-    assert "Helper runs" not in cost  # this database doesn't record which session started which: no count
-    monkeypatch.setattr(stats, "helper_runs", lambda since, directory=None, db=None: {"bharatcode/qwen-3.8-27b": 12,
-                                                                                    "bharatcode/deepseek-v4.1-flash": 1})
-    assert ("Helper runs started since then (counted from Desktop's record; report this number, don't count them "
+    # this database doesn't record which session started which: said, never counted by hand
+    assert "Helper runs: not available" in cost and "say the count wasn't available" in cost
+    seen = {}
+
+    def usage(since, directory=None, db=None, caller_tool=None):
+        seen["caller"] = caller_tool
+        return {}, {"bharatcode/qwen-3.8-27b": 12, "bharatcode/deepseek-v4.1-flash": 1}
+
+    monkeypatch.setattr(stats, "usage_since", usage)
+    assert ("(counted from Desktop's record, queued and failed ones included; report this number, don't count them "
             "yourself): 13 (1 on DeepSeek V4.1 Flash, 12 on Qwen 3.8 27B).") in tools.pack_cost()
+    assert seen["caller"] == "spare-gpu_pack_cost"  # only the helpers of the lead calling it
     monkeypatch.setenv("GTU_SWITCH_SAFE", "review-verifier")  # measured (or marked) switch-safe: the router may move it
     routed = tools.waits(roles=True)
     assert "- review-verifier: start `" in routed and "- research-checker: start `research-checker` (" in routed
