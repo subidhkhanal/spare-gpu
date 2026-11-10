@@ -1,0 +1,10 @@
+{
+  "target": "verify-refs",
+  "value": 0.9751552795031055,
+  "at": "20261110T141441Z",
+  "settings": {
+    "title_match": 0.85,
+    "title_exact": 0.95,
+    "title_shortened": 0.75
+  }
+}

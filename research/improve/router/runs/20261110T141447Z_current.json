@@ -1,0 +1,27 @@
+{
+  "target": "router",
+  "label": "current",
+  "value": 0.0,
+  "tasks": [
+    {
+      "id": "replay",
+      "score": 0.0,
+      "decisions": 506,
+      "moves": 0,
+      "mean_saved_seconds": 0.0,
+      "mean_preferred_wait": 10.54
+    }
+  ],
+  "detail": {
+    "settings": {
+      "min_saving": 20.0,
+      "back_votes": 2,
+      "start_window": 30.0,
+      "start_keep": 5,
+      "start_min": 2
+    },
+    "replies": 1117,
+    "decisions": 506,
+    "moves": 0
+  }
+}

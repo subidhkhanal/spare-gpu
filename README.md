@@ -465,8 +465,9 @@ BharatCode Desktop
 | `src/gpu_token_utilization/commands/`, `agents/` | `/auto` and its small handoff agent, installed with or without the pack |
 | `src/gpu_token_utilization/pack/` | The pack: `commands/` and `agents/` (Markdown), and `__init__.py`, which lists each component with its commands, agents and tools |
 | `tests/` | pytest. `fakedesktop.py` (in the package) is an in-process fake of Desktop's server; `tests/fixtures/` holds recorded registry answers |
-| `scripts/` | Benchmarks and measurements. They need Desktop and the internet, and never run in CI |
-| `research/` | The measurements and manual checks behind design decisions |
+| `scripts/` | Benchmarks and measurements, and `improve.py`, the improvement loop. They need Desktop and the internet, and never run in CI |
+| `benchmarks/` | The improvement loop's benchmarks: recorded material and small projects with planted bugs (its README says how to run them) |
+| `research/` | The measurements and manual checks behind design decisions; `research/improve/` records every run, candidate and promotion of the improvement loop |
 | `docs/` | The install checklist, how to release, and the images |
 
 ### Set up a working copy
@@ -508,6 +509,22 @@ python -m pytest tests/test_refs.py -q   # one file while you work
    - `test_overhead_budget.py` checks that normal chats still pay nothing.
    - Add tests for any new tool, using the fakes.
 5. **Try it.** Run `gtu integrate --pack`, restart Desktop, and run the command. `/doctor` lists the tools the server offers.
+
+### Improve a part with a benchmark
+
+`scripts/improve.py` proposes a change, scores it against the current version on a fixed
+benchmark, and keeps it only when it wins by 5% and you promote it (archived first, so
+`rollback` undoes it). Eight parts have a benchmark (`python scripts/improve.py list`):
+
+- **Replayed, seconds, and held by `tests/test_bench.py`:** `verify-refs` and `router` (settings
+  in `tuning.json`, searched over a grid), and `collect-sources` (code: change it and keep the
+  change only if the score holds).
+- **Live in Desktop, tokens and time:** `code-review`, `security-review`, `simplify`,
+  `auto-handoff` and `deep-research`. DeepSeek rewrites the agents' prompts from the current
+  version's failures. Install the candidate, restart Desktop, and score it.
+
+[benchmarks/README.md](benchmarks/README.md) has the steps. Nothing is promoted, committed or
+pushed without your command.
 
 ### Rules the project keeps
 

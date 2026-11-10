@@ -1,0 +1,12 @@
+{
+  "target": "router",
+  "value": 0.0,
+  "at": "20261110T141230Z",
+  "settings": {
+    "min_saving": 20.0,
+    "back_votes": 2,
+    "start_window": 30.0,
+    "start_keep": 5,
+    "start_min": 2
+  }
+}

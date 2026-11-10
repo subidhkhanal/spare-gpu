@@ -277,12 +277,15 @@ class DesktopAgent:
 
     def run_agent(self, workdir: Path, agent: str | None, prompt: str, *, model: str | None = None,
                   token_budget: int | None = None,
-                  on_step: Callable[[AgentStep], None] = lambda step: None) -> AgentResult:
+                  on_step: Callable[[AgentStep], None] = lambda step: None,
+                  permission: list[dict] | None = None) -> AgentResult:
         """One of Desktop's agents (a pack lead for the benchmarks; None: Desktop's default agent)
         on a prompt, as a session in `workdir`. The agent keeps its own permissions, and its own
-        model unless `model` pins one: nothing of a job's applies."""
+        model unless `model` pins one: nothing of a job's applies. `permission` adds session rules
+        after the agent's (the last matching rule wins), such as denying a tool for a benchmark."""
         extra = ({"agent": agent} if agent else {}) | ({"model": _model_ref(model)} if model else {})
-        return self._session(Path(workdir), prompt, {}, extra, token_budget, on_step, lambda: False)
+        rules = {"permission": permission} if permission else {}
+        return self._session(Path(workdir), prompt, rules, extra, token_budget, on_step, lambda: False)
 
     def server_version(self) -> str | None:
         """The version Desktop's server reports, or None."""

@@ -1,0 +1,604 @@
+[
+ {
+  "id": "synthetic/wrong-id-0",
+  "ref": {
+   "title": "Exploring RAG Solutions to Reduce Hallucinations in LLMs",
+   "authors": [
+    "AboulEla",
+    "Zabihitari",
+    "Ibrahim",
+    "Afshar",
+    "Kashef"
+   ],
+   "year": 2025,
+   "doi": "10.1145/3731120.3744592",
+   "key": "synthetic/wrong-id-0"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Correctness is not Faithfulness in Retrieval Augmented Generation Attributions",
+    "authors": [
+     "Jonas Wallat",
+     "Maria Heuss",
+     "Maarten de Rijke",
+     "Avishek Anand"
+    ],
+    "year": 2025,
+    "venue": "Proceedings of the 2025 International ACM SIGIR Conference on Innovative Concepts and Theories in Information Retrieval (ICTIR)",
+    "doi": "10.1145/3731120.3744592",
+    "url": "https://doi.org/10.1145/3731120.3744592",
+    "cited_by": 27,
+    "source": "crossref"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run2/abouela2025's title with rag-hallucination-run1/citfaith-ictir-2025's id"
+ },
+ {
+  "id": "synthetic/wrong-id-1",
+  "ref": {
+   "title": "Stable-RAG: Mitigating Retrieval-Permutation-Induced Hallucinations in Retrieval-Augmented Generation",
+   "authors": [
+    "Qianchi Zhang",
+    "Hainan Zhang",
+    "Liang Pang",
+    "Hong-Wei Zheng",
+    "Zhiming Zheng"
+   ],
+   "year": 2026,
+   "url": "https://arxiv.org/abs/2601.19927",
+   "key": "synthetic/wrong-id-1"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Attribution Techniques for Mitigating Hallucinated Information in RAG Systems: A Survey",
+    "authors": [
+     "Yuqing Zhao",
+     "Ziyao Liu",
+     "Yongsen Zheng",
+     "Kwok-Yan Lam"
+    ],
+    "year": 2026,
+    "venue": "The 8th International Conference on Artifcial Intelligence in Information and Communication (ICAIIC 2026)",
+    "arxiv": "2601.19927",
+    "url": "https://arxiv.org/abs/2601.19927",
+    "abstract": "Large Language Models (LLMs)-based question answering (QA) systems play a critical role in modern AI, demonstrating strong performance across various tasks. However, LLM-generated responses often suffer from hallucinations, unfaithful statements lacking reliable references. Retrieval-Augmented Generation (RAG) frameworks enhance LLM responses by incorporating external references but also introduce new forms of hallucination due to complex interactions between the retriever and generator. To addr…",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run1/zhang2026stablerag's title with rag-hallucination-run2/zhao2026's id"
+ },
+ {
+  "id": "synthetic/wrong-id-2",
+  "ref": {
+   "title": "ClashEval: Quantifying the tug-of-war between an LLM's internal prior and external evidence",
+   "authors": [
+    "Kevin Wu",
+    "Eric Wu",
+    "James Zou"
+   ],
+   "year": 2024,
+   "url": "https://arxiv.org/abs/2002.08909",
+   "key": "synthetic/wrong-id-2"
+  },
+  "recorded": {
+   "paper": {
+    "title": "REALM: Retrieval-Augmented Language Model Pre-Training",
+    "authors": [
+     "Kelvin Guu",
+     "Kenton Lee",
+     "Zora Tung",
+     "Panupong Pasupat",
+     "Ming-Wei Chang"
+    ],
+    "year": 2020,
+    "arxiv": "2002.08909",
+    "url": "https://arxiv.org/abs/2002.08909",
+    "abstract": "Language model pre-training has been shown to capture a surprising amount of world knowledge, crucial for NLP tasks such as question answering. However, this knowledge is stored implicitly in the parameters of a neural network, requiring ever-larger networks to cover more facts. To capture knowledge in a more modular and interpretable way, we augment language model pre-training with a latent knowledge retriever, which allows the model to retrieve and attend over documents from a large corpus suc…",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run2/clash-eval's title with rag-hallucination-run2/guu2020's id"
+ },
+ {
+  "id": "synthetic/wrong-id-3",
+  "ref": {
+   "title": "Benchmarking Retrieval-Augmented Generation for Medicine (MIRAGE / MEDRAG)",
+   "authors": [
+    "Guangzhi Xiong",
+    "Qiao Jin",
+    "Zhiyong Lu",
+    "Aidong Zhang"
+   ],
+   "year": 2024,
+   "arxiv": "2310.03214",
+   "key": "synthetic/wrong-id-3"
+  },
+  "recorded": {
+   "paper": {
+    "title": "FreshLLMs: Refreshing Large Language Models with Search Engine Augmentation",
+    "authors": [
+     "Tu Vu",
+     "Mohit Iyyer",
+     "Xuezhi Wang",
+     "Noah Constant",
+     "Jerry Wei",
+     "Jason Wei",
+     "Chris Tar",
+     "Yun-Hsuan Sung",
+     "Denny Zhou",
+     "Quoc Le",
+     "Thang Luong"
+    ],
+    "year": 2023,
+    "arxiv": "2310.03214",
+    "url": "https://arxiv.org/abs/2310.03214",
+    "abstract": "Most large language models (LLMs) are trained once and never updated; thus, they lack the ability to dynamically adapt to our ever-changing world. In this work, we perform a detailed study of the factuality of LLM-generated text in the context of answering questions that test current world knowledge. Specifically, we introduce FreshQA, a novel dynamic QA benchmark encompassing a diverse range of question and answer types, including questions that require fast-changing world knowledge as well as …",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination/xiong2024's title with rag-hallucination-run1/freshllms-2023's id"
+ },
+ {
+  "id": "synthetic/wrong-id-4",
+  "ref": {
+   "title": "Reducing hallucination in structured outputs via Retrieval-Augmented Generation",
+   "authors": [
+    "Orlando Marquez Ayala",
+    "Patrice Bechard"
+   ],
+   "year": 2024,
+   "doi": "10.1038/s41586-024-07421-0",
+   "url": "https://www.nature.com/articles/s41586-024-07421-0",
+   "key": "synthetic/wrong-id-4"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Detecting hallucinations in large language models using semantic entropy",
+    "authors": [
+     "Sebastian Farquhar",
+     "Jannik Kossen",
+     "Lorenz Kuhn",
+     "Yarin Gal"
+    ],
+    "year": 2024,
+    "venue": "Nature",
+    "doi": "10.1038/s41586-024-07421-0",
+    "url": "https://doi.org/10.1038/s41586-024-07421-0",
+    "abstract": "Abstract Large language model (LLM) systems, such as ChatGPT 1 or Gemini 2 , can show impressive reasoning and question-answering capabilities but often ‘hallucinate’ false outputs and unsubstantiated answers 3,4 . Answering unreliably or without the necessary information prevents adoption in diverse fields, with problems including fabrication of legal precedents 5 or untrue facts in news articles 6 and even posing a risk to human life in medical domains such as radiology 7 . Encouraging truthfu…",
+    "cited_by": 1073,
+    "source": "crossref"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run1/ayala2024's title with rag-hallucination/farquhar2024's id"
+ },
+ {
+  "id": "synthetic/wrong-id-5",
+  "ref": {
+   "title": "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection",
+   "authors": [
+    "Akari Asai",
+    "Zeqiu Wu",
+    "Yizhong Wang",
+    "Avirup Sil",
+    "Hannaneh Hajishirzi"
+   ],
+   "year": 2023,
+   "url": "https://arxiv.org/abs/2404.16032",
+   "key": "synthetic/wrong-id-5"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Studying Large Language Model Behaviors Under Context-Memory Conflicts With Real Documents",
+    "authors": [
+     "Evgenii Kortukov",
+     "Alexander Rubinstein",
+     "Elisa Nguyen",
+     "Seong Joon Oh"
+    ],
+    "year": 2024,
+    "arxiv": "2404.16032",
+    "url": "https://arxiv.org/abs/2404.16032",
+    "abstract": "Retrieval-augmented generation (RAG) mitigates many problems of fully parametric language models, such as temporal degradation, hallucinations, and lack of grounding. In RAG, the model's knowledge can be updated from documents provided in context. This leads to cases of conflict between the model's parametric knowledge and the contextual information, where the model may not always update its knowledge. Previous work studied context-memory knowledge conflicts by creating synthetic documents that …",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run1/selfrag-2023's title with rag-hallucination-run2/kortukov2024real's id"
+ },
+ {
+  "id": "synthetic/wrong-id-6",
+  "ref": {
+   "title": "FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation",
+   "authors": [
+    "Sewon Min",
+    "Kalpesh Krishna",
+    "Xinxi Lyu",
+    "Mike Lewis",
+    "Wen-tau Yih",
+    "Pang Wei Koh",
+    "Mohit Iyyer",
+    "Luke Zettlemoyer",
+    "Hannaneh Hajishirzi"
+   ],
+   "year": 2023,
+   "arxiv": "2505.10792",
+   "key": "synthetic/wrong-id-6"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Finetune-RAG: Fine-Tuning Language Models to Resist Hallucination in Retrieval-Augmented Generation",
+    "authors": [
+     "Zhan Peng Lee",
+     "Andre Lin",
+     "Calvin Tan"
+    ],
+    "year": 2025,
+    "arxiv": "2505.10792",
+    "url": "https://arxiv.org/abs/2505.10792",
+    "abstract": "Retrieval-Augmented Generation (RAG) has emerged as a powerful framework to improve factuality in large language models (LLMs) by grounding their outputs in retrieved documents. However, ensuring perfect retrieval of relevant information remains challenging, and when irrelevant content is passed downstream to an LLM, it can lead to hallucinations. In this work, we propose Finetune-RAG, a simple and effective fine-tuning approach that features the first-of-its-kind RAG training dataset constructe…",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination/factscore's title with rag-hallucination-run1/finetune-rag's id"
+ },
+ {
+  "id": "synthetic/wrong-id-7",
+  "ref": {
+   "title": "Do LLM Attribution Metrics Transfer? Auditing RAG Evaluation Across Datasets and Constructs",
+   "authors": [
+    "Ding et al."
+   ],
+   "year": 2026,
+   "doi": "10.48550/arxiv.2310.11511",
+   "arxiv": "2310.11511",
+   "url": "https://arxiv.org/abs/2310.11511",
+   "key": "synthetic/wrong-id-7"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection",
+    "authors": [
+     "Akari Asai",
+     "Zeqiu Wu",
+     "Yizhong Wang",
+     "Avirup Sil",
+     "Hannaneh Hajishirzi"
+    ],
+    "year": 2023,
+    "venue": "arXiv (Cornell University)",
+    "doi": "10.48550/arxiv.2310.11511",
+    "arxiv": "2310.11511",
+    "openalex": "W4387800173",
+    "url": "http://arxiv.org/abs/2310.11511",
+    "abstract": "Despite their remarkable capabilities, large language models (LLMs) often produce responses containing factual inaccuracies due to their sole reliance on the parametric knowledge they encapsulate. Retrieval-Augmented Generation (RAG), an ad hoc approach that augments LMs with retrieval of relevant knowledge, decreases such issues. However, indiscriminately retrieving and incorporating a fixed number of retrieved passages, regardless of whether retrieval is necessary, or passages are relevant, di…",
+    "cited_by": 1039,
+    "source": "openalex"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "rag-hallucination-run2/ding2026's title with rag-hallucination-run1/asai2023selfrag's id"
+ },
+ {
+  "id": "synthetic/made-up-doi-0",
+  "ref": {
+   "title": "Benchmarking LLM Faithfulness in RAG with Evolving Leaderboards",
+   "authors": [
+    "Manveer Singh Tamber",
+    "Forrest Sheng Bao",
+    "Chenyu Xu",
+    "Ge Luo",
+    "Suleman Kazi",
+    "et al."
+   ],
+   "year": 2025,
+   "doi": "10.1145/3655642.0",
+   "key": "synthetic/made-up-doi-0"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/made-up-doi-1",
+  "ref": {
+   "title": "RAGStress: A Controlled Benchmark for Evaluating RAG Under Knowledge-Base Degradation",
+   "authors": [
+    "L. Huang et al."
+   ],
+   "year": 2026,
+   "doi": "10.48550/fake.2401.17747",
+   "key": "synthetic/made-up-doi-1"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/made-up-doi-2",
+  "ref": {
+   "title": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+   "authors": [
+    "Cheng Niu et al."
+   ],
+   "year": 2024,
+   "doi": "10.1145/3674115.2",
+   "key": "synthetic/made-up-doi-2"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/made-up-doi-3",
+  "ref": {
+   "title": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+   "authors": [
+    "Cheng Niu",
+    "Yuanhao Wu",
+    "Juno Zhu",
+    "Siliang Xu",
+    "KaShun Shum",
+    "Randy Zhong",
+    "Juntong Song",
+    "Tong Zhang"
+   ],
+   "year": 2024,
+   "doi": "10.48550/fake.2403.26226",
+   "key": "synthetic/made-up-doi-3"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/made-up-doi-4",
+  "ref": {
+   "title": "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena",
+   "authors": [
+    "Lianmin Zheng",
+    "Wei-Lin Chiang",
+    "Ying Sheng",
+    "et al."
+   ],
+   "year": 2023,
+   "doi": "10.1145/3629260.4",
+   "key": "synthetic/made-up-doi-4"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/made-up-doi-5",
+  "ref": {
+   "title": "Prompt-Based Abstention Fails Under Misleading Context: A Controlled Study of Small Frozen RAG Models",
+   "authors": [
+    "Setiawan"
+   ],
+   "year": 2026,
+   "doi": "10.48550/fake.2405.92657",
+   "key": "synthetic/made-up-doi-5"
+  },
+  "recorded": {},
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a real title with a DOI no registry has"
+ },
+ {
+  "id": "synthetic/dead-page-0",
+  "ref": {
+   "key": "synthetic/dead-page-0",
+   "title": "Prompting GPT-3 To Be Reliable",
+   "url": "https://example.org/papers/0.html"
+  },
+  "recorded": {
+   "page": {
+    "status": 404,
+    "text": "Not Found"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a page that doesn't exist"
+ },
+ {
+  "id": "synthetic/dead-page-1",
+  "ref": {
+   "key": "synthetic/dead-page-1",
+   "title": "REALM: Retrieval-Augmented Language Model Pre-Training",
+   "url": "https://example.org/papers/1.html"
+  },
+  "recorded": {
+   "page": {
+    "status": 404,
+    "text": "Not Found"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a page that doesn't exist"
+ },
+ {
+  "id": "synthetic/dead-page-2",
+  "ref": {
+   "key": "synthetic/dead-page-2",
+   "title": "FreshLLMs: Refreshing Large Language Models with Search Engine Augmentation",
+   "url": "https://example.org/papers/2.html"
+  },
+  "recorded": {
+   "page": {
+    "status": 404,
+    "text": "Not Found"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a page that doesn't exist"
+ },
+ {
+  "id": "synthetic/dead-page-3",
+  "ref": {
+   "key": "synthetic/dead-page-3",
+   "title": "Why RAGs Hallucinate: Penalty-Aware Evaluation of RAG Systems with Knowledge-Gap Canaries",
+   "url": "https://example.org/papers/3.html"
+  },
+  "recorded": {
+   "page": {
+    "status": 404,
+    "text": "Not Found"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a page that doesn't exist"
+ },
+ {
+  "id": "synthetic/other-authors-0",
+  "ref": {
+   "key": "synthetic/other-authors-0",
+   "title": "REALM: Retrieval-Augmented Language Model Pre-Training Revisited",
+   "authors": [
+    "Jane Doe",
+    "John Roe"
+   ],
+   "year": 2020,
+   "url": "https://arxiv.org/abs/2002.08909"
+  },
+  "recorded": {
+   "paper": {
+    "title": "REALM: Retrieval-Augmented Language Model Pre-Training",
+    "authors": [
+     "Kelvin Guu",
+     "Kenton Lee",
+     "Zora Tung",
+     "Panupong Pasupat",
+     "Ming-Wei Chang"
+    ],
+    "year": 2020,
+    "arxiv": "2002.08909",
+    "url": "https://arxiv.org/abs/2002.08909",
+    "abstract": "Language model pre-training has been shown to capture a surprising amount of world knowledge, crucial for NLP tasks such as question answering. However, this knowledge is stored implicitly in the parameters of a neural network, requiring ever-larger networks to cover more facts. To capture knowledge in a more modular and interpretable way, we augment language model pre-training with a latent knowledge retriever, which allows the model to retrieve and attend over documents from a large corpus suc…",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a near title by invented authors on a real id"
+ },
+ {
+  "id": "synthetic/other-authors-1",
+  "ref": {
+   "key": "synthetic/other-authors-1",
+   "title": "ClashEval: Quantifying the tug-of-war between an LLM’s internal prior and external evidence Revisited",
+   "authors": [
+    "Jane Doe",
+    "John Roe"
+   ],
+   "year": 2024,
+   "doi": "10.52202/079017-1053"
+  },
+  "recorded": {
+   "paper": {
+    "title": "ClashEval: Quantifying the tug-of-war between an LLM’s internal prior and external evidence",
+    "authors": [
+     "Kevin Wu",
+     "Eric Wu",
+     "James Zou"
+    ],
+    "year": 2024,
+    "venue": "Advances in Neural Information Processing Systems 37",
+    "doi": "10.52202/079017-1053",
+    "url": "https://doi.org/10.52202/079017-1053",
+    "cited_by": 26,
+    "source": "crossref"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a near title by invented authors on a real id"
+ },
+ {
+  "id": "synthetic/other-authors-2",
+  "ref": {
+   "key": "synthetic/other-authors-2",
+   "title": "Reducing hallucination in structured outputs via Retrieval-Augmented Generation Revisited",
+   "authors": [
+    "Jane Doe",
+    "John Roe"
+   ],
+   "year": 2024,
+   "doi": "10.18653/v1/2024.naacl-industry.19",
+   "arxiv": "2404.08189",
+   "url": "https://arxiv.org/abs/2404.08189"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Reducing hallucination in structured outputs via Retrieval-Augmented Generation",
+    "authors": [
+     "Orlando Ayala",
+     "Patrice Bechard"
+    ],
+    "year": 2024,
+    "venue": "Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 6: Industry Track)",
+    "doi": "10.18653/v1/2024.naacl-industry.19",
+    "url": "https://doi.org/10.18653/v1/2024.naacl-industry.19",
+    "cited_by": 81,
+    "source": "crossref"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a near title by invented authors on a real id"
+ },
+ {
+  "id": "synthetic/other-authors-3",
+  "ref": {
+   "key": "synthetic/other-authors-3",
+   "title": "Ragas: Automated Evaluation of Retrieval Augmented Generation Revisited",
+   "authors": [
+    "Jane Doe",
+    "John Roe"
+   ],
+   "year": 2023,
+   "arxiv": "2309.15217"
+  },
+  "recorded": {
+   "paper": {
+    "title": "Ragas: Automated Evaluation of Retrieval Augmented Generation",
+    "authors": [
+     "Shahul Es",
+     "Jithin James",
+     "Luis Espinosa-Anke",
+     "Steven Schockaert"
+    ],
+    "year": 2023,
+    "arxiv": "2309.15217",
+    "url": "https://arxiv.org/abs/2309.15217",
+    "abstract": "We introduce Ragas (Retrieval Augmented Generation Assessment), a framework for reference-free evaluation of Retrieval Augmented Generation (RAG) pipelines. RAG systems are composed of a retrieval and an LLM based generation module, and provide LLMs with knowledge from a reference textual database, which enables them to act as a natural language layer between a user and textual databases, reducing the risk of hallucinations. Evaluating RAG architectures is, however, challenging because there are…",
+    "source": "arxiv"
+   }
+  },
+  "label": "drop",
+  "labelled_by": "person (made up)",
+  "why": "a near title by invented authors on a real id"
+ }
+]

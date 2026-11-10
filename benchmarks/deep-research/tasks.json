@@ -1,0 +1,29 @@
+[
+ {
+  "id": "academic-rag",
+  "kind": "academic",
+  "question": "How do retrieval-augmented language models reduce hallucination, and what are the limits?",
+  "key_papers": [
+   "2005.11401",
+   "2401.00396"
+  ]
+ },
+ {
+  "id": "technical-python-apis",
+  "kind": "technical",
+  "question": "FastAPI vs Litestar vs Django Ninja for a small Python REST API: performance, maturity and ecosystem",
+  "key_papers": []
+ },
+ {
+  "id": "market-ai-coding",
+  "kind": "market",
+  "question": "How big is the AI coding assistant market in 2026, and who are the main players?",
+  "key_papers": []
+ },
+ {
+  "id": "fact-python-version",
+  "kind": "fact",
+  "question": "What is the latest stable Python version and when was it released? --depth quick",
+  "key_papers": []
+ }
+]

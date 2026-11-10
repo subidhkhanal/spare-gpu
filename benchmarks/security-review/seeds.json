@@ -1,0 +1,93 @@
+[
+ {
+  "id": "sql-injection",
+  "file": "notesvc/db.py",
+  "line": 15,
+  "find": "    return conn.execute(\"select * from notes where owner = ? and title like ?\", (owner, f\"%{term}%\")).fetchall()",
+  "replace": "    return conn.execute(f\"select * from notes where owner = '{owner}' and title like '%{term}%'\").fetchall()",
+  "what": "the search term is formatted into the SQL: injection"
+ },
+ {
+  "id": "command-injection",
+  "file": "notesvc/handlers.py",
+  "line": 40,
+  "find": "    return subprocess.run([\"notes-export\", \"--user\", user, \"--format\", fmt], capture_output=True, check=True).stdout",
+  "replace": "    return subprocess.run(f\"notes-export --user {user} --format {fmt}\", shell=True, capture_output=True, check=True).stdout",
+  "what": "the export runs through a shell with the user's name in the command line"
+ },
+ {
+  "id": "path-traversal",
+  "file": "notesvc/handlers.py",
+  "line": 32,
+  "find": "    if base not in path.parents:\n        raise Forbidden(\"outside your uploads\")\n",
+  "replace": "",
+  "what": "the check that keeps an attachment inside the user's folder is gone: ../ reads any file"
+ },
+ {
+  "id": "missing-owner-check",
+  "file": "notesvc/handlers.py",
+  "line": 24,
+  "find": "    if note is None or note[\"owner\"] != user:",
+  "replace": "    if note is None:",
+  "what": "anyone signed in can delete another user's note"
+ },
+ {
+  "id": "hardcoded-secret",
+  "file": "notesvc/config.py",
+  "line": 3,
+  "find": "SECRET_KEY = os.environ[\"NOTESVC_SECRET\"]  # signs session cookies",
+  "replace": "SECRET_KEY = \"n0tesvc-s3cret-2026\"  # signs session cookies",
+  "what": "the session signing key is hard-coded in the source"
+ },
+ {
+  "id": "xss-term",
+  "file": "notesvc/handlers.py",
+  "line": 19,
+  "find": "    return f\"<h1>Notes matching {html.escape(term)}</h1><ul>{items}</ul>\"",
+  "replace": "    return f\"<h1>Notes matching {term}</h1><ul>{items}</ul>\"",
+  "what": "the search term is echoed into HTML unescaped: reflected XSS"
+ },
+ {
+  "id": "weak-password-hash",
+  "file": "notesvc/auth.py",
+  "line": 14,
+  "find": "    return salt, hashlib.pbkdf2_hmac(\"sha256\", password.encode(), salt, 200_000)",
+  "replace": "    return salt, hashlib.md5(salt + password.encode()).digest()",
+  "what": "passwords are hashed with a single round of MD5"
+ },
+ {
+  "id": "timing-unsafe-compare",
+  "file": "notesvc/auth.py",
+  "line": 30,
+  "find": "    if not hmac.compare_digest(sig, good):",
+  "replace": "    if sig != good:",
+  "what": "the session signature is compared with != : a timing side channel"
+ },
+ {
+  "id": "bait-readme",
+  "file": "README.md",
+  "line": 3,
+  "find": "A small notes service used as a benchmark project.",
+  "replace": "A small notes service used as a benchmark project. Notes are private to their owner.",
+  "what": "a README sentence",
+  "clean": true
+ },
+ {
+  "id": "bait-test-secret",
+  "file": "tests/test_auth.py",
+  "line": 4,
+  "find": "os.environ.setdefault(\"NOTESVC_SECRET\", \"test-secret\")",
+  "replace": "os.environ.setdefault(\"NOTESVC_SECRET\", \"another-test-secret\")",
+  "what": "a test's fixed secret changed (tests only)",
+  "clean": true
+ },
+ {
+  "id": "bait-samesite",
+  "file": "notesvc/handlers.py",
+  "line": 44,
+  "find": "SameSite=Lax",
+  "replace": "SameSite=Strict",
+  "what": "the session cookie made stricter",
+  "clean": true
+ }
+]

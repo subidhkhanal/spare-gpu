@@ -1,0 +1,84 @@
+[
+ {
+  "id": "tier-boundary",
+  "file": "shopcart/pricing.py",
+  "line": 15,
+  "find": "        if total >= threshold:",
+  "replace": "        if total > threshold:",
+  "what": "an order exactly at a tier's threshold no longer gets its discount (>= became >)"
+ },
+ {
+  "id": "round-truncates",
+  "file": "shopcart/pricing.py",
+  "line": 9,
+  "find": "    return int(amount + 0.5)",
+  "replace": "    return int(amount)",
+  "what": "round_money truncates instead of rounding half up"
+ },
+ {
+  "id": "discount-args-swapped",
+  "file": "shopcart/cart.py",
+  "line": 45,
+  "find": "        return with_tax(apply_discount(subtotal, tier_discount(subtotal)))",
+  "replace": "        return with_tax(apply_discount(tier_discount(subtotal), subtotal))",
+  "what": "apply_discount's arguments are swapped: the rate is passed as the total"
+ },
+ {
+  "id": "remove-wrong-line",
+  "file": "shopcart/cart.py",
+  "line": 35,
+  "find": "                del self.lines[i]\n",
+  "replace": "                del self.lines[i - 1]\n",
+  "what": "remove deletes the line before the matching one (and the last line for the first)"
+ },
+ {
+  "id": "release-subtracts",
+  "file": "shopcart/inventory.py",
+  "line": 27,
+  "find": "        self.stock[sku] = self.stock.get(sku, 0) + quantity",
+  "replace": "        self.stock[sku] = self.stock.get(sku, 0) - quantity",
+  "what": "release takes stock away instead of putting it back"
+ },
+ {
+  "id": "reserve-allows-oversell",
+  "file": "shopcart/inventory.py",
+  "line": 22,
+  "find": "        if quantity > available:",
+  "replace": "        if quantity > available + 1:",
+  "what": "reserve lets an order take one more than is in stock, leaving stock at -1"
+ },
+ {
+  "id": "greeting-no-none-check",
+  "file": "shopcart/customers.py",
+  "line": 28,
+  "find": "    customer = find_customer(customers, customer_id)\n    if customer is None:\n        return \"Hello!\"\n",
+  "replace": "    customer = find_customer(customers, customer_id)\n",
+  "what": "greeting no longer handles an unknown customer: None.name raises"
+ },
+ {
+  "id": "load-leaks-file",
+  "file": "shopcart/inventory.py",
+  "line": 17,
+  "find": "        with open(path, encoding=\"utf-8\") as fh:\n            return cls(json.load(fh))",
+  "replace": "        fh = open(path, encoding=\"utf-8\")\n        return cls(json.load(fh))",
+  "what": "load opens the stock file and never closes it"
+ },
+ {
+  "id": "clean-docstring",
+  "file": "shopcart/cart.py",
+  "line": 43,
+  "find": "        \"\"\"Subtotal, less the tier discount, plus tax.\"\"\"",
+  "replace": "        \"\"\"The amount to charge: the subtotal, less the tier discount, plus tax.\"\"\"",
+  "what": "a docstring reworded",
+  "clean": true
+ },
+ {
+  "id": "clean-rename",
+  "file": "shopcart/customers.py",
+  "line": 21,
+  "find": "    for customer in customers:\n        if customer.id == customer_id:\n            return customer",
+  "replace": "    for candidate in customers:\n        if candidate.id == customer_id:\n            return candidate",
+  "what": "a loop variable renamed",
+  "clean": true
+ }
+]

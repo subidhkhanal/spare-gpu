@@ -1,0 +1,43 @@
+{
+  "target": "collect-sources",
+  "label": "current",
+  "value": 1.0,
+  "tasks": [
+    {
+      "id": "run1",
+      "score": 1.0,
+      "entries_read": 46,
+      "entries": 46,
+      "sources": 39,
+      "expected_sources": 39,
+      "merge_f1": 1.0,
+      "missed_merges": [],
+      "wrong_merges": []
+    },
+    {
+      "id": "run2",
+      "score": 1.0,
+      "entries_read": 57,
+      "entries": 57,
+      "sources": 52,
+      "expected_sources": 52,
+      "merge_f1": 1.0,
+      "missed_merges": [],
+      "wrong_merges": []
+    },
+    {
+      "id": "run3",
+      "score": 1.0,
+      "entries_read": 38,
+      "entries": 38,
+      "sources": 35,
+      "expected_sources": 35,
+      "merge_f1": 1.0,
+      "missed_merges": [],
+      "wrong_merges": []
+    }
+  ],
+  "detail": {
+    "runs": 3
+  }
+}

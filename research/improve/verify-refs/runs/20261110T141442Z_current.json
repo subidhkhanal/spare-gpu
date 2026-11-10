@@ -1,0 +1,1140 @@
+{
+  "target": "verify-refs",
+  "label": "current",
+  "value": 0.9751552795031055,
+  "tasks": [
+    {
+      "id": "rag-hallucination-run1/lewis2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/gao2023survey",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/wang2024survey",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/zhou2024trust",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/asai2023selfrag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/rowen2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/ayala2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/freshllms-2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/ragtruth-2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/selfrag-2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/factscore-2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/vectara-lb",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run1/vectara-paper-2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/citfaith-ictir-2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/faithbench-2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/liu2024lost",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/liu2024raglc",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/yoran2024irrelevant",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/amiraz2025distracting",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/chaudhari2024phantom",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/hong2025contextrot",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run1/zhang2026stablerag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/wang2024astute",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the registry asked us to slow down (HTTP 429) every time"
+    },
+    {
+      "id": "rag-hallucination-run1/cheng2024echoqa",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/yu2026fides",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/flare",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/crag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/sevenfailures",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/longrag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/chunksize",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/finetune-rag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/ragas2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/ares2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/zheng2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/magesh2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/sainz2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/ragcache2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/carrot2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/stolfo2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run1/nuggetindex2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/lewis2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/shuster2021",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/haleval2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragtruth24",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves; the title was shortened and is corrected from the registry"
+    },
+    {
+      "id": "rag-hallucination-run2/ragtruth-benchlm",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/ragtruth-repo",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/abouela2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/selfrag2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragtruth2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/barnett2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhang2025",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the site answered HTTP 403 (refused or busy), which says nothing about whether the page exists"
+    },
+    {
+      "id": "rag-hallucination-run2/ragec2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragec-arxiv",
+      "score": 0.0,
+      "label": "keep",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Classifying and Addressing the Diversity of Errors in Retrieval-Augmented Generation Systems'"
+    },
+    {
+      "id": "rag-hallucination-run2/zhao2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/garani2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhang2023-siren",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/crag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/robust-ralms",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/clash-eval",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/erag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/drag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragtruth",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/tamper",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragstress",
+      "score": 0.0,
+      "label": "keep",
+      "got": "drop",
+      "reason": "the id resolves to other authors: Shiqi Yang, Jiekai Ma, Gaoyuan Du"
+    },
+    {
+      "id": "rag-hallucination-run2/goyal2024groundedness",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhao2024wild",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/bell2026medical",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the registry asked us to slow down (HTTP 429) every time"
+    },
+    {
+      "id": "rag-hallucination-run2/wu2024clash",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/xie2024irrelevant",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/levy2025moredocs",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ceur2025rethinking",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the URL is a PDF whose text can't be read here"
+    },
+    {
+      "id": "rag-hallucination-run2/anon2026ink",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/liu2024lost",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.18653/v1/2024.tacl-1.9"
+    },
+    {
+      "id": "rag-hallucination-run2/yoran2024robust",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhou2025doknow",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/grabrag2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhang2026sufficiency",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/rajapakse2026rsrr",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/wallat2024correctness",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the registry asked us to slow down (HTTP 429) every time"
+    },
+    {
+      "id": "rag-hallucination-run2/pham2026copying",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the registry asked us to slow down (HTTP 429) every time"
+    },
+    {
+      "id": "rag-hallucination-run2/ctxconflict2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "the URL answers and carries the title"
+    },
+    {
+      "id": "rag-hallucination-run2/chen2022conflicts",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/kortukov2024real",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ragas",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/vectara-faithjudge",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/malin2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/ding2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/selfrag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/grab-rag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/reasons2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and the title matches; the authors were wrong and are corrected from the registry: Deepa Tilwani, Yash Saxena, Seyedali Mohammadi, Ankur Padia"
+    },
+    {
+      "id": "rag-hallucination-run2/magesh2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/das2026",
+      "score": 1.0,
+      "label": "unchecked",
+      "got": "unchecked",
+      "reason": "couldn't check it: the registry asked us to slow down (HTTP 429) every time"
+    },
+    {
+      "id": "rag-hallucination-run2/penalty2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/guu2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/gao2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/zhou2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/izacard2021",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/petroni2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination-run2/atlas2022",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/shuster2021",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/wang2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/mallen2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/gao2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/xiong2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/xiong2024-mrag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/cuconasu2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/zhang2025-raguard",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/ragged2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/bioasq-strategy2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/ragtruth2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/tamber2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/rowen2024",
+      "score": 0.0,
+      "label": "keep",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Rowen: Adaptive Retrieval-Augmented Generation for Hallucination Mitigation in LLMs'"
+    },
+    {
+      "id": "rag-hallucination/cot-rag2025",
+      "score": 0.0,
+      "label": "keep",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Improving the Reliability of LLMs: Combining CoT, RAG, Self-Consistency, and Self-Verification'"
+    },
+    {
+      "id": "rag-hallucination/iti2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/roy2024-noise",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/filco2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/rgb-bench",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/liu2024lost",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/astute",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/wang2023kconflict",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/cdd2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/hsieh2024found",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/admassu2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/multihop-rag",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/magic",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/factscore",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/canary",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/position-medical",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/ragged-edges",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/retrieval-helps-or-hurts",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/li2025capability",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/alansari2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/zhao2026",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/huang2023survey",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/ji2023",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/maynez2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/farquhar2024",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/lewis2020",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "rag-hallucination/huang-rhio2025",
+      "score": 1.0,
+      "label": "keep",
+      "got": "keep",
+      "reason": "resolves and matches"
+    },
+    {
+      "id": "synthetic/wrong-id-0",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Correctness is not Faithfulness in Retrieval Augmented Generation Attributions'"
+    },
+    {
+      "id": "synthetic/wrong-id-1",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Attribution Techniques for Mitigating Hallucinated Information in RAG Systems: A Survey'"
+    },
+    {
+      "id": "synthetic/wrong-id-2",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'REALM: Retrieval-Augmented Language Model Pre-Training'"
+    },
+    {
+      "id": "synthetic/wrong-id-3",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'FreshLLMs: Refreshing Large Language Models with Search Engine Augmentation'"
+    },
+    {
+      "id": "synthetic/wrong-id-4",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Detecting hallucinations in large language models using semantic entropy'"
+    },
+    {
+      "id": "synthetic/wrong-id-5",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Studying Large Language Model Behaviors Under Context-Memory Conflicts With Real Documents'"
+    },
+    {
+      "id": "synthetic/wrong-id-6",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Finetune-RAG: Fine-Tuning Language Models to Resist Hallucination in Retrieval-Augmented Generation'"
+    },
+    {
+      "id": "synthetic/wrong-id-7",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to a different title: 'Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection'"
+    },
+    {
+      "id": "synthetic/made-up-doi-0",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.1145/3655642.0"
+    },
+    {
+      "id": "synthetic/made-up-doi-1",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.48550/fake.2401.17747"
+    },
+    {
+      "id": "synthetic/made-up-doi-2",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.1145/3674115.2"
+    },
+    {
+      "id": "synthetic/made-up-doi-3",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.48550/fake.2403.26226"
+    },
+    {
+      "id": "synthetic/made-up-doi-4",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.1145/3629260.4"
+    },
+    {
+      "id": "synthetic/made-up-doi-5",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "no registry has DOI 10.48550/fake.2405.92657"
+    },
+    {
+      "id": "synthetic/dead-page-0",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the URL answered HTTP 404"
+    },
+    {
+      "id": "synthetic/dead-page-1",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the URL answered HTTP 404"
+    },
+    {
+      "id": "synthetic/dead-page-2",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the URL answered HTTP 404"
+    },
+    {
+      "id": "synthetic/dead-page-3",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the URL answered HTTP 404"
+    },
+    {
+      "id": "synthetic/other-authors-0",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to other authors: Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasupat"
+    },
+    {
+      "id": "synthetic/other-authors-1",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to other authors: Kevin Wu, Eric Wu, James Zou"
+    },
+    {
+      "id": "synthetic/other-authors-2",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to other authors: Orlando Ayala, Patrice Bechard"
+    },
+    {
+      "id": "synthetic/other-authors-3",
+      "score": 1.0,
+      "label": "drop",
+      "got": "drop",
+      "reason": "the id resolves to other authors: Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert"
+    }
+  ],
+  "detail": {
+    "references": 161,
+    "real_dropped": 4,
+    "bad_kept": 0,
+    "other_wrong": 0
+  }
+}

@@ -1,0 +1,23 @@
+[
+ {
+  "id": "normalize",
+  "file": "textkit/normalize.py",
+  "what": "duplicated character filtering, string building in loops, if/else returning booleans"
+ },
+ {
+  "id": "counts",
+  "file": "textkit/counts.py",
+  "what": "hand-written counting and top-n (Counter, sorted, slicing), a total that re-counts"
+ },
+ {
+  "id": "report",
+  "file": "textkit/report.py",
+  "what": "a dead `if False` branch, a no-op else, the counts computed three times"
+ },
+ {
+  "id": "slug-clean",
+  "file": "textkit/slug.py",
+  "clean": true,
+  "what": "already clean: nothing to do"
+ }
+]

@@ -1,0 +1,13 @@
+{
+ "rag-hallucination-run2/ragtruth2024": "keep",
+ "rag-hallucination-run2/zhang2025": "unchecked",
+ "rag-hallucination-run2/ragec-arxiv": "keep",
+ "rag-hallucination-run2/ragstress": "keep",
+ "rag-hallucination-run2/ceur2025rethinking": "unchecked",
+ "rag-hallucination-run2/liu2024lost": "drop",
+ "rag-hallucination-run2/reasons2024": "keep",
+ "rag-hallucination-run2/ragtruth24": "keep",
+ "rag-hallucination/rowen2024": "keep",
+ "rag-hallucination/cot-rag2025": "keep",
+ "rag-hallucination-run2/tamper": "keep"
+}
