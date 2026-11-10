@@ -5,6 +5,7 @@ import pytest
 from gpu_token_utilization import landing
 from gpu_token_utilization.agent import BusyError
 from gpu_token_utilization.fakedesktop import FakeClock, Step
+from gpu_token_utilization.jobs import run_agent
 from gpu_token_utilization.scheduler import DEFAULT_PLANS, Scheduler
 
 
@@ -21,12 +22,12 @@ def counting_plan(names, calls, crash_on=None, busy=None):
             if busy and busy.get(name):
                 busy[name] -= 1
                 raise BusyError("BharatCode Desktop did not finish within 60 s")
-            ctx.chat([{"role": "user", "content": name}])
+            run_agent(ctx, name, edit=False, commands=())
             return f"{name} output"
 
         return step
 
-    return {kind: [(n, make(n)) for n in names] for kind in ("tests", "docs", "review")}
+    return {"fix": [(n, make(n)) for n in names]}
 
 
 def make_scheduler(store, desktop_fake, clock, plans, isolate=False, agent=None, **kwargs):
@@ -37,13 +38,17 @@ def make_scheduler(store, desktop_fake, clock, plans, isolate=False, agent=None,
 def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinning(desktop_fake, clock, store, job_repo):
     from gpu_token_utilization.budget import BudgetExceeded
 
-    def too_big(ctx):
-        raise BudgetExceeded("not enough token budget left for the review")  # as review() says before sending
-
-    job = store.add_job("review", "big.py", job_repo)
-    other = store.add_job("docs", "a.py", job_repo)
+    job = store.add_job("fix", "big.py", job_repo)
+    other = store.add_job("fix", "a.py", job_repo)
     calls, logs = [], []
-    plans = {**counting_plan(["one"], calls), "review": [("review", too_big)]}  # the review step is the one that can't fit
+    (_, counted), = counting_plan(["one"], calls)["fix"]
+
+    def one(ctx):
+        if ctx.job.id == job.id:  # this job's step is the one that can't fit
+            raise BudgetExceeded("not enough token budget left for the step")
+        return counted(ctx)
+
+    plans = {"fix": [("one", one)]}
     scheduler = make_scheduler(store, desktop_fake, clock, plans, log=logs.append)
     assert scheduler.run_job(job.id) == "paused"
     assert store.get_job(job.id).status == "paused" and store.get_job(other.id).status == "queued"
@@ -55,13 +60,17 @@ def test_a_step_that_cannot_fit_the_budget_pauses_the_job_once_instead_of_spinni
 def test_anything_else_that_breaks_a_step_fails_that_job_and_the_next_still_runs(desktop_fake, clock, store, job_repo):
     import xml.etree.ElementTree as ET
 
-    def broken(ctx):
-        raise ET.ParseError("junit.xml: no element found")  # a truncated report after a killed pytest
-
-    job = store.add_job("tests", "a.py", job_repo)
-    other = store.add_job("docs", "b.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
+    other = store.add_job("fix", "b.py", job_repo)
     calls, logs = [], []
-    plans = {"tests": [("write", broken)], "docs": counting_plan(["one"], calls)["docs"]}
+    (_, counted), = counting_plan(["one"], calls)["fix"]
+
+    def write(ctx):
+        if ctx.job.id == job.id:
+            raise ET.ParseError("junit.xml: no element found")  # an error no step expects
+        return counted(ctx)
+
+    plans = {"fix": [("write", write)]}
     scheduler = make_scheduler(store, desktop_fake, clock, plans, log=logs.append)
     assert scheduler.run_job(job.id) == "failed"
     assert store.steps(job.id)[0]["output"] == "ParseError: junit.xml: no element found"
@@ -71,7 +80,7 @@ def test_anything_else_that_breaks_a_step_fails_that_job_and_the_next_still_runs
 
 def test_a_session_that_times_out_is_waited_out_and_the_step_tried_again_waiting_longer_each_time(
         desktop_fake, clock, store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     # The first two sessions never finish in time (100 polls of 2 s against a 5 s timeout); the rest answer.
     desktop_fake.calls = [[Step(polls=100)], [Step(polls=100)], [Step(text="done")]]
     session_clock = FakeClock()
@@ -89,7 +98,7 @@ def test_a_session_that_times_out_is_waited_out_and_the_step_tried_again_waiting
 
 
 def test_killed_mid_job_resumes_without_repeating_finished_steps(desktop_fake, clock, store, job_repo):
-    job = store.add_job("docs", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     calls = []
     plans = counting_plan(["one", "two", "three"], calls, crash_on={"two": 1})
     with pytest.raises(KeyboardInterrupt):
@@ -104,7 +113,7 @@ def test_killed_mid_job_resumes_without_repeating_finished_steps(desktop_fake, c
 
 
 def test_the_busy_wait_starts_over_once_a_step_gets_through(desktop_fake, clock, store, job_repo):
-    job = store.add_job("review", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     calls = []
     scheduler = make_scheduler(store, desktop_fake, clock, counting_plan(["one", "two"], calls, busy={"one": 1}))
     assert scheduler.run_job(job.id) == "done"
@@ -113,7 +122,7 @@ def test_the_busy_wait_starts_over_once_a_step_gets_through(desktop_fake, clock,
 
 
 def test_cancelled_job_stops_between_steps(desktop_fake, clock, store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     calls = []
 
     def cancel_self(ctx):
@@ -147,7 +156,7 @@ def writing_plan(names, calls, crash_on=None):
 
         return step
 
-    return {kind: [(n, make(n)) for n in names] for kind in ("tests", "docs", "review")}
+    return {"fix": [(n, make(n)) for n in names]}
 
 
 def result_files(store, job_id):
@@ -159,7 +168,7 @@ def result_files(store, job_id):
 
 def test_job_works_on_its_own_copy_and_never_touches_main(desktop_fake, clock, store, git_repo):
     main_head = git(git_repo, "rev-parse", "main")
-    job = store.add_job("docs", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", "src/calc.py", str(git_repo))
     plans = writing_plan(["one", "two"], [])
     make_scheduler(store, desktop_fake, clock, plans, isolate=True).run_job(job.id)
 
@@ -179,7 +188,7 @@ def test_job_works_on_its_own_copy_and_never_touches_main(desktop_fake, clock, s
 
 
 def test_crash_mid_step_discards_partial_edits_and_resumes(desktop_fake, clock, store, git_repo):
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", "src/calc.py", str(git_repo))
     calls = []
     plans = writing_plan(["one", "two", "three"], calls, crash_on={"two": 1})
     with pytest.raises(KeyboardInterrupt):
@@ -193,7 +202,7 @@ def test_crash_mid_step_discards_partial_edits_and_resumes(desktop_fake, clock, 
 
 
 def test_unsaved_changes_are_what_the_job_starts_from(desktop_fake, clock, store, git_repo):
-    job = store.add_job("docs", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", "src/calc.py", str(git_repo))
     (git_repo / "src" / "calc.py").write_text("edited but not committed\n")
     seen = []
 
@@ -201,21 +210,21 @@ def test_unsaved_changes_are_what_the_job_starts_from(desktop_fake, clock, store
         seen.append((ctx.workdir / "src" / "calc.py").read_text())
         return "ok"
 
-    plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
+    plans = {"fix": [("write", step)]}
     make_scheduler(store, desktop_fake, clock, plans, isolate=True).run_job(job.id)
     assert store.get_job(job.id).status == "done" and seen == ["edited but not committed\n"]
     assert (git_repo / "src" / "calc.py").read_text() == "edited but not committed\n"  # still the user's
 
 
 def test_opencode_config_is_never_committed(desktop_fake, clock, store, git_repo):
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", "src/calc.py", str(git_repo))
 
     def step(ctx):
         (ctx.workdir / "opencode.json").write_text('{"permission": {}}')
         (ctx.workdir / "test_calc.py").write_text("def test_ok():\n    assert True\n")
         return "ok"
 
-    plans = {k: [("write", step)] for k in ("tests", "docs", "review")}
+    plans = {"fix": [("write", step)]}
     make_scheduler(store, desktop_fake, clock, plans, isolate=True).run_job(job.id)
     assert result_files(store, job.id) == {"test_calc.py"}  # never opencode.json
 
@@ -223,8 +232,8 @@ def test_opencode_config_is_never_committed(desktop_fake, clock, store, git_repo
 # --- run_job: one job, in front of whoever asked -------------------------------------------
 
 def test_run_job_runs_only_that_job_to_the_end_and_leaves_the_rest_queued(desktop_fake, clock, store, job_repo):
-    mine = store.add_job("docs", "a.py", job_repo)
-    other = store.add_job("review", "b.py", job_repo)
+    mine = store.add_job("fix", "a.py", job_repo)
+    other = store.add_job("fix", "b.py", job_repo)
     calls = []
     scheduler = make_scheduler(store, desktop_fake, clock, counting_plan(["one", "two"], calls))
     assert scheduler.run_job(mine.id) == "done"
@@ -233,7 +242,7 @@ def test_run_job_runs_only_that_job_to_the_end_and_leaves_the_rest_queued(deskto
 
 
 def test_run_job_waits_out_busy_answers_and_reports_a_failed_step(desktop_fake, clock, store, job_repo):
-    job = store.add_job("review", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     calls, logs = [], []
     scheduler = make_scheduler(store, desktop_fake, clock, counting_plan(["one"], calls, busy={"one": 1}),
                                log=logs.append)
@@ -242,8 +251,8 @@ def test_run_job_waits_out_busy_answers_and_reports_a_failed_step(desktop_fake, 
     def broken(ctx):
         raise ValueError("no element found")
 
-    failing = store.add_job("docs", "b.py", job_repo)
-    assert make_scheduler(store, desktop_fake, clock, {"docs": [("write", broken)]}).run_job(failing.id) == "failed"
+    failing = store.add_job("fix", "b.py", job_repo)
+    assert make_scheduler(store, desktop_fake, clock, {"fix": [("write", broken)]}).run_job(failing.id) == "failed"
     assert store.steps(failing.id)[0]["output"] == "ValueError: no element found"
 
 
@@ -252,7 +261,7 @@ def test_run_job_pauses_when_the_budget_is_used_up(desktop_fake, clock, store, j
     from gpu_token_utilization.scheduler import AGENT_ENDPOINT
     from gpu_token_utilization.store import RequestLog
 
-    job = store.add_job("review", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     store.log_request(RequestLog(endpoint=AGENT_ENDPOINT, attempt=1, total_tokens=500, job_id=job.id))
     calls, logs = [], []
     scheduler = make_scheduler(store, desktop_fake, clock, counting_plan(["one"], calls), budgets=Budgets(per_job=400),
@@ -263,7 +272,7 @@ def test_run_job_pauses_when_the_budget_is_used_up(desktop_fake, clock, store, j
 
 
 def test_run_job_ends_a_job_cancelled_while_it_runs(desktop_fake, clock, store, job_repo):
-    job = store.add_job("docs", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     calls = []
 
     def first(ctx):
@@ -271,7 +280,7 @@ def test_run_job_ends_a_job_cancelled_while_it_runs(desktop_fake, clock, store, 
         ctx.store.cancel_job(ctx.job.id)  # spare_cancel_work arrives while the first step runs
         return "one"
 
-    plans = {"docs": [("one", first), ("two", lambda ctx: calls.append("two") or "two")]}
+    plans = {"fix": [("one", first), ("two", lambda ctx: calls.append("two") or "two")]}
     scheduler = make_scheduler(store, desktop_fake, clock, plans,
                                should_stop=lambda: store.get_job(job.id).status == "cancelled")
     assert scheduler.run_job(job.id) == "cancelled" and calls == ["one"]
@@ -279,15 +288,27 @@ def test_run_job_ends_a_job_cancelled_while_it_runs(desktop_fake, clock, store, 
 
 
 def test_run_job_stopped_between_steps_leaves_the_job_paused_and_resumable(desktop_fake, clock, store, job_repo):
-    job = store.add_job("docs", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     asked = {"stop": False}
 
     def first(ctx):
         asked["stop"] = True  # a stop arrives while the first step runs
         return "one"
 
-    plans = {"docs": [("one", first), ("two", lambda ctx: "two")]}
+    plans = {"fix": [("one", first), ("two", lambda ctx: "two")]}
     scheduler = make_scheduler(store, desktop_fake, clock, plans, should_stop=lambda: asked["stop"])
     assert scheduler.run_job(job.id) == "paused" and scheduler.stopped
     assert [s["status"] for s in store.steps(job.id)] == ["done", "pending"]  # resumable
     assert make_scheduler(store, desktop_fake, clock, plans).run_job(job.id) == "done"
+
+
+def test_a_job_of_a_kind_that_is_gone_fails_cleanly(desktop_fake, clock, store, job_repo):
+    # an older version queued a docs job; that kind has no steps any more
+    store.conn.execute("INSERT INTO jobs (id, kind, target, repo, created_at, updated_at) VALUES "
+                       "('old00001', 'docs', 'a.py', ?, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+                       (job_repo,))
+    store.conn.commit()
+    logs = []
+    assert make_scheduler(store, desktop_fake, clock, DEFAULT_PLANS, log=logs.append).run_job("old00001") == "failed"
+    assert store.get_job("old00001").status == "failed" and store.steps("old00001") == []
+    assert "Job old00001: docs jobs are no longer supported." in logs

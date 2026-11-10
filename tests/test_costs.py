@@ -17,19 +17,19 @@ def step(store, job, prompt, output, sent_at=None):
 
 
 def test_totals_per_job_and_overall(store, job_repo):
-    tests = store.add_job("tests", "a.py", job_repo)
-    review = store.add_job("review", "b.py", job_repo)
-    step(store, tests, 8_000, 500)
-    step(store, tests, 8_500, 300)
-    step(store, review, 3_000, 700)
+    first = store.add_job("fix", "a.py", job_repo)
+    second = store.add_job("fix", "b.py", job_repo)
+    step(store, first, 8_000, 500)
+    step(store, first, 8_500, 300)
+    step(store, second, 3_000, 700)
     cost, label = costs.collect(store, "all")
     assert label == "all time" and cost.total == 21_000
-    assert cost.jobs[tests.id].total == 17_300 and cost.jobs[tests.id].requests == 2
-    assert cost.jobs[review.id].completion == 700
+    assert cost.jobs[first.id].total == 17_300 and cost.jobs[first.id].requests == 2
+    assert cost.jobs[second.id].completion == 700
 
 
 def test_scope_by_hours_and_by_job(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     now = datetime.now(timezone.utc)
     step(store, job, 1_000, 0, sent_at=(now - timedelta(hours=30)).isoformat())
     step(store, job, 2_000, 0, sent_at=(now - timedelta(hours=1)).isoformat())
@@ -42,7 +42,7 @@ def test_scope_by_hours_and_by_job(store, job_repo):
 def test_an_all_digit_job_id_is_the_job_not_a_number_of_hours(store, job_repo, monkeypatch):
     # seen in CI on 5 Nov: job 16170455 was read as "the last 1.61705e+07 hours"
     monkeypatch.setattr("gpu_token_utilization.store.secrets.token_hex", lambda n: "16170455")
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     step(store, job, 1_000, 0)
     cost, label = costs.collect(store, "16170455")
     assert cost.total == 1_000 and label.startswith("job 16170455")
@@ -83,11 +83,11 @@ def finished(store, repo, kind, target, status, tokens, verify=None, when=None):
 
 def test_period_combines_the_model_figures_with_the_jobs(store, job_repo):
     now = datetime.now(timezone.utc)
-    a = finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 3 passing test(s), dropped 1.")
-    b = finished(store, job_repo, "docs", "README.md", "done", 15_000, verify="Kept documentation changes in 0 file(s).")
-    c = finished(store, job_repo, "review", "src/r.py", "failed", 10_000)
+    a = finished(store, job_repo, "fix", "src/pay.py", "done", 20_000, verify="Kept the fix in 3 file(s): the test command passed.")
+    b = finished(store, job_repo, "fix", "README.md", "done", 15_000, verify="Kept the fix in 0 file(s): the test command failed with it.")
+    c = finished(store, job_repo, "fix", "src/r.py", "failed", 10_000)
     d = finished(store, job_repo, "fix", "src/f.py", "cancelled", 500)
-    old = finished(store, job_repo, "tests", "old.py", "done", 99_000, verify="Kept 1 passing test(s), dropped 0.",
+    old = finished(store, job_repo, "fix", "old.py", "done", 99_000, verify="Kept the fix in 3 file(s): the test command passed.",
                    when=(now - timedelta(days=3)).isoformat(timespec="seconds"))
     period = costs.period(store, days=1, now=now, usage=USAGE)
     assert period.ran == 4 and period.count("done") == 2 and period.count("failed") == 1 and period.count("cancelled") == 1
@@ -103,15 +103,15 @@ def test_period_combines_the_model_figures_with_the_jobs(store, job_repo):
                     ("DeepSeek V4.1 Flash", "12", "168,700")]
     assert "spare-gpu jobs: 4 job(s) ran (2 done, 1 failed, 1 cancelled), 45,500 tokens; 1 kept nothing after its check." in text
     assert f"{b.id}  done, kept nothing" in text and f"{c.id}  failed" in text
-    assert f"1. tests src/pay.py ({a.id}): 20,000 tokens, done" in text
-    assert f"2. docs README.md ({b.id}): 15,000 tokens, done, kept nothing" in text
+    assert f"1. fix src/pay.py ({a.id}): 20,000 tokens, done" in text
+    assert f"2. fix README.md ({b.id}): 15,000 tokens, done, kept nothing" in text
     assert old.id not in text and "\u2014" not in text
 
     short = costs.render_short(period)
     assert "\n" not in short and short.startswith("In the last 24 hours: By model (")
     assert "Qwen 3.8 27B 320,000 tokens in 30 message(s); DeepSeek V4.1 Flash 168,700 tokens in 12 message(s)." in short
     assert "spare-gpu: 4 job(s) ran (2 done, 1 failed, 1 cancelled) for 45,500 tokens, and 1 kept nothing after its check." in short
-    assert f"Most expensive: tests src/pay.py ({a.id}) 20,000 tokens, done; docs README.md ({b.id}) 15,000 tokens, done, kept nothing; " in short
+    assert f"Most expensive: fix src/pay.py ({a.id}) 20,000 tokens, done; fix README.md ({b.id}) 15,000 tokens, done, kept nothing; " in short
 
 
 def test_period_without_desktop_data_says_so_and_without_jobs_too(store):
@@ -144,7 +144,7 @@ def test_period_reads_desktops_record_from_the_start_of_the_period(store, monkey
 
 
 def test_a_running_job_with_requests_in_the_period_counts_as_ran(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     store.set_status(job.id, "running")
     step(store, job, 2_000, 0)
     period = costs.period(store, usage=None)
@@ -156,7 +156,7 @@ def test_the_cost_summary_tool(store, job_repo, monkeypatch, tmp_path):
     monkeypatch.setenv("GTU_DB", str(store.path))
     monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: USAGE)
     monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: store.path)  # any file: the figures are faked
-    finished(store, job_repo, "tests", "src/pay.py", "done", 20_000, verify="Kept 0 passing test(s), dropped 2.")
+    finished(store, job_repo, "fix", "src/pay.py", "done", 20_000, verify="Kept the fix in 0 file(s): the test command failed with it.")
     tools = SpareTools(tmp_path)
     tables = tools.cost_summary(short=False)
     assert "Tokens per model" in tables and "1 job(s) ran (1 done), 20,000 tokens; 1 kept nothing" in tables

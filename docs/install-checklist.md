@@ -34,15 +34,15 @@ small project of your own.
 1. [ ] `/doctor` in a chat answers with PASS lines for spare-gpu, Desktop's config, the MCP entry
    (and that the server starts) and the pack, and ends with "Result: PASS" (or WARN, each with
    its fix).
-2. [ ] `/auto write docs for <a file>` runs a job as a Desktop session named "spare-gpu: ...";
-   the reply says Done and names a `spare-gpu/<date>_<time>/` folder; `git status` shows nothing
-   but that folder, which ignores itself.
+2. [ ] `/simplify <a file>` lists safe cleanups and runs a fix job as a Desktop session named
+   "spare-gpu: ..."; the reply says Done and names a `spare-gpu/<date>_<time>/` folder (or that
+   nothing was kept); `git status` shows nothing but that folder, which ignores itself.
 3. [ ] `/apply --dry-run` says what it would copy and writes nothing; `/apply` copies the files in;
    `/undo` puts your files back exactly (`git status` is clean again).
 4. [ ] `/auto what does <a file> do?` reads the file and answers, naming the model and an
    "auto: ..." session; `/auto now add a comment to it` continues that session (it remembers the
    first turn) and asks for your approval there before editing.
-5. [ ] "cancel the docs job" while a job runs: the reply says it stops within a few seconds, and
+5. [ ] "cancel the fix job" while a job runs: the reply says it stops within a few seconds, and
    nothing is copied to `spare-gpu/`.
 6. [ ] `/cost` answers with tokens per model for the last 24 hours and this project's jobs.
 7. [ ] `/prompts` answers with a table of approved commands (or says there were too few) and a
@@ -54,8 +54,6 @@ small project of your own.
 
 1. [ ] Everything above also works for a project in a folder with spaces (e.g.
    `C:\Users\<you>\Documents\my project`) and a file name with spaces.
-2. [ ] A docs job on a `.py` file saved by Notepad or `Set-Content -Encoding utf8` (byte-order
-   mark, CRLF): the file in `spare-gpu\<date>_<time>\` differs from yours only by added lines.
 
 ## Record
 

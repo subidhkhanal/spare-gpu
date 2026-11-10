@@ -21,7 +21,7 @@ class BudgetExceeded(Exception):
 @dataclass
 class Budgets:
     # Each step of a job's Desktop session costs ~11k tokens (mostly BharatCode's own system prompt), so a
-    # tests or docs job typically uses 50-150k.
+    # job typically uses 50-150k.
     per_job: int = 200_000
 
     @classmethod

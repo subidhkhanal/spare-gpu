@@ -1,7 +1,7 @@
 """Benchmarks for the pack's commands (plan §8): run a command's lead as a BharatCode Desktop
 session in each setup, tally the outcome from the files it leaves, read the tokens per model from
-Desktop's own record of the replies, and decide which switchable roles are switch-safe with the
-rule scripts/eval_models.py uses for job types. scripts/eval_research.py and scripts/eval_review.py
+Desktop's own record of the replies, and decide which switchable roles are switch-safe with a
+non-inferiority rule fixed in advance. scripts/eval_research.py and scripts/eval_review.py
 are thin wrappers; everything here runs without BharatCode in the tests (a fake Desktop server,
 recorded files).
 
@@ -193,7 +193,7 @@ def bootstrap_lower(diffs: list[float], seed: int = 7, rounds: int = BOOTSTRAP) 
 
 def decide_role(pairs: list[tuple[float | None, float | None]]) -> dict:
     """pairs: (score with the heavy-model role, score with the -standard variant) per task. The
-    rule of scripts/eval_models.py: switch-safe when the 95% paired-bootstrap lower bound of
+    rule: switch-safe when the 95% paired-bootstrap lower bound of
     mean(standard - heavy) is at least -5% of the heavy mean; unmeasured when nothing scored."""
     usable = [(h, s) for h, s in pairs if h is not None and s is not None]
     if len(usable) < 2 or not any(h or s for h, s in usable):

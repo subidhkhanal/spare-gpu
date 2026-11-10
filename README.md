@@ -18,11 +18,10 @@
 
 A set of **chat commands for BharatCode Desktop**. You install it once, then do everything by typing a `/command` in any Desktop chat:
 
-- **Get work done:** coding jobs (tests, docs, fixes, "make the tests pass", "carry out this plan") on a private copy of your project, kept only if they pass their checks.
-- **Check your code:** code review (also of GitHub pull requests), security review, safe simplifications, and app checks in a real browser.
+- **Check your code:** code review (also of GitHub pull requests), security review, safe simplifications, and app checks in a real browser. Fixes run on a private copy of your project and are kept only if your tests pass.
 - **Research:** reports with sources that are checked to be real.
 - **Keep track:** project memory every chat knows, hand-offs between chats, exact token costs, fewer permission prompts, and a health check of the install.
-- **Wait less:** questions and some jobs go to whichever model starts sooner.
+- **Wait less:** `/auto` does anything a normal chat does, on whichever model starts sooner.
 
 The work is split between Desktop's two models: **DeepSeek** plans and checks, and **Qwen** does the many quick steps, several at once.
 
@@ -35,24 +34,23 @@ Windows only. It works inside BharatCode Desktop with no API key and no extra ac
 
 1. [Install](#install)
 2. [Features](#features)
-3. [Coding jobs](#1-coding-jobs)
-4. [Apply and undo](#2-apply-and-undo-apply-undo)
-5. [Code review](#3-code-review-code-review)
-6. [Security review](#4-security-review-security-review)
-7. [Deep research](#5-deep-research-deep-research)
-8. [Simplify](#6-simplify-simplify)
-9. [App check](#7-app-check-verify-app)
-10. [Memory across chats](#8-memory-across-chats-remember-handoff-pickup)
-11. [Cost](#9-cost-cost)
-12. [Fewer permission prompts](#10-fewer-permission-prompts-prompts)
-13. [Health check](#11-health-check-doctor)
-14. [Faster answers](#12-faster-answers-auto)
-15. [Settings](#settings)
-16. [Safety](#safety)
-17. [Command reference](#command-reference)
-18. [FAQ](#faq)
-19. [Where to look next](#where-to-look-next)
-20. [Remove](#remove)
+3. [Apply and undo](#1-apply-and-undo-apply-undo)
+4. [Code review](#2-code-review-code-review)
+5. [Security review](#3-security-review-security-review)
+6. [Deep research](#4-deep-research-deep-research)
+7. [Simplify](#5-simplify-simplify)
+8. [App check](#6-app-check-verify-app)
+9. [Memory across chats](#7-memory-across-chats-remember-handoff-pickup)
+10. [Cost](#8-cost-cost)
+11. [Fewer permission prompts](#9-fewer-permission-prompts-prompts)
+12. [Health check](#10-health-check-doctor)
+13. [Faster answers](#11-faster-answers-auto)
+14. [Settings](#settings)
+15. [Safety](#safety)
+16. [Command reference](#command-reference)
+17. [FAQ](#faq)
+18. [Where to look next](#where-to-look-next)
+19. [Remove](#remove)
 
 ---
 
@@ -84,53 +82,31 @@ That's all. The installer adds Python and git if they're missing, installs spare
 
 ## Features
 
-Twelve features, each a chat command. They are listed in the order a project usually meets them; none depends on another.
+Eleven features, each a chat command. They are listed in the order a project usually meets them; none depends on another.
 
 | # | Feature | Type in a chat | What you get |
 |---|---|---|---|
-| 1 | [Coding jobs](#1-coding-jobs) | `/auto write tests for src` | Tests, docs, reviews, fixes, "make the tests pass", "implement a plan", on a private copy |
-| 2 | [Apply and undo](#2-apply-and-undo-apply-undo) | `/apply`, `/undo` | A job's files copied into your project, and taken back |
-| 3 | [Code review](#3-code-review-code-review) | `/code-review`, `/code-review 42` | Bugs with evidence in your changes, a commit, a branch or a pull request |
-| 4 | [Security review](#4-security-review-security-review) | `/security-review` | High-confidence security findings, false alarms dropped |
-| 5 | [Deep research](#5-deep-research-deep-research) | `/deep-research <question>` | A report whose every source is checked to exist |
-| 6 | [Simplify](#6-simplify-simplify) | `/simplify src` | Cleanups that keep behaviour, kept only if your tests pass |
-| 7 | [App check](#7-app-check-verify-app) | `/verify-app <url> <what>` | Your running app checked in a real browser |
-| 8 | [Memory](#8-memory-across-chats-remember-handoff-pickup) | `/remember`, `/handoff`, `/pickup` | Notes every chat knows; work passed to a new chat |
-| 9 | [Cost](#9-cost-cost) | `/cost` | Exact tokens per model, and what each job used |
-| 10 | [Fewer prompts](#10-fewer-permission-prompts-prompts) | `/prompts` | Allow rules for commands you keep approving |
-| 11 | [Health check](#11-health-check-doctor) | `/doctor` | Every problem in the install, with its fix |
-| 12 | [Faster answers](#12-faster-answers-auto) | `/auto <anything>` | A normal BharatCode chat, on whichever model starts sooner |
+| 1 | [Apply and undo](#1-apply-and-undo-apply-undo) | `/apply`, `/undo` | A fix job's files copied into your project, and taken back |
+| 2 | [Code review](#2-code-review-code-review) | `/code-review`, `/code-review 42` | Bugs with evidence in your changes, a commit, a branch or a pull request |
+| 3 | [Security review](#3-security-review-security-review) | `/security-review` | High-confidence security findings, false alarms dropped |
+| 4 | [Deep research](#4-deep-research-deep-research) | `/deep-research <question>` | A report whose every source is checked to exist |
+| 5 | [Simplify](#5-simplify-simplify) | `/simplify src` | Cleanups that keep behaviour, kept only if your tests pass |
+| 6 | [App check](#6-app-check-verify-app) | `/verify-app <url> <what>` | Your running app checked in a real browser |
+| 7 | [Memory](#7-memory-across-chats-remember-handoff-pickup) | `/remember`, `/handoff`, `/pickup` | Notes every chat knows; work passed to a new chat |
+| 8 | [Cost](#8-cost-cost) | `/cost` | Exact tokens per model, and what each job used |
+| 9 | [Fewer prompts](#9-fewer-permission-prompts-prompts) | `/prompts` | Allow rules for commands you keep approving |
+| 10 | [Health check](#10-health-check-doctor) | `/doctor` | Every problem in the install, with its fix |
+| 11 | [Faster answers](#11-faster-answers-auto) | `/auto <anything>` | A normal BharatCode chat, on whichever model starts sooner |
 
-The bigger commands (3 to 7) split the work: DeepSeek plans and judges, several Qwen helpers read or search at the same time, and each ends with a **cost summary** of which model did what and the exact tokens used. Add `--plan` to any of them (for example `/code-review --plan`) to see the plan, how many helpers it would start and on which model, without starting anything.
+The bigger commands (2 to 6) split the work: DeepSeek plans and judges, several Qwen helpers read or search at the same time, and each ends with a **cost summary** of which model did what and the exact tokens used. Add `--plan` to any of them (for example `/code-review --plan`) to see the plan, how many helpers it would start and on which model, without starting anything.
 
 ---
 
-## 1. Coding jobs
+## 1. Apply and undo: `/apply`, `/undo`
 
-A job is a piece of coding work that runs on its own as a Desktop chat named **"spare-gpu: …"**, which you can open and watch. Every job works on a **private copy** of your project, so your own files are never touched, and its result is checked before it is kept.
-
-| Job | Ask for it | What it does | Kept only if |
-|---|---|---|---|
-| `tests` | `/auto write tests for src` | Writes new test files | the new tests pass |
-| `docs` | `/auto write docs for src` | Adds docstrings and README text | no code changed |
-| `review` | `/auto review src` | Writes a code review | (nothing to check) |
-| `fix` | `/code-review --fix` | Applies review findings | your tests still pass |
-| `green` | `/auto make the tests pass` | Changes the code until the tests pass, up to 3 tries | the tests pass, existing tests untouched |
-| `implement` | `/auto implement docs/plan.md` | Carries out a Markdown plan | your tests still pass |
-
-Plain words work too: "fix the failing tests" runs a `green` job, "implement docs/plan.md" an `implement` job, "is my tests job done?" shows what's running and finished, and "cancel the docs job" stops one within a few seconds.
+`/code-review --fix` and `/simplify` hand their changes to a **fix job**. It runs on its own as a Desktop chat named **"spare-gpu: …"**, which you can open and watch, on a **private copy** of your project, so your own files are never touched. Its result is kept only if your tests still pass, and the files it changed are copied to a dated folder in your project. Nothing else changes until you say so.
 
 <img src="docs/assets/coding-jobs.svg" alt="How a job runs: you ask in a Desktop chat; spare-gpu picks the model; the job runs as a Desktop session on a private copy; the result is checked; kept files land in spare-gpu/ for /apply" width="100%">
-
-- The job runs right away; the chat reply says **Done**, **Failed** or **Cancelled**, and where the files are.
-- spare-gpu finds how your tests run from `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` (see [Settings](#settings) to change it).
-- Each job has a token budget (200,000 by default); a job that reaches it stops instead of failing, and nothing of it is kept.
-
----
-
-## 2. Apply and undo: `/apply`, `/undo`
-
-When a job finishes, the files it changed are copied to a dated folder in your project. Nothing else changes until you say so.
 
 ```
 your-project/
@@ -152,10 +128,12 @@ your-project/
 - `/apply` only replaces a file you haven't changed since the job started. Otherwise it skips it and tells you (`/apply --force` replaces it anyway).
 - Your old version is saved first, so `/undo` restores everything exactly.
 - The `spare-gpu/` folder is ignored by git, so it never shows up as a change. You can also copy files from it by hand.
+- spare-gpu finds how your tests run from `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml` or a `Makefile` (see [Settings](#settings) to change it).
+- Each job has a token budget (200,000 by default); a job that reaches it stops instead of failing, and nothing of it is kept. "Cancel the fix job" in a chat stops one within a few seconds.
 
 ---
 
-## 3. Code review: `/code-review`
+## 2. Code review: `/code-review`
 
 Several Qwen helpers each look for one kind of bug, at the same time; DeepSeek checks every finding against the code and keeps only those with real evidence.
 
@@ -172,7 +150,7 @@ Several Qwen helpers each look for one kind of bug, at the same time; DeepSeek c
 
 ---
 
-## 4. Security review: `/security-review`
+## 3. Security review: `/security-review`
 
 A read-only security review. Five Qwen helpers each look for one kind of problem: injection, login and access, secrets, code execution, data leaks. Known false alarms are dropped by fixed rules, then DeepSeek verifies what's left.
 
@@ -187,7 +165,7 @@ A read-only security review. Five Qwen helpers each look for one kind of problem
 
 ---
 
-## 5. Deep research: `/deep-research`
+## 4. Deep research: `/deep-research`
 
 Writes a report with sources into `research/<topic>/`. Qwen scouts search research papers (OpenAlex, Crossref, arXiv) and the web at the same time; writers draft the sections; DeepSeek checks every source and removes fake or wrong ones.
 
@@ -202,7 +180,7 @@ Writes a report with sources into `research/<topic>/`. Qwen scouts search resear
 
 ---
 
-## 6. Simplify: `/simplify`
+## 5. Simplify: `/simplify`
 
 Finds cleanups that don't change behaviour (a helper that already exists used instead of a copy, a branch that can't be taken, work done twice), and applies the safe ones as a `fix` job, kept only if your tests still pass.
 
@@ -216,7 +194,7 @@ Finds cleanups that don't change behaviour (a helper that already exists used in
 
 ---
 
-## 7. App check: `/verify-app`
+## 6. App check: `/verify-app`
 
 Checks a running app in a real browser: Qwen drivers click through each check you describe at the same time, and DeepSeek judges each one pass, fail or unclear, quoting what the page showed.
 
@@ -229,7 +207,7 @@ Checks a running app in a real browser: Qwen drivers click through each check yo
 
 ---
 
-## 8. Memory across chats: `/remember`, `/handoff`, `/pickup`
+## 7. Memory across chats: `/remember`, `/handoff`, `/pickup`
 
 Desktop forgets a chat when it ends. These keep what matters.
 
@@ -244,7 +222,7 @@ Desktop forgets a chat when it ends. These keep what matters.
 
 ---
 
-## 9. Cost: `/cost`
+## 8. Cost: `/cost`
 
 Shows the **exact tokens per model** from Desktop's own record of every reply on this machine, then spare-gpu's jobs: how they ended, what they used, which kept nothing, and the most expensive three.
 
@@ -260,7 +238,7 @@ Shows the **exact tokens per model** from Desktop's own record of every reply on
 
 ---
 
-## 10. Fewer permission prompts: `/prompts`
+## 9. Fewer permission prompts: `/prompts`
 
 Desktop asks before running a shell command, and "always allow" only remembers that exact text, so `git status` and `git status --short` each ask again.
 
@@ -275,7 +253,7 @@ Desktop asks before running a shell command, and "always allow" only remembers t
 
 ---
 
-## 11. Health check: `/doctor`
+## 10. Health check: `/doctor`
 
 Checks everything (spare-gpu, git, Desktop's settings, the connection to spare-gpu, the command pack, project memory, this project's jobs and settings) and tells you how to fix each problem. It changes nothing.
 
@@ -290,18 +268,17 @@ Checks everything (spare-gpu, git, Desktop's settings, the connection to spare-g
 
 ---
 
-## 12. Faster answers: `/auto`
+## 11. Faster answers: `/auto`
 
-At busy times one of Desktop's two models has a queue of several minutes while the other is free. `/auto` checks BharatCode's live queues and, when the other model would start sooner and is good enough for the task, sends your work there. `/auto` is also how you ask for [coding jobs](#1-coding-jobs).
+At busy times one of Desktop's two models has a queue of several minutes while the other is free. `/auto` checks BharatCode's live queues and, when the other model would start sooner and is good enough for the task, sends your work there.
 
-Anything that isn't a coding job is done the way a normal BharatCode chat does it: the model can read and edit your files, run commands, search and use your MCP tools, and asks for your approval as usual. It runs in a session named "auto: ..." in your project, and the reply comes back into your chat.
+Your request is done the way a normal BharatCode chat does it: the model can read and edit your files, run commands, search and use your MCP tools, and asks for your approval as usual. It runs in a session named "auto: ..." in your project, and the reply comes back into your chat.
 
 | Type | What happens |
 |---|---|
 | `/auto what does calc.py do?` | Reads the file and answers, on the model that starts sooner |
 | `/auto now add a divide function` | Continues the same conversation: it remembers the earlier `/auto` turns from this chat |
 | `/auto new <request>` | Starts a fresh conversation |
-| `/auto write docs for src/utils.py` | Runs a docs job on a private copy, on the model that starts sooner |
 | `/auto` | Shows how long each model would wait right now |
 
 - Each chat keeps its own "auto: ..." session. The model is picked again for every message, so one turn can run on DeepSeek and the next on Qwen, with the whole history kept.
@@ -323,13 +300,15 @@ Example, when DeepSeek had a queue:
 
 It starts from DeepSeek and switches only when that saves at least 20 seconds and the other model has a free slot:
 
-| Right now | `/auto` conversations and docs run on | Other jobs run on |
+| Right now | `/auto` runs on | Fix jobs run on |
 |---|---|---|
 | DeepSeek free | DeepSeek | DeepSeek |
 | DeepSeek queued, Qwen free | **Qwen** | DeepSeek |
 | Qwen queued, DeepSeek free | DeepSeek | DeepSeek |
 
-Moving up to DeepSeek is always allowed. Moving down to Qwen happens for docs jobs, the one job type where Qwen was measured to be just as good, and for `/auto` conversations, which go to the faster model by design rather than by measurement. Tests and reviews stay on DeepSeek. `/auto` conversations aren't measured: not waiting is the point, and the reply always names the model that answered. If your plan has only Qwen, everything runs on Qwen. The measurement is a small evaluation, 3 tasks per job type: see [research/eval/](research/eval/).
+"Saves" is judged first by what you actually waited: how long each model took to start answering in your own Desktop chats over the last 30 minutes (the median of its latest 5 replies). BharatCode's queue figures decide only when your recent chats don't cover both models. They can be wrong: on 9 Nov they showed Qwen 85 seconds faster while your replies started in about 6 seconds on DeepSeek and 13 on Qwen.
+
+Moving up to DeepSeek is always allowed. Moving down to Qwen happens only for `/auto` conversations, which go to the faster model by design rather than by measurement: not waiting is the point, and the reply always names the model that answered. Fix jobs stay on DeepSeek, and a fix is kept only if your tests pass with it. If your plan has only Qwen, everything runs on Qwen.
 
 In the bigger commands, some DeepSeek roles also ship as a standard-model variant on Qwen. They are only used once a benchmark shows Qwen is good enough for them; until then they stay on DeepSeek.
 
@@ -345,14 +324,13 @@ Jobs work without any settings. To change how they run, write `.gtu/settings.jso
 
 | Setting | Override for one run | What it sets |
 |---|---|---|
-| `test_command` | `GTU_TEST_COMMAND` | How your tests run (found from your project's files when not set). Tests and fixes are kept only if this passes. |
+| `test_command` | `GTU_TEST_COMMAND` | How your tests run (found from your project's files when not set). A fix is kept only if this passes. |
 | `allowed_commands` | `GTU_ALLOWED_COMMANDS` | Commands a job may run (must include the test command) |
 | `test_timeout` | `GTU_TEST_TIMEOUT` | Seconds one test run may take |
 | `agent_timeout` | `GTU_AGENT_TIMEOUT` | Seconds one job's Desktop session may take |
 | `job_token_budget` | `GTU_JOB_TOKEN_BUDGET` | Tokens one job may use before it stops |
 | `preferred_model` | `GTU_PREFERRED_MODEL` | The model jobs start from |
 | `switch_safe` | `GTU_SWITCH_SAFE` | Extra job types allowed to move to the faster model |
-| `green_rounds` | `GTU_GREEN_ROUNDS` | Tries a "make the tests pass" job gets, 1 to 10 (default 3) |
 
 `/doctor` shows the settings in force and says what's wrong with a broken file.
 
@@ -365,7 +343,6 @@ Jobs work without any settings. To change how they run, write `.gtu/settings.jso
 - Jobs may only read, edit their copy, and run your test command. No web access, no other commands, no permission pop-ups, and your other MCP servers are switched off inside a job.
 - Some files are never copied into a job, even if git tracks them: tool and instruction folders that Desktop would run or obey (`.opencode`, `.claude`, `.agents`, `.cursor`), Desktop's own config files, and credential files (`.env`, `*.pem`, `*.key`, `id_rsa*` and similar). To leave out more, list patterns in `.gtu/copy-exclude`, one per line.
 - Big folders like `node_modules`, `venv`, `dist` and `build` aren't copied, unless git tracks them.
-- Before code is sent for review, anything that looks like a key or password is replaced with `[redacted]`.
 - The commands' helpers and tools are hidden from your normal chats, so they add nothing to them (a test holds this to a budget of 1,500 tokens per step), and every helper has a step limit (30 for a helper, 60 for a lead).
 
 ---
@@ -376,17 +353,17 @@ Jobs work without any settings. To change how they run, write `.gtu/settings.jso
 
 | Command | Feature |
 |---|---|
-| `/auto [new] <anything>` | [Coding jobs](#1-coding-jobs), [Faster answers](#12-faster-answers-auto) |
-| `/apply [result] [--dry-run] [--force]`, `/undo [result]` | [Apply and undo](#2-apply-and-undo-apply-undo) |
-| `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post] [--plan]` | [Code review](#3-code-review-code-review) |
-| `/security-review [commit or branch] [deep] [--plan]` | [Security review](#4-security-review-security-review) |
-| `/deep-research <question> [--depth quick\|standard\|deep] [--plan]` | [Deep research](#5-deep-research-deep-research) |
-| `/simplify [file or folder] [--plan]` | [Simplify](#6-simplify-simplify) |
-| `/verify-app <url> <what to check> [--plan]` | [App check](#7-app-check-verify-app) |
-| `/remember [note]`, `/handoff`, `/pickup` | [Memory](#8-memory-across-chats-remember-handoff-pickup) |
-| `/cost [days] [build]` | [Cost](#9-cost-cost) |
-| `/prompts [days] [--min N]` | [Fewer prompts](#10-fewer-permission-prompts-prompts) |
-| `/doctor [live] [build]` | [Health check](#11-health-check-doctor) |
+| `/auto [new] <anything>` | [Faster answers](#11-faster-answers-auto) |
+| `/apply [result] [--dry-run] [--force]`, `/undo [result]` | [Apply and undo](#1-apply-and-undo-apply-undo) |
+| `/code-review [low\|medium\|high\|deep] [commit, branch or PR number] [--fix\|--post] [--plan]` | [Code review](#2-code-review-code-review) |
+| `/security-review [commit or branch] [deep] [--plan]` | [Security review](#3-security-review-security-review) |
+| `/deep-research <question> [--depth quick\|standard\|deep] [--plan]` | [Deep research](#4-deep-research-deep-research) |
+| `/simplify [file or folder] [--plan]` | [Simplify](#5-simplify-simplify) |
+| `/verify-app <url> <what to check> [--plan]` | [App check](#6-app-check-verify-app) |
+| `/remember [note]`, `/handoff`, `/pickup` | [Memory](#7-memory-across-chats-remember-handoff-pickup) |
+| `/cost [days] [build]` | [Cost](#8-cost-cost) |
+| `/prompts [days] [--min N]` | [Fewer prompts](#9-fewer-permission-prompts-prompts) |
+| `/doctor [live] [build]` | [Health check](#10-health-check-doctor) |
 
 **In a terminal** (only to install or remove)
 
@@ -408,7 +385,7 @@ No. Every job works on a private copy. The files a job changed wait in `spare-gp
 <details>
 <summary>Will a cheaper model make my work worse?</summary>
 
-Only two kinds of work move to Qwen to save waiting. Docs jobs: Qwen was measured to be just as good at them. `/auto` conversations: these go to the faster model by design. Tests, reviews and the other jobs stay on DeepSeek. In the bigger commands, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work. Every job's result is also checked before it's kept, and each reply names the model that answered.
+Only `/auto` moves your work to Qwen to save waiting, by design, and its reply names the model that answered. Fix jobs stay on DeepSeek and are kept only if your tests pass. In the bigger commands, the many small helper steps run on Qwen by design, while DeepSeek plans and checks their work.
 </details>
 
 <details>
@@ -444,7 +421,6 @@ No. Jobs, reviews and questions run on BharatCode's models. The commands that on
 | Check an install step by step on a clean PC | [docs/install-checklist.md](docs/install-checklist.md) |
 | Cut a release | [docs/releasing.md](docs/releasing.md) |
 | See the measurements behind the routing and the commands | [research/](research/) |
-| See which job types may move to Qwen, and why | [research/eval/](research/eval/) |
 | Check each command by hand | `research/<command>/manual-check.md` |
 | See what code is reused, and under which licence | [ATTRIBUTION.md](src/gpu_token_utilization/pack/ATTRIBUTION.md) |
 

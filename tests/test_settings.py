@@ -102,13 +102,13 @@ def test_jobs_budget_and_router_read_the_file_and_the_environment_wins(project, 
     write_settings(project, {
         "test_command": ["npm", "test", "--", "--ci"], "allowed_commands": ["npm test", "make lint"],
         "test_timeout": 45, "agent_timeout": 120.5, "job_token_budget": 50_000,
-        "preferred_model": "qwen-3.8-27b", "switch_safe": ["tests"]})
+        "preferred_model": "qwen-3.8-27b", "switch_safe": ["fix"]})
     config = JobConfig.load(project)
     assert config.test_command == ("npm", "test", "--", "--ci") and config.allowed_commands == ("npm test", "make lint")
     assert (config.test_timeout, config.agent_timeout) == (45.0, 120.5)
     assert Budgets.load(project).per_job == 50_000
     folder = project / ".gtu"
-    assert router.switch_safe("tests", router.load_policy(folder)) and not router.switch_safe("docs", router.load_policy(folder))
+    assert router.switch_safe("fix", router.load_policy(folder)) and not router.switch_safe("review-verifier", router.load_policy(folder))
     assert router.preferred_model("deepseek-v4.1-flash", folder) == "qwen-3.8-27b"
     assert router.preferred_model("deepseek-v4.1-flash") == "deepseek-v4.1-flash"  # no folder: the file isn't read
     monkeypatch.setenv("GTU_TEST_COMMAND", "make lint")  # allowed by the file's own allowlist
@@ -134,8 +134,8 @@ def test_without_a_file_the_defaults_apply(project):
     ({"test_timeout": "fast"}, "test_timeout must be a number of seconds above 0"),
     ({"job_token_budget": 0}, "job_token_budget must be a whole number of tokens above 0"),
     ({"job_token_budget": True}, "job_token_budget must be a whole number"),
-    ({"switch_safe": ["tests", "nope"]}, "switch_safe names unknown job kind(s) nope; the kinds are tests, docs, review, fix, green, implement"),
-    ({"green_rounds": 11}, "green_rounds must be a whole number of rounds from 1 to 10"),
+    ({"switch_safe": ["fix", "docs"]}, "switch_safe names unknown job kind(s) docs; the kinds are fix"),
+    ({"green_rounds": 3}, "unknown setting(s) green_rounds"),
     ({"test_command": "rm -rf /"}, "test command 'rm -rf /' is not in the allowlist"),
 ])
 def test_a_broken_file_is_refused_with_the_fix(project, doc, message):
@@ -160,8 +160,8 @@ def test_the_doctor_says_where_the_settings_come_from(project, monkeypatch):
 
 def test_the_store_is_the_projects_from_any_subfolder(project, monkeypatch):
     with Store(Store.default_path(project / "src")) as store:
-        store.add_job("review", "src", str(project))
+        store.add_job("fix", "src", str(project))
     assert Store.default_path(project / "src") == project / ".gtu" / "gtu.db"
-    assert "review src" in SpareTools(project / "src").work_status()  # the MCP server started in a subfolder finds it
+    assert "fix src" in SpareTools(project / "src").work_status()  # the MCP server started in a subfolder finds it
     monkeypatch.setenv("GTU_DB", str(project / "elsewhere.db"))
     assert Store.default_path(project / "src") == project / "elsewhere.db"

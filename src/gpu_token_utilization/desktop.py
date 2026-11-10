@@ -340,16 +340,6 @@ class DesktopAgent:
             result.exit_code = 1 if result.error or result.stopped else 0
         return (session, result) if keep_running else result
 
-    def ask(self, workdir: Path, messages: list[dict], *, token_budget: int | None = None,
-            on_step: Callable[[AgentStep], None] = lambda step: None,
-            should_stop: Callable[[], bool] = lambda: False) -> AgentResult:
-        """A one-answer request (the review job) as a Desktop session that may read but not edit
-        or run anything, so it needs Desktop's sign-in rather than spare-gpu's own API key."""
-        prompt = "\n\n".join(m["content"] for m in messages if m.get("content"))
-        prompt += "\n\nReply with the report itself and nothing else. Don't use any tools."
-        return self.run(workdir, prompt, edit=False, commands=(), token_budget=token_budget, on_step=on_step,
-                        should_stop=should_stop)
-
     def _follow(self, http, session, where, result, token_budget, on_step, should_stop, *, skip: int = 0,
                 keep_running: bool = False, on_approval: Callable[[], None] | None = None) -> None:
         deadline = self._clock() + self.timeout
@@ -477,6 +467,6 @@ class DesktopAgent:
             return False
         if last.get("error"):
             result.error = _error_text(last["error"])
-        # Every text part: a review's body often comes before a closing remark.
+        # Every text part: an answer's body often comes before a closing remark.
         result.text = "\n".join(t.strip() for t in texts if t.strip())
         return True

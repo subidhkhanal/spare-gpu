@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOB_KINDS = ("tests", "docs", "review", "fix", "green", "implement")
+JOB_KINDS = ("fix",)  # what add_job accepts
+# Every kind the jobs table has ever allowed: older stores hold rows of kinds that are gone now,
+# and they must still open and list, so the table's CHECK constraint keeps naming them all.
+STORED_KINDS = ("tests", "docs", "review", "fix", "green", "implement")
 JOB_STATUSES = ("queued", "running", "paused", "done", "failed", "cancelled")
 FINAL_STATUSES = ("done", "failed", "cancelled")
 STEP_STATUSES = ("pending", "running", "done", "failed")
@@ -29,7 +32,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     note        TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
-)""".replace("__KINDS__", ", ".join(f"'{k}'" for k in JOB_KINDS))
+)""".replace("__KINDS__", ", ".join(f"'{k}'" for k in STORED_KINDS))
 
 SCHEMA = JOBS_TABLE + """;
 
@@ -181,12 +184,12 @@ class Store:
         self._widen_job_kinds()
 
     def _widen_job_kinds(self) -> None:
-        """An older store limits `kind` with a CHECK constraint that lacks newer kinds (fix, then
-        green and implement). SQLite can't change a constraint in place, so the jobs table is
+        """An older store limits `kind` with a CHECK constraint that lacks a kind added later (fix
+        among them). SQLite can't change a constraint in place, so the jobs table is
         rebuilt once, keeping every row; the steps and requests that point at jobs by id are
         untouched."""
         row = self.conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone()
-        if row is None or all(f"'{kind}'" in row["sql"] for kind in JOB_KINDS):
+        if row is None or all(f"'{kind}'" in row["sql"] for kind in STORED_KINDS):
             return
         columns = [r["name"] for r in self.conn.execute("PRAGMA table_info(jobs)")]
         names = ", ".join(columns)

@@ -255,7 +255,7 @@ def describe(all_views: list[View]) -> str:
     known = sorted((e for e in estimates if e.seconds is not None), key=lambda e: e.seconds)
     if len(known) >= 2 and known[-1].seconds - known[0].seconds >= 20:
         lines.append(f"{name(known[0].model)} would start about {_secs(known[-1].seconds - known[0].seconds)} sooner "
-                     f"than {name(known[-1].model)} right now. spare_delegate hands a switch-safe task to the faster one.")
+                     f"than {name(known[-1].model)} right now. /auto (spare_auto) hands a request to the faster one.")
     elif len(known) >= 2:
         lines.append("No meaningful difference between the models right now.")
     else:

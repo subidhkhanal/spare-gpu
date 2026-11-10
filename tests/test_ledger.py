@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 
 from gpu_token_utilization import landing, ledger, worktree
-from gpu_token_utilization.fakedesktop import Step
 from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.mcp_server import SpareTools
 from gpu_token_utilization.scheduler import Scheduler
@@ -20,11 +19,8 @@ from gpu_token_utilization.scheduler import Scheduler
 from conftest import git
 
 IMPORT_SRC = "import pathlib, sys\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))\nfrom src.calc import add\n\n"
-GOOD_AND_BAD_TESTS = IMPORT_SRC + (
-    "def test_adds_numbers():\n    assert add(2, 3) == 5\n\n\n"
-    "def test_adds_negatives():\n    assert add(-2, -3) == -5\n\n\n"
-    "def test_wrong_on_purpose():\n    assert add(2, 2) == 5\n"
-)
+EXISTING_TEST = IMPORT_SRC + "def test_adds_numbers():\n    assert add(2, 3) == 5\n"
+FINDINGS = "src/calc.py:1 the function has no docstring; add one"
 CALC = "def add(a, b):\n    return a + b\n"
 DOCUMENTED = 'def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n'
 MINE = "def add(a, b):\n    return b + a  # my own edit, after the job started\n"
@@ -54,6 +50,20 @@ def run_jobs(store, desktop_fake, clock):
     return run
 
 
+@pytest.fixture
+def repo(git_repo):
+    """The sample repo with a passing test, so a fix job's check can pass."""
+    (git_repo / "tests").mkdir()
+    (git_repo / "tests" / "test_calc.py").write_text(EXISTING_TEST)
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "tests")
+    return git_repo
+
+
+# A fix that documents add() and tries to weaken the existing test (which the check reverts).
+FIX_WRITES = {"src/calc.py": DOCUMENTED, "tests/test_calc.py": "def test_nothing():\n    pass\n"}
+
+
 def ledger_of(repo, job_id) -> dict:
     return json.loads((Path(repo) / ".gtu" / "jobs" / job_id / "ledger.json").read_text(encoding="utf-8"))
 
@@ -65,55 +75,44 @@ def folder_of(store, job_id) -> Path:
 
 # --- the ledger ---------------------------------------------------------------------------------
 
-def test_a_tests_job_leaves_one_ledger_entry_per_step_with_the_tools_it_used(git_repo, store, scenario, run_jobs):
-    scenario(steps=[{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": GOOD_AND_BAD_TESTS,
-                                                 "src/calc.py": "def add(a, b):\n    return a - b\n"}},
-                    {"tokens": 400}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+def test_a_fix_job_leaves_one_ledger_entry_per_step_with_the_tools_it_used(repo, store, scenario, run_jobs):
+    scenario(steps=[{"tokens": 11500, "writes": FIX_WRITES}, {"tokens": 400}])
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
     run_jobs()
     assert store.get_job(job.id).status == "done"
-    doc = ledger_of(git_repo, job.id)
-    assert (doc["job"], doc["kind"], doc["target"]) == (job.id, "tests", "src/calc.py")
+    doc = ledger_of(repo, job.id)
+    assert (doc["job"], doc["kind"], doc["target"]) == (job.id, "fix", ".")
     write, verify = doc["steps"]
     assert (write["step"], write["status"], write["tokens"]) == ("write", "done", 11900)
     assert write["model"] == "qwen-3.8-27b"  # the fake Desktop's default model, as the requests logged it
     # the tools as the agent reported them, targets inside the job's copy shown relative to it
-    assert write["tools"] == ["edit tests/test_gtu_calc.py", "edit src/calc.py"]
+    assert write["tools"] == ["edit src/calc.py", "edit tests/test_calc.py"]
     assert write["outcome"] == store.steps(job.id)[0]["output"]
     assert verify["step"] == "verify" and verify["tools"] == [] and verify["tokens"] == 0
-    assert "Kept 2 passing test(s), dropped 1" in verify["outcome"] and "reverted src/calc.py" in verify["outcome"]
+    assert "Kept the fix in 1 file(s)" in verify["outcome"] and "reverted tests/test_calc.py" in verify["outcome"]
     for entry in (write, verify):
         assert entry["started"].endswith("+00:00") and entry["finished"] >= entry["started"]
     assert write["finished"] <= verify["started"]
 
 
-def test_the_ledger_is_written_after_every_step_not_only_at_the_end(git_repo, store, scenario, run_jobs, monkeypatch):
+def test_the_ledger_is_written_after_every_step_not_only_at_the_end(repo, store, scenario, run_jobs, monkeypatch):
     from gpu_token_utilization import jobs
 
-    scenario(steps=[{"tokens": 500, "writes": {"tests/test_gtu_calc.py": GOOD_AND_BAD_TESTS}}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
-    monkeypatch.setattr(jobs, "_run_pytest", lambda ctx, path: (_ for _ in ()).throw(KeyboardInterrupt))
+    scenario(steps=[{"tokens": 500, "writes": {"src/calc.py": DOCUMENTED}}])
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
+    monkeypatch.setattr(jobs, "run_test_command", lambda ctx: (_ for _ in ()).throw(KeyboardInterrupt))
     with pytest.raises(KeyboardInterrupt):  # the process dies during verify
         run_jobs()
-    doc = ledger_of(git_repo, job.id)
+    doc = ledger_of(repo, job.id)
     assert [e["step"] for e in doc["steps"]] == ["write"] and doc["steps"][0]["tokens"] == 500
 
 
-def test_a_review_step_is_recorded_with_its_tokens_and_no_tools(git_repo, store, run_jobs, desktop_fake):
-    desktop_fake.steps = [Step(tokens=340, text="## Likely bugs\nNothing found.")]
-    job = store.add_job("review", "src", str(git_repo))
-    run_jobs()
-    (entry,) = ledger_of(git_repo, job.id)["steps"]
-    assert (entry["step"], entry["status"], entry["tokens"], entry["tools"]) == ("review", "done", 340, [])
-    assert entry["model"] == "qwen-3.8-27b" and entry["outcome"].startswith("Wrote gtu-review-")
-
-
-def test_a_failed_step_is_recorded_too(git_repo, store, scenario, run_jobs):
+def test_a_failed_step_is_recorded_too(repo, store, scenario, run_jobs):
     scenario(steps=[{"tokens": 100}], error="Unexpected server error")
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
     run_jobs()
     assert store.get_job(job.id).status == "failed"
-    (entry,) = ledger_of(git_repo, job.id)["steps"]
+    (entry,) = ledger_of(repo, job.id)["steps"]
     assert entry["status"] == "failed" and "Unexpected server error" in entry["outcome"] and entry["tokens"] == 100
 
 
@@ -127,55 +126,53 @@ def test_relative_tools_only_touch_targets_inside_the_copy(tmp_path):
 
 # --- RUN.md and manifest.json next to the files -------------------------------------------------
 
-def test_the_manifest_hashes_match_the_files_and_their_base_versions(git_repo, store, scenario, run_jobs):
-    (git_repo / "README.md").write_text("# Sample\n\nIntro line.\n")
-    git(git_repo, "add", "-A")
-    git(git_repo, "commit", "-q", "-m", "readme")
+def test_the_manifest_hashes_match_the_files_and_their_base_versions(repo, store, scenario, run_jobs):
+    (repo / "README.md").write_text("# Sample\n\nIntro line.\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "readme")
     scenario(steps=[{"tokens": 11000, "writes": {
         "src/calc.py": DOCUMENTED,
         "README.md": "# Sample\n\nIntro line.\n\n## calc\n\nAdds numbers.\n",
         "docs/calc.md": "# calc\n",
     }}])
-    job = store.add_job("docs", "src", str(git_repo))
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
     run_jobs()
     folder = folder_of(store, job.id)
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert (manifest["job"], manifest["kind"], manifest["target"], manifest["tokens"]) == (job.id, "docs", "src", 11000)
+    assert (manifest["job"], manifest["kind"], manifest["target"], manifest["tokens"]) == (job.id, "fix", ".", 11000)
     assert manifest["model"] == "qwen-3.8-27b" and manifest["exported_at"].endswith("+00:00")
     by_path = {f["path"]: f for f in manifest["files"]}
     assert set(by_path) == {"README.md", "docs/calc.md", "src/calc.py"}
     assert by_path["src/calc.py"]["change"] == "M"
     # Hashes are of the files' real bytes: on Windows the test repo's files have CRLF endings, and a job
     # keeps a file's own endings, so compare bytes for the hash and the text without the endings.
-    base, new = (git_repo / "src" / "calc.py").read_bytes(), (folder / "src" / "calc.py").read_bytes()
+    base, new = (repo / "src" / "calc.py").read_bytes(), (folder / "src" / "calc.py").read_bytes()
     assert by_path["src/calc.py"]["base_sha256"] == sha(base) and base.replace(b"\r\n", b"\n") == CALC.encode()
     assert by_path["src/calc.py"]["new_sha256"] == sha(new) and new.replace(b"\r\n", b"\n") == DOCUMENTED.encode()
     assert by_path["docs/calc.md"] == {"path": "docs/calc.md", "change": "A", "base_sha256": None,
                                        "new_sha256": sha((folder / "docs" / "calc.md").read_bytes())}
-    readme = (git_repo / "README.md").read_bytes()
+    readme = (repo / "README.md").read_bytes()
     assert by_path["README.md"]["base_sha256"] == sha(readme) and readme.replace(b"\r\n", b"\n") == b"# Sample\n\nIntro line.\n"
     # the records sit next to the job's files and are never counted as its output
     assert sorted(p.name for p in folder.iterdir()) == ["README.md", "RUN.md", "docs", "manifest.json", "src"]
     assert landing.exported_files(folder) == ["README.md", "docs/calc.md", "src/calc.py"]
-    assert git(git_repo, "status", "--porcelain") == ""  # still nothing of spare-gpu's shows in git
+    assert git(repo, "status", "--porcelain") == ""  # still nothing of spare-gpu's shows in git
 
 
-def test_run_md_summarises_the_job_its_steps_its_files_and_what_was_reverted(git_repo, store, scenario, run_jobs):
-    scenario(steps=[{"tokens": 11500, "writes": {"tests/test_gtu_calc.py": GOOD_AND_BAD_TESTS,
-                                                 "src/calc.py": "def add(a, b):\n    return a - b\n"}},
-                    {"tokens": 400}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+def test_run_md_summarises_the_job_its_steps_its_files_and_what_was_reverted(repo, store, scenario, run_jobs):
+    scenario(steps=[{"tokens": 11500, "writes": FIX_WRITES}, {"tokens": 400}])
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
     run_jobs()
     folder = folder_of(store, job.id)
     text = (folder / "RUN.md").read_text(encoding="utf-8")
-    assert text.startswith(f"# spare-gpu job {job.id}: tests `src/calc.py`\n")
-    assert "- Kind: tests\n- Target: `src/calc.py`\n" in text and "- Tokens: 11,900\n" in text
-    assert "- Files: 1 added, 0 changed, 0 deleted" in text
+    assert text.startswith(f"# spare-gpu job {job.id}: fix `.`\n")
+    assert "- Kind: fix\n- Target: `.`\n" in text and "- Tokens: 11,900\n" in text
+    assert "- Files: 0 added, 1 changed, 0 deleted" in text
     # both of the fake Desktop session's steps happen inside the job's one write step, hence 11,900 there
-    assert "| write | done | qwen-3.8-27b |" in text and "| 11,900 | edit tests/test_gtu_calc.py; edit src/calc.py |" in text
+    assert "| write | done | qwen-3.8-27b |" in text and "| 11,900 | edit src/calc.py; edit tests/test_calc.py |" in text
     assert "| verify | done | qwen-3.8-27b |" in text and "| 0 | none |" in text
-    assert "- `tests/test_gtu_calc.py` (added): 2 passing test(s), dropped 1 failing" in text
-    assert "## Reverted by the checks\n\n- `src/calc.py`: tests jobs only add new test files" in text
+    assert "- `src/calc.py` (changed): part of the fix; the test command passed with it" in text
+    assert "## Reverted by the checks\n\n- `tests/test_calc.py`: a fix may not change existing tests" in text
     assert f"`/apply {folder.name}`" in text and f"`/undo {folder.name}`" in text
     assert "\u2014" not in text  # plain punctuation only
 
@@ -380,7 +377,7 @@ def test_apply_works_in_a_plain_folder_from_a_subfolder(tmp_path):
     plain = tmp_path / "plain"
     (plain / "src").mkdir(parents=True)
     (plain / "src" / "calc.py").write_text(CALC)
-    finished(plain, "j", lambda copy: (copy / "src" / "calc.py").write_text(DOCUMENTED), kind="docs", target="src", model=None)
+    finished(plain, "j", lambda copy: (copy / "src" / "calc.py").write_text(DOCUMENTED), target="src", model=None)
     assert landing.find_root(plain / "src") == plain.resolve()
     text = SpareTools(plain / "src").apply_result()
     assert text.startswith("replaced: src/calc.py"), text
@@ -398,9 +395,9 @@ def test_a_job_that_only_deleted_a_file_still_gets_a_folder_with_the_deletion_on
     assert worktree.changed_files(copy, None) == []  # nothing to copy, as before
 
 
-def test_a_tests_jobs_manifest_lists_only_the_test_file_it_kept(git_repo, store, scenario, run_jobs):
-    scenario(steps=[{"tokens": 1000, "writes": {"tests/test_gtu_calc.py": GOOD_AND_BAD_TESTS}}, {"tokens": 100}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+def test_a_fix_jobs_manifest_lists_only_what_passed_the_check(repo, store, scenario, run_jobs):
+    scenario(steps=[{"tokens": 1000, "writes": FIX_WRITES}, {"tokens": 100}])
+    job = store.add_job("fix", ".", str(repo), FINDINGS)
     run_jobs()
     manifest = json.loads((folder_of(store, job.id) / "manifest.json").read_text(encoding="utf-8"))
-    assert [(f["change"], f["path"]) for f in manifest["files"]] == [("A", "tests/test_gtu_calc.py")]
+    assert [(f["change"], f["path"]) for f in manifest["files"]] == [("M", "src/calc.py")]

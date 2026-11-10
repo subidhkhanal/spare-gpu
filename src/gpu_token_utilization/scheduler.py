@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import landing, ledger, router, waits, worktree
-from .agent import AgentStep, BharatCodeError, BusyError, ChatResult, Usage
-from .desktop import DESKTOP_NEEDED, DesktopAgent, DesktopNotFound
+from .agent import AgentStep, BharatCodeError, BusyError
+from .desktop import DesktopAgent, DesktopNotFound
 from .router import Choice
 from .budget import BudgetExceeded, Budgets
 from .jobs import PLANS, JobConfig
@@ -48,28 +48,6 @@ class StepContext:
     budget_remaining: Callable[[], int]
     should_stop: Callable[[], bool] = lambda: False
     log: Callable[[str], None] = lambda message: None
-
-    def chat(self, messages: list[dict]) -> ChatResult:
-        """One answer, as a read-only Desktop session (the review job's step)."""
-        if self.agent is None:
-            raise DesktopNotFound(DESKTOP_NEEDED)
-        self.log("  Asking BharatCode Desktop...")
-        started = time.monotonic()
-        result = self.agent.ask(self.workdir, messages, token_budget=self.budget_remaining(),
-                                on_step=self.log_agent_step, should_stop=self.should_stop)
-        if result.stopped == "stop":
-            raise StopRequested("stopped")
-        if result.stopped == "budget":
-            raise BudgetExceeded(f"stopped BharatCode Desktop after {result.tokens} tokens: budget reached")
-        if result.stopped == "timeout":
-            raise BusyError(f"BharatCode Desktop did not finish within {self.agent.timeout:.0f} s")
-        if not result.ok:
-            raise BharatCodeError(f"BharatCode Desktop failed: {result.error or 'unknown error'}")
-        inputs = sum(s.input_tokens + s.cache_read_tokens for s in result.steps)
-        outputs = sum(s.output_tokens + s.reasoning_tokens for s in result.steps)
-        return ChatResult(content=result.text,
-                          usage=Usage(prompt_tokens=inputs, completion_tokens=outputs, total_tokens=result.tokens),
-                          elapsed_ms=(time.monotonic() - started) * 1000)
 
     def log_agent_step(self, step: AgentStep) -> None:
         """Record one step of a Desktop session like a request, so budgets and reports include it."""
@@ -101,11 +79,6 @@ class _ToolRecorder:
         self.tools += result.tools
         return result
 
-    def ask(self, *args, **kwargs):
-        result = self._worker.ask(*args, **kwargs)
-        self.tools += result.tools
-        return result
-
 
 def _label(worker) -> str:
     return getattr(worker, "label", "BharatCode Desktop")
@@ -115,9 +88,7 @@ def _model_name(worker) -> str:
     return waits.name(getattr(worker, "model", "") or "")
 
 
-KEPT_NOTHING = re.compile(r"^(No test files were generated|Kept 0 passing test|No documentation changes were "
-                          r"generated|Kept documentation changes in 0 file|No fix was generated|Kept the fix in 0 file|"
-                          r"Tests still fail after|Nothing was implemented|Tests fail after implementing the plan)")
+KEPT_NOTHING = re.compile(r"^(No fix was generated|Kept the fix in 0 file)")
 
 
 def kept_nothing(verify_output: str | None) -> bool:
@@ -227,7 +198,11 @@ class Scheduler:
 
     def run_step(self, job: Job) -> str:
         """Run the job's next unfinished step. Returns done, busy, budget, failed, retry, stopped or finished."""
-        plan = self.plans[job.kind]
+        plan = self.plans.get(job.kind)
+        if plan is None:  # a kind an older version queued that has no steps any more
+            self.store.set_status(job.id, "failed")
+            self._log(f"Job {job.id}: {job.kind} jobs are no longer supported.")
+            return "failed"
         if not self.store.steps(job.id):
             for name, _ in plan:
                 self.store.add_step(job.id, name)
@@ -272,7 +247,7 @@ class Scheduler:
             self.should_stop, self._log,
         )
         doing = f"{_label(worker)} is working on it ({_model_name(worker)}); this can take several minutes" \
-            if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one request"
+            if step["name"] == "write" else "running locally" if step["name"] == "verify" else "one step"
         self._log(f"Job {job.id}: step {step['seq']} of {len(steps)} ({step['name']}) started: {doing}.")
         # For the ledger: when the step began, and which requests were logged before it (so a step
         # run again after a fallback counts only its own).
@@ -316,7 +291,7 @@ class Scheduler:
             self._finish(job, "failed")
             self._log(f"Job {job.id}: step {step['seq']} ({step['name']}) failed: {exc}")
             return "failed"
-        except Exception as exc:  # noqa: BLE001  anything else (a git call, a truncated junit.xml, a locked file)
+        except Exception as exc:  # noqa: BLE001  anything else (a git call, a locked file)
             # fails this job and is written down, instead of the server dying with a traceback and
             # leaving the job marked running.
             if self.should_stop():

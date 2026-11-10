@@ -20,7 +20,7 @@
   <!-- title -->
   <text x="72" y="150" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="78" font-weight="700" fill="#fff4ec">spare<tspan fill="#ff6a35">-</tspan>gpu</text>
   <text x="76" y="200" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="27" fill="#d8c8bc">Chat commands that make BharatCode Desktop do more</text>
-  <text x="76" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#a8968a">answers · coding jobs · reviews · research · memory · cost · checks</text>
+  <text x="76" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#a8968a">answers · reviews · research · memory · cost · checks</text>
 
   <!-- twelve features, one tile each, all alike -->
   <g font-family="Consolas, Menlo, monospace" font-size="15" fill="#fff4ec" text-anchor="middle">
@@ -36,9 +36,9 @@
       <rect x="724" y="180" width="5" height="46" rx="2"/><rect x="890" y="180" width="5" height="46" rx="2"/><rect x="1056" y="180" width="5" height="46" rx="2"/>
       <rect x="724" y="238" width="5" height="46" rx="2"/><rect x="890" y="238" width="5" height="46" rx="2"/><rect x="1056" y="238" width="5" height="46" rx="2"/>
     </g>
-    <text x="804" y="92">/auto</text><text x="970" y="92">coding jobs</text><text x="1136" y="92">/apply /undo</text>
-    <text x="804" y="150">/code-review</text><text x="970" y="150">/security-review</text><text x="1136" y="150">/deep-research</text>
-    <text x="804" y="208">/simplify</text><text x="970" y="208">/verify-app</text><text x="1136" y="208">/remember</text>
-    <text x="804" y="266">/handoff /pickup</text><text x="970" y="266">/cost /prompts</text><text x="1136" y="266">/doctor</text>
+    <text x="804" y="92">/auto</text><text x="970" y="92">/apply /undo</text><text x="1136" y="92">/code-review</text>
+    <text x="804" y="150">/security-review</text><text x="970" y="150">/deep-research</text><text x="1136" y="150">/simplify</text>
+    <text x="804" y="208">/verify-app</text><text x="970" y="208">/remember</text><text x="1136" y="208">/handoff /pickup</text>
+    <text x="804" y="266">/cost</text><text x="970" y="266">/prompts</text><text x="1136" y="266">/doctor</text>
   </g>
 </svg>

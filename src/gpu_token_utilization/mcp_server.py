@@ -31,13 +31,11 @@ from .scheduler import Scheduler
 from .store import DB_ENV, FINAL_STATUSES, IGNORE, Store, StoreError
 
 INSTRUCTIONS = (
-    "spare-gpu does coding chores (writing tests, adding docs, code review, applying a fix) for a project "
-    "folder as BharatCode Desktop sessions the user can watch, in a private copy of the project, never "
-    "touching the user's checkout: each finished job's edited files are copied to the project's "
-    "spare-gpu/<date>_<time>/ folder. spare_delegate runs the job now and returns when it is done. It "
-    "measures how long each model would wait right now, and can hand a switch-safe task to whichever "
-    "model starts it sooner, checking the result before keeping it. Relay the tools' answers to the user "
-    "as they are."
+    "spare-gpu runs a request on whichever BharatCode model starts it sooner (spare_auto), and applies "
+    "review findings as a fix job (spare_delegate): a BharatCode Desktop session the user can watch, in "
+    "a private copy of the project, never touching the user's checkout. Each finished job's edited files "
+    "are copied to the project's spare-gpu/<date>_<time>/ folder; a fix is kept only if the project's "
+    "tests pass with it. Relay the tools' answers to the user as they are."
 )
 # Desktop already shows each session's tokens in detail; spare-gpu points there rather than estimate.
 SESSION_DETAIL = ("Each job runs as a BharatCode Desktop session named \"spare-gpu: ...\"; open it in Desktop "
@@ -251,7 +249,7 @@ class SpareTools:
             # Like questions before: no measured quality check, and the user asked for the faster
             # model, so /auto's turns are treated as switch-safe.
             choice = router.choose(QUESTION, self._preferred(your_model), waits.views(store, http), state,
-                                   {"types": {QUESTION: "switch-safe"}})
+                                   {"types": {QUESTION: "switch-safe"}}, measured=router.own_start_times())
             state.save(path.parent)
         links_file = path.parent / AUTO_SESSIONS
         try:
@@ -562,7 +560,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         """Everything about spare-gpu's work in this repo in one answer: what's queued, what's
         running, and what finished (with job ids, tokens and where each job's files landed).
 
-        Use it for any "where are things" question: "what's queued?", "is my tests job done?",
+        Use it for any "where are things" question: "what's queued?", "is my fix job done?",
         "what is spare-gpu doing?", "why hasn't my job started?", "what did spare-gpu do
         today?". Also use it to find a job id before cancelling. For how long each model would
         wait right now use spare_waits; for what the day cost, the /cost command."""
@@ -573,7 +571,7 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         """Cancel a queued or running spare-gpu job. Nothing of a cancelled job is copied to the
         spare-gpu/ folder.
 
-        Use it for "cancel the docs job", "drop job 1a2b3c4d", "stop the tests for payments".
+        Use it for "cancel the fix job", "drop job 1a2b3c4d", "stop that job".
 
         Args:
             job_id: The 8-character id of the job. If the user describes it instead, call
@@ -604,10 +602,9 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
         picked again every turn. Waits for the reply and returns it, with which model answered and
         why. Approvals the work needs are asked in that session; the reply says so.
 
-        Use it for anything the user sends through /auto that isn't a coding job: "/auto what does
-        calc.py do?", "/auto add a divide function", "ask whichever model is free: ...". Pass the
-        reply on as it comes back. For tests, docs, a review, "make the tests pass" or "implement
-        docs/plan.md" on a private copy, use spare_delegate instead.
+        Use it for anything the user sends through /auto: "/auto what does calc.py do?", "/auto add
+        a divide function", "ask whichever model is free: ...". Pass the reply on as it comes back.
+        It is not spare_delegate, which only /code-review --fix and /simplify use for their fix jobs.
 
         Args:
             request: The user's request, exactly as written.
@@ -766,37 +763,23 @@ def build_server(base: Path, tools: SpareTools | None = None, pack: bool = False
             return tools.pack_cost()
 
     @server.tool(annotations=notes(False, world=True))
-    async def spare_delegate(type: Literal["tests", "docs", "review", "fix", "green", "implement"], path: str,
+    async def spare_delegate(type: Literal["fix"], path: str,
                              note: str | None = None, your_model: str | None = None, ctx: Context | None = None) -> str:
-        """Run a self-contained task (write tests, write docs, review code, apply a fix, make the
-        tests pass, or implement a plan file, for a file or folder in this repo) now, as a BharatCode
-        Desktop session the user can watch, on whichever model will start it sooner, so the user
-        doesn't wait in DeepSeek's queue. Only task types measured as switch-safe ever move to the
-        other model; the result is checked before it's kept, and if the check keeps nothing it reruns
-        once on the preferred model. The call returns when the job is done (minutes for tests and
-        docs), with the result and where its edited files are: spare-gpu/<date>_<time>/ in the
-        project. The user's own files are never touched, and the work itself never comes back into
-        this chat.
+        """Apply a list of review findings to this repo now, as a fix job: a BharatCode Desktop
+        session the user can watch, in a private copy of the project. The result is kept only if
+        the project's test command passes with it; changes to existing tests are reverted first.
+        The call returns when the job is done, with the result and where its edited files are:
+        spare-gpu/<date>_<time>/ in the project. The user's own files are never touched, and the
+        work itself never comes back into this chat.
 
-        Use it when the user wants the task done now: "write tests for src/pay.py on whichever
-        model is free", "get this reviewed now, don't wait in the queue", "delegate the docs for
-        utils", "run tests for the payments module", "make the tests pass", "fix the failing
-        tests", "implement docs/plan.md". For anything else (a question, a change made right in the project) use spare_auto.
+        Use it for the accepted findings of /code-review --fix and /simplify. For anything else (a
+        question, a change made right in the project) use spare_auto.
 
         Args:
-            type: "tests" writes new passing tests; "docs" adds docstrings and README text without
-                changing code; "review" writes a code review; "fix" applies the review findings given
-                in `note` (from /code-review --fix) and keeps the result only if the project's test
-                command passes with it; "green" makes the project's failing tests pass by changing
-                the code, never the tests, in up to green_rounds rounds, and keeps the result only
-                once the test command passes; "implement" carries out the Markdown plan file named
-                by `path` and keeps the result only if the test command passes.
-            path: File or folder relative to the repo root, e.g. "src/pay.py" ("." for a fix, or for
-                green when no file or folder is named; for implement, the plan file, e.g.
-                "docs/plan.md"). Pass the user's path exactly as given; spare-gpu says if it doesn't
-                exist.
-            note: Optional extra instructions in the user's words; for "fix", the findings, one per
-                line with file:line and the change wanted.
+            type: "fix", the only job type.
+            path: The folder the fix works on, relative to the repo root: "." for the whole repo.
+                Pass it exactly as given; spare-gpu says if it doesn't exist.
+            note: The findings to apply, one per line with file:line and the change wanted.
             your_model: The model you are running on, as your system prompt names it (e.g.
                 "deepseek-v4.1-flash"); it's the one the task would otherwise use.
         """

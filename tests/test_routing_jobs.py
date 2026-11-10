@@ -40,12 +40,12 @@ def plans(used, verify_outputs, refuse=()):
         used.append(waits.model_id(ctx.agent.model))
         if waits.model_id(ctx.agent.model) in refuse:
             raise BharatCodeError(f"BharatCode Desktop failed: {REFUSAL}")
-        return "wrote tests"
+        return "wrote the fix"
 
     def verify(ctx):
         return next(outputs)
 
-    return {"tests": [("write", write), ("verify", verify)]}
+    return {"fix": [("write", write), ("verify", verify)]}
 
 
 def run(store, job, job_plans, route=None):
@@ -53,10 +53,10 @@ def run(store, job, job_plans, route=None):
 
 
 def test_the_chosen_model_is_stored_and_used_for_the_whole_job(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", ".", job_repo, "a.py:1 fix it")
     used = []
     route = lambda j: Choice(QWEN, DEEPSEEK, "saves about 2m 05s of waiting over DeepSeek V4.1 Flash")
-    run(store, job, plans(used, ["Kept 3 passing test(s), dropped 0."]), route)
+    run(store, job, plans(used, ["Kept the fix in 3 file(s): the test command passed."]), route)
     job = store.get_job(job.id)
     assert used == [QWEN] and job.status == "done"
     assert (job.model, job.preferred_model, job.fallback) == (QWEN, DEEPSEEK, 0)
@@ -64,10 +64,10 @@ def test_the_chosen_model_is_stored_and_used_for_the_whole_job(store, job_repo):
 
 
 def test_a_routed_job_whose_check_keeps_nothing_reruns_once_on_the_preferred_model(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", ".", job_repo, "a.py:1 fix it")
     used = []
     route = lambda j: Choice(QWEN, DEEPSEEK, "faster")
-    run(store, job, plans(used, ["Kept 0 passing test(s), dropped 2.", "Kept 2 passing test(s), dropped 0."]),
+    run(store, job, plans(used, ["Kept the fix in 0 file(s): the test command failed with it.", "Kept the fix in 2 file(s): the test command passed."]),
         route)
     job = store.get_job(job.id)
     assert used == [QWEN, DEEPSEEK] and job.status == "done"
@@ -75,17 +75,17 @@ def test_a_routed_job_whose_check_keeps_nothing_reruns_once_on_the_preferred_mod
 
 
 def test_a_job_on_its_preferred_model_never_falls_back(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", ".", job_repo, "a.py:1 fix it")
     used = []
     route = lambda j: Choice(DEEPSEEK, DEEPSEEK, "not switch-safe")
-    run(store, job, plans(used, ["No test files were generated; nothing to keep."]), route)
+    run(store, job, plans(used, ["No fix was generated; nothing to keep."]), route)
     assert used == [DEEPSEEK] and store.get_job(job.id).status == "done"
 
 
 def test_a_model_the_plan_refuses_is_swapped_for_the_one_it_includes(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", ".", job_repo, "a.py:1 fix it")
     used = []
-    run(store, job, plans(used, ["Kept 1 passing test(s), dropped 0."], refuse={DEEPSEEK}))
+    run(store, job, plans(used, ["Kept the fix in 1 file(s): the test command passed."], refuse={DEEPSEEK}))
     job = store.get_job(job.id)
     assert used == [DEEPSEEK, QWEN] and job.status == "done" and job.model == QWEN
     assert "plan doesn't include DeepSeek V4.1 Flash" in job.route_reason
@@ -93,17 +93,16 @@ def test_a_model_the_plan_refuses_is_swapped_for_the_one_it_includes(store, job_
 
 
 def test_a_refusal_of_the_only_allowed_model_still_fails_the_job(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", ".", job_repo, "a.py:1 fix it")
     used = []
     run(store, job, plans(used, [], refuse={DEEPSEEK, QWEN}), route=lambda j: Choice(QWEN, QWEN, "only one"))
     assert used == [QWEN] and store.get_job(job.id).status == "failed"
 
 
 def test_kept_nothing_reads_the_verify_summaries():
-    assert kept_nothing("Kept 0 passing test(s), dropped 3.\n- ...")
-    assert kept_nothing("No documentation changes were generated; nothing to keep.")
-    assert kept_nothing("Kept documentation changes in 0 file(s).")
-    assert not kept_nothing("Kept 10 passing test(s), dropped 0.") and not kept_nothing(None)
+    assert kept_nothing("Kept the fix in 0 file(s): the test command failed with it.\n- ...")
+    assert kept_nothing("No fix was generated; nothing to keep.")
+    assert not kept_nothing("Kept the fix in 10 file(s): the test command passed.") and not kept_nothing(None)
 
 
 # --- spare_delegate -------------------------------------------------------------------------------
@@ -132,12 +131,12 @@ def fresh_wait_cache(monkeypatch):
     waits._cache.clear()
 
 
-def test_delegate_routes_a_switch_safe_task_and_says_why(git_repo):
+def test_delegate_routes_a_fix_marked_switch_safe_and_says_why(git_repo):
     (git_repo / ".gtu").mkdir(exist_ok=True)
-    (git_repo / ".gtu" / "switch-safe").write_text("tests\n", encoding="utf-8")
+    (git_repo / ".gtu" / "switch-safe").write_text("fix\n", encoding="utf-8")  # marked switch-safe by hand
     tools = quick_tools(git_repo, wait_figures)
-    text = tools.delegate("tests", "src", your_model=f"bharatcode/{DEEPSEEK}")
-    assert text.startswith("Done: tests for src (job ")
+    text = tools.delegate("fix", "src", your_model=f"bharatcode/{DEEPSEEK}")
+    assert text.startswith("Done: fix for src (job ")
     assert "Runs on Qwen 3.8 27B: saves about 2m 05s of waiting over DeepSeek V4.1 Flash" in text
     assert "DeepSeek V4.1 Flash ≈ 2m 05s" in text and "Qwen 3.8 27B ≈ 0 s (free slot, empty queue)" in text
     with Store(db_path(git_repo)) as store:
@@ -147,7 +146,7 @@ def test_delegate_routes_a_switch_safe_task_and_says_why(git_repo):
 
 def test_delegate_from_qwen_would_move_up_to_deepseek_but_its_lane_is_full(git_repo):
     # moving up to DeepSeek is allowed for any type, but here DeepSeek's lane has a queue
-    text = quick_tools(git_repo, wait_figures).delegate("docs", "src", your_model=QWEN)
+    text = quick_tools(git_repo, wait_figures).delegate("fix", "src", your_model=QWEN)
     assert "Runs on Qwen 3.8 27B: no other model has a free slot right now" in text
 
 
@@ -165,10 +164,18 @@ def test_delegate_from_qwen_moves_up_to_deepseek_when_qwen_is_packed(git_repo):
                 {"id": QWEN, "api": lane(2, 8, 2)}, {"id": DEEPSEEK, "api": lane(1, 0, 4)}]})
         return httpx.Client(transport=httpx.MockTransport(handle))
 
-    text = quick_tools(git_repo, flipped).delegate("tests", "src", your_model=QWEN)
+    text = quick_tools(git_repo, flipped).delegate("fix", "src", your_model=QWEN)
     assert "Runs on DeepSeek V4.1 Flash: saves about 2m 05s of waiting over Qwen 3.8 27B" in text
 
 
 def test_delegate_without_the_callers_model_prefers_deepseek_outside_desktop(git_repo):
-    text = quick_tools(git_repo, wait_figures).delegate("review", "src")
+    text = quick_tools(git_repo, wait_figures).delegate("fix", "src")
     assert "Runs on DeepSeek V4.1 Flash" in text
+
+
+def test_a_fix_not_marked_switch_safe_stays_on_deepseek_even_when_it_is_queued(git_repo):
+    text = quick_tools(git_repo, wait_figures).delegate("fix", "src", your_model=DEEPSEEK)
+    assert text.startswith("Done: fix for src (job ") and "Runs on DeepSeek V4.1 Flash" in text
+    with Store(db_path(git_repo)) as store:
+        (job,) = store.list_jobs()
+    assert (job.model, job.preferred_model) == (DEEPSEEK, DEEPSEEK)

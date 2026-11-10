@@ -110,7 +110,7 @@ def test_without_live_figures_the_usual_for_the_hour_is_used_then_unknown():
 def test_describe_names_the_faster_model_only_when_it_matters(store):
     text = waits.describe(waits.views(store, client(), NOW))
     assert "DeepSeek V4.1 Flash: everyone, last hour: p50 16 s, p75 1m 43s" in text
-    assert "Qwen 3.8 27B would start about" in text and "spare_delegate" in text
+    assert "Qwen 3.8 27B would start about" in text and "/auto (spare_auto) hands a request to the faster one" in text
     waits._cache.clear()
     even = client(queue=httpx.Response(200, json=queue_waits_body(deepseek=(3, 4, 5))), usage=httpx.Response(
         200, json=usage_body(deepseek=(0, 0, 2))))

@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from gpu_token_utilization.store import SCHEMA, RequestLog, Store, StoreError
+from gpu_token_utilization.store import JOB_KINDS, SCHEMA, STORED_KINDS, RequestLog, Store, StoreError
 
 
 @pytest.fixture
@@ -24,34 +24,51 @@ def test_a_store_elsewhere_never_gitignores_that_folder(tmp_path):
 
 
 def test_add_get_and_list_jobs(store, job_repo):
-    a = store.add_job("tests", "src/a.py", job_repo)
-    b = store.add_job("review", "src", job_repo, note="focus on errors")
+    a = store.add_job("fix", "src/a.py", job_repo)
+    b = store.add_job("fix", "src", job_repo, note="focus on errors")
     assert len(a.id) == 8 and a.status == "queued"
     assert store.get_job(b.id).note == "focus on errors"
     assert [j.id for j in store.list_jobs()] == [a.id, b.id]
 
 
-def test_an_older_store_learns_the_fix_kind_and_keeps_its_rows(tmp_path, job_repo):
-    # a store made before the fix kind existed: its CHECK constraint names only the first three
+def test_an_older_store_learns_the_fix_kind_and_keeps_its_rows_of_kinds_that_are_gone(tmp_path, job_repo):
+    # a store made before the fix kind existed: its CHECK constraint names only the first three,
+    # kinds that can no longer be queued but whose rows must still open and list
     path = tmp_path / ".gtu" / "gtu.db"
     path.parent.mkdir()
+    kinds_sql = ", ".join(f"'{k}'" for k in STORED_KINDS)
+    assert kinds_sql in SCHEMA
     old = sqlite3.connect(path)
-    old.executescript(SCHEMA.replace("'tests', 'docs', 'review', 'fix', 'green', 'implement'", "'tests', 'docs', 'review'"))
-    old.execute("INSERT INTO jobs (id, kind, target, repo, note, created_at, updated_at) VALUES "
-                "('old00001', 'tests', 'src', ?, 'keep me', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')", (job_repo,))
-    old.execute("INSERT INTO job_steps (job_id, seq, name, status) VALUES ('old00001', 1, 'write', 'done')")
+    old.executescript(SCHEMA.replace(kinds_sql, "'tests', 'docs', 'review'"))
+    for n, kind in enumerate(("tests", "docs", "review"), 1):
+        old.execute("INSERT INTO jobs (id, kind, target, repo, status, note, created_at, updated_at) VALUES "
+                    f"('old0000{n}', ?, 'src', ?, 'done', 'keep me', '2026-01-0{n}T00:00:00+00:00', "
+                    f"'2026-01-0{n}T00:00:00+00:00')", (kind, job_repo))
+        old.execute(f"INSERT INTO job_steps (job_id, seq, name, status) VALUES ('old0000{n}', 1, 'write', 'done')")
     old.commit()
     with pytest.raises(sqlite3.IntegrityError):
         old.execute("INSERT INTO jobs (id, kind, target, repo, created_at, updated_at) VALUES ('x', 'fix', '.', 'r', 'a', 'a')")
     old.close()
     with Store(path) as store:
+        assert [(j.id, j.kind) for j in store.list_jobs()] == [
+            ("old00001", "tests"), ("old00002", "docs"), ("old00003", "review")]
+        assert store.get_job("old00001").note == "keep me"
+        assert [s["name"] for s in store.steps("old00002")] == ["write"]
         new = store.add_job("fix", ".", job_repo, note="src/a.py:3 off by one")
-        assert new.kind == "fix" and store.get_job("old00001").note == "keep me"
-        assert [s["name"] for s in store.steps("old00001")] == ["write"]
+        assert new.kind == "fix"
+        with pytest.raises(StoreError, match="unknown job kind 'docs'"):
+            store.add_job(store.get_job("old00002").kind, "README.md", job_repo)
         assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert "'fix'" in store.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'jobs'").fetchone()[0]
     with Store(path) as again:  # a second open changes nothing
-        assert [j.id for j in again.list_jobs()] == ["old00001", new.id]
+        assert [j.id for j in again.list_jobs()] == ["old00001", "old00002", "old00003", new.id]
+
+
+def test_only_fix_jobs_can_be_queued(store, job_repo):
+    assert JOB_KINDS == ("fix",)
+    for gone in ("tests", "docs", "review", "green", "implement"):
+        with pytest.raises(StoreError, match="expected one of fix"):
+            store.add_job(gone, ".", job_repo)
 
 
 def test_unknown_kind_is_rejected(store, job_repo):
@@ -65,25 +82,25 @@ def test_unknown_job_is_an_error(store):
 
 
 def test_cancel_rules(store, job_repo):
-    job = store.add_job("docs", "README.md", job_repo)
+    job = store.add_job("fix", "README.md", job_repo)
     assert store.cancel_job(job.id).status == "cancelled"
     with pytest.raises(StoreError):
         store.cancel_job(job.id)
-    done = store.add_job("docs", "a.py", job_repo)
+    done = store.add_job("fix", "a.py", job_repo)
     store.set_status(done.id, "done")
     with pytest.raises(StoreError):
         store.cancel_job(done.id)
 
 
 def test_list_active_hides_finished(store, job_repo):
-    keep = store.add_job("tests", "a.py", job_repo)
-    gone = store.add_job("tests", "b.py", job_repo)
+    keep = store.add_job("fix", "a.py", job_repo)
+    gone = store.add_job("fix", "b.py", job_repo)
     store.cancel_job(gone.id)
     assert [j.id for j in store.list_jobs(include_finished=False)] == [keep.id]
 
 
 def test_steps_are_numbered_in_order(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     first = store.add_step(job.id, "read code")
     store.add_step(job.id, "write tests")
     store.set_step(first, "running")
@@ -107,7 +124,7 @@ def test_phase1_database_gains_new_columns(tmp_path):
 
 
 def test_interrupted_steps_become_pending(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     step = store.add_step(job.id, "write tests")
     store.set_step(step, "running")
     assert store.reset_interrupted_steps(job.id) == 1
@@ -115,7 +132,7 @@ def test_interrupted_steps_become_pending(store, job_repo):
 
 
 def test_request_summary(store, job_repo):
-    job = store.add_job("tests", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
     store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=503, request_id="r1", job_id=job.id))
     store.log_request(
         RequestLog(endpoint="/chat/completions", attempt=2, status_code=200, request_id="r2",

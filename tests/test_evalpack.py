@@ -1,6 +1,6 @@
 """The benchmark machinery without BharatCode: the command prompt comes from the pack's own file,
 a lead's run as a (fake) Desktop session is read, research runs are tallied from sources.json, review
-findings are matched to seeds, roles are judged with the eval_models rule, and the policy keeps
+findings are matched to seeds, roles are judged with the switch-safety rule, and the policy keeps
 the job types."""
 
 import json
@@ -90,7 +90,7 @@ def test_review_findings_match_seeds_within_a_few_lines_and_precision_waits_for_
     assert evalpack.precision([{"real": True}, {"real": False}, {"real": None}]) == 0.5
 
 
-def test_roles_are_judged_with_the_eval_models_rule_and_written_next_to_the_job_types(tmp_path):
+def test_roles_are_judged_with_the_switch_safety_rule_and_written_next_to_the_job_types(tmp_path):
     assert evalpack.decide_role([(None, None), (1.0, None)])["verdict"] == "unmeasured"
     assert evalpack.decide_role([(0.0, 0.0), (0.0, 0.0)])["verdict"] == "unmeasured"
     same = evalpack.decide_role([(1.0, 1.0)] * 10)
@@ -98,9 +98,9 @@ def test_roles_are_judged_with_the_eval_models_rule_and_written_next_to_the_job_
     worse = evalpack.decide_role([(1.0, 0.5)] * 10)
     assert worse["verdict"] == "keep-preferred" and worse["ci95_lower"] < -0.4
     policy = tmp_path / "routing_policy.json"
-    policy.write_text(json.dumps({"version": 1, "types": {"tests": "keep-preferred", "review-verifier": "unmeasured"}, "evidence": {}}), encoding="utf-8")
+    policy.write_text(json.dumps({"version": 1, "types": {"fix": "keep-preferred", "review-verifier": "unmeasured"}, "evidence": {}}), encoding="utf-8")
     written = evalpack.write_policy(policy, {"review-verifier": same, "research-checker": {"verdict": "unmeasured", "tasks": 0}})
-    assert written["types"] == {"tests": "keep-preferred", "review-verifier": "switch-safe", "research-checker": "unmeasured"}
+    assert written["types"] == {"fix": "keep-preferred", "review-verifier": "switch-safe", "research-checker": "unmeasured"}
     assert written["evidence"]["review-verifier"]["tasks"] == 10 and "research-checker" not in written["evidence"]
 
 

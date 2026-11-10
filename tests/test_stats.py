@@ -75,3 +75,37 @@ def test_the_database_is_only_read(tmp_path):
     conn = sqlite3.connect(db)
     assert conn.execute("select count(*) from message").fetchone()[0] == 2
     conn.close()
+
+
+def test_start_times_are_each_models_median_first_output_lately(tmp_path):
+    import sqlite3
+
+    import json
+
+    from gpu_token_utilization.stats import start_times
+
+    path = tmp_path / "bharatcode.db"
+    db = sqlite3.connect(path)
+    db.execute("create table message (id text primary key, session_id text, time_created integer, data text)")
+    db.execute("create table part (id text primary key, message_id text, session_id text, time_created integer, data text)")
+    now = 10_000_000.0
+    replies = [  # (model, seconds ago, seconds to first output, failed)
+        ("deepseek-v4.1-flash", 600, 5.0, False), ("deepseek-v4.1-flash", 500, 7.0, False),
+        ("deepseek-v4.1-flash", 400, 6.0, False), ("qwen-3.8-27b", 300, 40.0, False),
+        ("qwen-3.8-27b", 200, 12.0, False), ("qwen-3.8-27b", 100, 99.0, True),  # failed: left out
+        ("qwen-3.8-27b", 3 * 3600, 1.0, False),  # too long ago
+        ("other-model", 50, 3.0, False),  # one reply: not enough
+    ]
+    for n, (model, ago, first, failed) in enumerate(replies):
+        created = int((now - ago) * 1000)
+        data = {"role": "assistant", "modelID": model, "time": {"created": created}} | ({"error": {"name": "x"}} if failed else {})
+        db.execute("insert into message values (?, 's', ?, ?)", (f"m{n}", created, json.dumps(data)))
+        db.execute("insert into part values (?, ?, 's', ?, ?)", (f"p{n}a", f"m{n}", created, json.dumps({"type": "step-start"})))
+        db.execute("insert into part values (?, ?, 's', ?, ?)", (f"p{n}b", f"m{n}", created, json.dumps(
+            {"type": "text", "time": {"start": created + int(first * 1000)}})))
+        db.execute("insert into part values (?, ?, 's', ?, ?)", (f"p{n}c", f"m{n}", created, json.dumps(
+            {"type": "tool", "state": {"time": {"start": created + int(first * 1000) + 500}}})))
+    db.commit()
+    db.close()
+    assert start_times(db=path, now=now) == {"deepseek-v4.1-flash": 6.0, "qwen-3.8-27b": 26.0}
+    assert start_times(db=tmp_path / "missing.db", now=now) == {}

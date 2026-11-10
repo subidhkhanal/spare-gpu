@@ -79,10 +79,10 @@ def queue(repo, kind, path, note=None):
     return actions.queue_job(lambda root: Store(db_path(root)), repo, kind, path, note).job
 
 
-def finished_review(git_repo, tokens=355, wait_ms=12500):
-    job = queue(git_repo, "review", "src")
+def finished_fix(git_repo, tokens=355, wait_ms=12500):
+    job = queue(git_repo, "fix", "src")
     with Store(db_path(git_repo)) as store:
-        step = store.add_step(job.id, "review")
+        step = store.add_step(job.id, "write")
         store.set_step(step, "running")
         store.set_step(step, "done", output="report written")
         store.log_request(RequestLog(endpoint="/chat/completions", attempt=1, status_code=200, prompt_tokens=300,
@@ -95,11 +95,11 @@ def finished_review(git_repo, tokens=355, wait_ms=12500):
 # --- spare_delegate: runs the job now, in front, and says how it went (routing is in test_routing_jobs) ---
 
 def test_delegate_runs_the_job_now_in_the_same_store_as_the_cli(tools, git_repo):
-    text = tools.delegate("tests", "src", note="cover negative numbers")
-    assert readable(text) and text.startswith("Done: tests for src (job ") and "changed no files" in text
+    text = tools.delegate("fix", "src", note="src/calc.py:1 handle negative numbers")
+    assert readable(text) and text.startswith("Done: fix for src (job ") and "changed no files" in text
     with Store(git_repo / ".gtu" / "gtu.db") as store:  # exactly where `gtu add` puts it
         (job,) = store.list_jobs()
-    assert (job.kind, job.target, job.note, job.status) == ("tests", "src", "cover negative numbers", "done")
+    assert (job.kind, job.target, job.note, job.status) == ("fix", "src", "src/calc.py:1 handle negative numbers", "done")
     assert runstate.running_pid(git_repo / ".gtu") is None  # the run file is cleared once it's done
 
 
@@ -110,8 +110,8 @@ def test_delegate_reports_where_the_files_landed_and_narrates_progress(git_repo,
 
     tools = quick_tools(git_repo, live, plans=quick_plans(write))
     lines = []
-    text = tools.delegate("tests", "src", progress=lines.append)
-    assert text.startswith("Done: tests for src (job ") and "its edited files are in spare-gpu/" in text
+    text = tools.delegate("fix", "src", progress=lines.append)
+    assert text.startswith("Done: fix for src (job ") and "its edited files are in spare-gpu/" in text
     folder = text.split("its edited files are in ")[1].split("/ in this project")[0]
     assert (git_repo / folder / "tests" / "test_new.py").is_file()
     assert "Your files weren't touched" in text and "Desktop session named" in text
@@ -124,15 +124,15 @@ def test_delegate_without_desktop_cancels_the_job_and_says_why(git_repo, live):
         raise desktop.DesktopNotFound("BharatCode Desktop's server isn't running")
 
     tools = quick_tools(git_repo, live, make_worker=no_worker)
-    text = tools.delegate("review", "src")
-    assert text.startswith("Not started: review for src") and "Desktop's server isn't running" in text
+    text = tools.delegate("fix", "src")
+    assert text.startswith("Not started: fix for src") and "Desktop's server isn't running" in text
     with Store(db_path(git_repo)) as store:
         assert store.list_jobs()[0].status == "cancelled"
 
 
 def test_delegate_while_another_window_runs_a_job_does_not_start(tools, git_repo, monkeypatch):
     monkeypatch.setattr(runstate, "running_pid", lambda folder: 99999)  # another Desktop window's server
-    text = tools.delegate("docs", "src")
+    text = tools.delegate("fix", "src")
     assert text.startswith("Not started: another BharatCode Desktop window") and "process 99999" in text
     with Store(db_path(git_repo)) as store:
         assert store.list_jobs()[0].status == "cancelled"
@@ -143,55 +143,55 @@ def test_a_cancelled_job_stops_and_says_so(git_repo, live):
         ctx.store.cancel_job(ctx.job.id)  # spare_cancel_work from another chat, mid-job
 
     tools = quick_tools(git_repo, live, plans=quick_plans(cancel_self))
-    text = tools.delegate("docs", "src")
-    assert text.startswith("Cancelled: docs for src") and "nothing was copied" in text
+    text = tools.delegate("fix", "src")
+    assert text.startswith("Cancelled: fix for src") and "nothing was copied" in text
     assert not (git_repo / ".gtu" / "worktrees").exists() or not any((git_repo / ".gtu" / "worktrees").iterdir())
 
 
 def test_delegate_from_a_subfolder_resolves_the_repo_root(git_repo, live):
-    text = quick_tools(git_repo / "src", live).delegate("review", "src/calc.py")
-    assert "Done: review for src/calc.py" in text
+    text = quick_tools(git_repo / "src", live).delegate("fix", "src/calc.py")
+    assert "Done: fix for src/calc.py" in text
     assert (git_repo / ".gtu" / "gtu.db").exists() and not (git_repo / "src" / ".gtu").exists()
 
 
 @pytest.mark.parametrize("path, problem", [("src/nope.py", "does not exist"), ("../elsewhere", "outside this repo")])
 def test_delegate_refusals_are_explained(tools, git_repo, path, problem):
     (git_repo.parent / "elsewhere").mkdir()
-    text = tools.delegate("docs", path)
+    text = tools.delegate("fix", path)
     assert text.startswith("Didn't hand it over:") and problem in text
 
 
 def test_delegate_with_unsaved_changes(tools, git_repo):
     (git_repo / "scratch.txt").write_text("wip")
-    assert tools.delegate("review", "src").startswith("Done: review for src")
+    assert tools.delegate("fix", "src").startswith("Done: fix for src")
 
 
 def test_delegate_in_a_folder_that_is_not_a_git_repo(tmp_path, live):
     (tmp_path / "a.py").write_text("x = 1\n")
-    text = quick_tools(tmp_path, live).delegate("review", ".")
-    assert text.startswith("Done: review for ."), text
+    text = quick_tools(tmp_path, live).delegate("fix", ".")
+    assert text.startswith("Done: fix for ."), text
 
 
 def test_delegate_notes_a_big_folder_that_is_not_a_git_repo(tmp_path, live, monkeypatch):
     monkeypatch.setattr(worktree, "WARN_COPY_BYTES", 1)
     (tmp_path / "a.py").write_text("x = 1\n")
-    text = quick_tools(tmp_path, live).delegate("review", ".")
-    assert text.startswith("Done: review for .") and "isn't a git repo" in text
+    text = quick_tools(tmp_path, live).delegate("fix", ".")
+    assert text.startswith("Done: fix for .") and "isn't a git repo" in text
 
 
 # --- spare_work_status ------------------------------------------------------------------------
 
 def test_work_status_merges_queue_and_results(tools, git_repo):
-    done = finished_review(git_repo)
-    queue(git_repo, "docs", "src/calc.py")
+    done = finished_fix(git_repo)
+    queue(git_repo, "fix", "src/calc.py")
     text = tools.work_status()
     assert readable(text) and text.index("Waiting:") < text.index("Finished:")
-    assert "docs src/calc.py, queued" in text and f"- {done.id}: review src, done" in text and "355 tokens" in text
+    assert "fix src/calc.py, queued" in text and f"- {done.id}: fix src, done" in text and "355 tokens" in text
     assert "Nothing is running now" in text
 
 
 def test_work_status_with_nothing_yet(tools, git_repo):
-    queue(git_repo, "review", "src")
+    queue(git_repo, "fix", "src")
     with Store(db_path(git_repo)) as store:
         store.conn.execute("DELETE FROM jobs")
         store.conn.commit()
@@ -201,8 +201,8 @@ def test_work_status_with_nothing_yet(tools, git_repo):
 # --- spare_cancel_work ------------------------------------------------------------------------
 
 def test_cancel_work_jobs_and_unknown_ids(tools, git_repo):
-    job = queue(git_repo, "docs", "src")
-    assert tools.cancel_work(f" {job.id} ").startswith(f"Cancelled job {job.id} (docs src)")
+    job = queue(git_repo, "fix", "src")
+    assert tools.cancel_work(f" {job.id} ").startswith(f"Cancelled job {job.id} (fix src)")
     again = tools.cancel_work(job.id)
     assert "Didn't cancel it" in again and "already cancelled" in again
     unknown = tools.cancel_work("zzzz")
@@ -242,14 +242,14 @@ def test_protocol_offers_exactly_five_task_shaped_tools(tools, git_repo):
     listed = {t.name: t for t in anyio.run(go)}
     assert set(listed) == TOOLS and not set(listed) & REMOVED
     delegate = listed["spare_delegate"]
-    assert set(delegate.input_schema["properties"]["type"]["enum"]) == {"tests", "docs", "review", "fix", "green", "implement"}
+    assert delegate.input_schema["properties"]["type"]["const"] == "fix"  # the only job type
     assert delegate.input_schema["required"] == ["type", "path"]
     # each description names its example phrasings and steers away from its nearest neighbour
     for name, phrase, neighbour in [
         ("spare_work_status", "why hasn't my job started?", "spare_waits"),
-        ("spare_cancel_work", "cancel the docs job", "spare_work_status"),
+        ("spare_cancel_work", "cancel the fix job", "spare_work_status"),
         ("spare_waits", "is now a good time to run a big refactor?", "spare_delegate"),
-        ("spare_delegate", "write tests for src/pay.py on whichever model is free", "spare_auto"),
+        ("spare_delegate", "the accepted findings of /code-review --fix and /simplify", "spare_auto"),
         ("spare_auto", "ask whichever model is free", "spare_delegate"),
     ]:
         description = " ".join(listed[name].description.split())
@@ -381,14 +381,14 @@ def test_scholar_search_and_verify_refs_through_the_tools(git_repo, live):
 def test_protocol_calls_return_plain_text(tools, git_repo):
     async def go():
         async with mcp.Client(build_server(git_repo, tools)) as client:
-            handed = await client.call_tool("spare_delegate", {"type": "review", "path": "src"})
+            handed = await client.call_tool("spare_delegate", {"type": "fix", "path": "src"})
             status = await client.call_tool("spare_work_status", {})
             return handed, status
 
     handed, status = anyio.run(go)
     assert not handed.is_error and readable(handed.content[0].text)
-    assert "Done: review for src" in handed.content[0].text
-    assert "review src, done" in status.content[0].text
+    assert "Done: fix for src" in handed.content[0].text
+    assert "fix src, done" in status.content[0].text
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the stdio path BharatCode Desktop uses on Windows")
@@ -420,9 +420,9 @@ WORKER = textwrap.dedent("""
     path, n = sys.argv[1], int(sys.argv[2])
     with Store(path) as store:
         for i in range(n):
-            job = store.add_job("review", f"src/{i}.py", "/repo-" + sys.argv[3])
+            job = store.add_job("fix", f"src/{i}.py", "/repo-" + sys.argv[3])
             store.set_status(job.id, "running")
-            store.add_step(job.id, "review")
+            store.add_step(job.id, "write")
             store.list_jobs()
             store.set_status(job.id, "done")
 """)
@@ -467,7 +467,7 @@ FINISHER = textwrap.dedent("""
 def test_cancel_racing_a_runner_finishing_never_leaves_a_contradiction(tmp_path):
     path = tmp_path / ".gtu" / "gtu.db"
     with Store(path) as store:
-        ids = [store.add_job("tests", f"t{i}.py", "/repo").id for i in range(60)]
+        ids = [store.add_job("fix", f"t{i}.py", "/repo").id for i in range(60)]
         for job_id in ids:
             store.set_status(job_id, "running")
     arg = json.dumps(ids)
@@ -482,7 +482,7 @@ def test_cancel_racing_a_runner_finishing_never_leaves_a_contradiction(tmp_path)
 
 
 def test_a_cancelled_job_stays_cancelled_when_the_runner_reports_late(store):
-    job = store.add_job("docs", "a.py", "/repo")
+    job = store.add_job("fix", "a.py", "/repo")
     store.set_status(job.id, "running")
     store.cancel_job(job.id)
     assert store.set_status(job.id, "done").status == "cancelled"
@@ -506,10 +506,10 @@ def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, live, monkey
         async with mcp.Client(build_server(git_repo, tools)) as client:
             async def on_progress(progress, total, message):
                 seen.append((progress, message))
-            return await client.call_tool("spare_delegate", {"type": "docs", "path": "src"}, progress_callback=on_progress)
+            return await client.call_tool("spare_delegate", {"type": "fix", "path": "src"}, progress_callback=on_progress)
 
     result = anyio.run(go)
-    assert not result.is_error and result.content[0].text.startswith("Done: docs for src")
+    assert not result.is_error and result.content[0].text.startswith("Done: fix for src")
     assert len(seen) >= 2 and seen[-1][0] > seen[0][0]  # several heartbeats, counting up
     assert any("step 1 of 2 (write) started" in (message or "") for _, message in seen)  # carrying the latest line
 
@@ -517,20 +517,20 @@ def test_spare_delegate_sends_progress_while_the_job_runs(git_repo, live, monkey
 # --- what /apply, /undo, /cost, /prompts and /doctor call ---------------------------------------------
 
 def finished_result(repo):
-    """A finished docs job's result folder: it documented src/calc.py, its copy already removed."""
+    """A finished fix job's result folder: it added a docstring to src/calc.py, its copy already removed."""
     from datetime import datetime, timezone
     from types import SimpleNamespace
 
     from gpu_token_utilization import landing, ledger
 
-    copy = worktree.create(repo, "jobdocs1")
+    copy = worktree.create(repo, "jobfix01")
     (copy / "src" / "calc.py").write_text(DOCUMENTED)
     worktree.commit(copy, "job work")
-    folder = worktree.export(repo, "jobdocs1", None, datetime(2026, 11, 5, 14, 32, 7))
-    job = SimpleNamespace(id="jobdocs1", kind="docs", target="src", model="deepseek-v4.1-flash")
+    folder = worktree.export(repo, "jobfix01", None, datetime(2026, 11, 5, 14, 32, 7))
+    job = SimpleNamespace(id="jobfix01", kind="fix", target="src", model="deepseek-v4.1-flash")
     landing.write_records(folder, copy, job, base=None, ledger_doc=ledger.empty(), steps=[], tokens=100,
                           exported_at=datetime(2026, 11, 5, 9, 2, 7, tzinfo=timezone.utc))
-    worktree.remove(repo, "jobdocs1")
+    worktree.remove(repo, "jobfix01")
     return folder
 
 
@@ -565,7 +565,7 @@ def test_cost_summary_reports_desktops_figures_and_the_jobs(tools, git_repo, mon
                                          "cache_read": 0, "cache_write": 0, "tokens": 10_000}}
     monkeypatch.setattr(stats, "tokens_since", lambda since, directory=None, db=None: usage)
     monkeypatch.setattr(stats, "session_db", lambda env=None, which=None: git_repo / "any.db")
-    finished_review(git_repo)
+    finished_fix(git_repo)
     short = tools.cost_summary()
     assert readable(short) and "\n" not in short and short.startswith("In the last 24 hours: By model (")
     assert "Qwen 3.8 27B 10,000 tokens in 3 message(s)" in short and "1 job(s) ran (1 done)" in short
@@ -597,3 +597,21 @@ def test_doctor_check_lists_the_findings_then_the_result(tools, git_repo):
     assert lines[-1].startswith("/doctor live")
     assert lines[0].split(":", 1)[0] in ("PASS", "WARN", "FAIL"), lines
     assert "unknown Desktop build 'nightly'" in tools.doctor_check(channel="nightly")
+
+
+def test_spare_delegate_offers_only_the_fix_job_and_refuses_the_rest(tools, git_repo):
+    async def go():
+        async with mcp.Client(build_server(git_repo, tools)) as client:
+            listed = {t.name: t for t in (await client.list_tools()).tools}
+            refused = await client.call_tool("spare_delegate", {"type": "docs", "path": "src"})
+            return listed, refused
+
+    listed, refused = anyio.run(go)
+    delegate = listed["spare_delegate"]
+    assert delegate.input_schema["properties"]["type"]["const"] == "fix"
+    description = " ".join(delegate.description.split())
+    for gone in ("write tests", "make the tests pass", "implement docs/plan.md", "green_rounds", '"docs"', '"review"'):
+        assert gone not in description, gone
+    assert refused.is_error and "Input should be 'fix'" in refused.content[0].text  # the schema refuses any other type
+    text = tools.delegate("docs", "src")  # a caller that skips the schema still gets a plain refusal
+    assert text.startswith("Didn't hand it over") and "expected one of fix" in text

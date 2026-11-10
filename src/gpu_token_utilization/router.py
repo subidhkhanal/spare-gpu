@@ -1,8 +1,7 @@
 """Wait-aware model routing: run a job on whichever allowed model will start it sooner.
 
-Moving work to a weaker model is only for task types measured as switch-safe (routing_policy.json,
-written by scripts/eval_models.py): types where Qwen's results were shown no worse than
-DeepSeek's. Moving to a stronger model never costs quality, so any type may move up when that
+Moving work to a weaker model is only for task types marked switch-safe (routing_policy.json, or
+the user's own override): types where Qwen's results were shown no worse than DeepSeek's. Moving to a stronger model never costs quality, so any type may move up when that
 starts it sooner. The rules, in order:
 - not switch-safe and no stronger model to move up to, or no wait data on the preferred model
   -> the preferred model;
@@ -16,7 +15,10 @@ starts it sooner. The rules, in order:
   the preferred model;
 - a model that just failed (BharatCode answering "Model unavailable") is skipped for
   FAILING_FOR seconds, whatever the wait figures say: they can show a free slot on a lane
-  that is failing.
+  that is failing;
+- when the user's own recent replies show how long each model took to start (stats.start_times),
+  those times decide the saving instead of BharatCode's queue figures, which have shown one
+  model 85 s faster while the user's replies started sooner on the other.
 Routing happens inside spare-gpu (the model of the Desktop session it creates for the job):
 BharatCode's apps only serve their own catalog, so a routing "model" can't be added to them.
 """
@@ -35,7 +37,7 @@ from .waits import Estimate, View
 
 POLICY_FILE = Path(__file__).with_name("routing_policy.json")
 POLICY_ENV = "GTU_ROUTING_POLICY"  # a different policy file
-SWITCH_SAFE_ENV = "GTU_SWITCH_SAFE"  # "tests,docs": the user's own override of the policy
+SWITCH_SAFE_ENV = "GTU_SWITCH_SAFE"  # "fix,review-verifier": the user's own override of the policy
 SWITCH_SAFE_FILE = "switch-safe"  # the same, per project, in .gtu/
 PREFERRED_ENV = "GTU_PREFERRED_MODEL"
 MIN_SAVING_ENV = "GTU_ROUTE_MIN_SAVING"
@@ -178,8 +180,10 @@ def stronger(model: str, than: str) -> bool:
     return rank(model) < rank(than)
 
 
-def decide(store, folder: Path, kind: str, preferred: str, http_factory) -> Choice:
-    """choose() with fresh wait figures and this project's policy overrides and router state."""
+def decide(store, folder: Path, kind: str, preferred: str, http_factory,
+           measured: dict[str, float] | None = None) -> Choice:
+    """choose() with fresh wait figures and this project's policy overrides and router state;
+    `measured`: the user's own recent start times per model (stats.start_times), read when not given."""
     state = State.load(folder)
     policy = load_policy(folder)
     can_move = switch_safe(kind, policy) or any(stronger(m, preferred) for m in waits.models())
@@ -191,13 +195,24 @@ def decide(store, folder: Path, kind: str, preferred: str, http_factory) -> Choi
                 current = waits.views(store, http)
         except Exception:  # noqa: BLE001 - routing is an optimisation: no figures means "don't switch", never a failed job
             current = []
-        choice = choose(kind, preferred, current, state, policy)
+        choice = choose(kind, preferred, current, state, policy, measured=own_start_times() if measured is None else measured)
     state.save(folder)
     return choice
 
 
+def own_start_times() -> dict[str, float]:
+    """The user's own recent start times per model, or {} if they can't be read."""
+    from . import stats
+
+    try:
+        return stats.start_times()
+    except Exception:  # noqa: BLE001 - an optimisation: no figures means the queue figures decide
+        return {}
+
+
 def choose(kind: str, preferred: str, views: list[View], state: State | None = None,
-           policy: dict | None = None, threshold: float | None = None) -> Choice:
+           policy: dict | None = None, threshold: float | None = None,
+           measured: dict[str, float] | None = None) -> Choice:
     preferred = waits.model_id(preferred)
     state = state if state is not None else State()
     threshold = min_saving() if threshold is None else threshold
@@ -230,11 +245,18 @@ def choose(kind: str, preferred: str, views: list[View], state: State | None = N
                   and (safe or stronger(e.model, preferred))]
     best = min(candidates, key=lambda e: e.seconds, default=None)
     saving = pref.seconds - best.seconds if best else 0.0
+    mine = {waits.model_id(m): s for m, s in (measured or {}).items()}
+    seen = None  # the user's own start times, when they cover both models
+    if best and preferred in mine and best.model in mine:
+        saving = mine[preferred] - mine[best.model]
+        seen = (f"in your recent replies {waits.name(best.model)} started in about {waits._secs(mine[best.model])} "
+                f"and {waits.name(preferred)} in about {waits._secs(mine[preferred])}")
 
     if best and saving >= threshold:
         state.away_from, state.back_votes = preferred, 0
-        return Choice(best.model, preferred, f"saves about {waits._secs(saving)} of waiting over "
-                      f"{waits.name(preferred)}, and its lane has a free slot", estimates)
+        why = (f"{seen}, and its lane has a free slot" if seen else
+               f"saves about {waits._secs(saving)} of waiting over {waits.name(preferred)}, and its lane has a free slot")
+        return Choice(best.model, preferred, why, estimates)
     if state.away_from == preferred and best:
         state.back_votes += 1
         if state.back_votes < BACK_VOTES:
@@ -245,6 +267,8 @@ def choose(kind: str, preferred: str, views: list[View], state: State | None = N
         why = "your BharatCode plan includes no other model"
     elif best is None and any(e.model != preferred for e in estimates):
         why = "no other model has a free slot right now"
+    elif seen:
+        why = f"{seen}, so switching wouldn't save {waits._secs(threshold)} or more"
     else:
         why = f"no model would save {waits._secs(threshold)} or more"
     return Choice(preferred, preferred, why, estimates)

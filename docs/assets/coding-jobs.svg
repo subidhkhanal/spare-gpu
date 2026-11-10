@@ -11,14 +11,14 @@
     <g>
       <rect x="40" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
       <text x="165" y="96" font-size="15" fill="#a8968a" text-anchor="middle">1 · You ask for a job</text>
-      <text x="165" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">/auto write tests</text>
+      <text x="165" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">/code-review --fix</text>
       <text x="165" y="150" font-size="14" fill="#a8968a" text-anchor="middle">in any Desktop chat</text>
     </g>
     <g>
       <rect x="355" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#3a2c24"/>
       <text x="480" y="96" font-size="15" fill="#a8968a" text-anchor="middle">2 · Pick the model</text>
-      <text x="480" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">live queue check</text>
-      <text x="480" y="150" font-size="14" fill="#a8968a" text-anchor="middle">DeepSeek or Qwen, sooner wins</text>
+      <text x="480" y="126" font-size="19" font-weight="600" fill="#fff4ec" text-anchor="middle">stays on DeepSeek</text>
+      <text x="480" y="150" font-size="14" fill="#a8968a" text-anchor="middle">Qwen only if your plan lacks it</text>
     </g>
     <g>
       <rect x="670" y="56" width="250" height="110" rx="14" fill="#2a1d16" stroke="#038fac"/>
@@ -56,6 +56,6 @@
     <!-- note -->
     <text x="40" y="282" font-size="16" fill="#fff4ec">Your own files are never touched.</text>
     <text x="40" y="310" font-size="14" fill="#a8968a">Jobs may only read, edit their copy and run your test</text>
-    <text x="40" y="332" font-size="14" fill="#a8968a">command. Keys are redacted; secrets are never copied.</text>
+    <text x="40" y="332" font-size="14" fill="#a8968a">command. Secrets are never copied.</text>
   </g>
 </svg>

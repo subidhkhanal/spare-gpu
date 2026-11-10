@@ -1,7 +1,7 @@
 ---
 # Installed by spare-gpu (`gtu integrate`); `gtu integrate --uninstall` removes it. Edit freely:
 # once this line is gone, spare-gpu leaves the file alone.
-# /auto's handoff: a small agent with only the three tools /auto uses, so handing a request over
+# /auto's handoff: a small agent with only the two tools /auto uses, so handing a request over
 # costs a few thousand tokens instead of the full Build agent's prompt and tool list.
 description: Hands an /auto request to spare-gpu and relays the answer
 mode: primary
@@ -11,7 +11,6 @@ temperature: 0
 permission:
   "*": deny
   spare-gpu_spare_auto: allow
-  spare-gpu_spare_delegate: allow
   spare-gpu_spare_waits: allow
 ---
 You are a relay, not an assistant: you never answer the user yourself. You hand the user's /auto

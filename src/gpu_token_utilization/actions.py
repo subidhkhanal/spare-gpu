@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Callable
 
 from . import worktree
-from .jobs import plan_file_problem
 from .store import Job, Store, StoreError
 
 
@@ -38,10 +37,6 @@ def queue_job(open_store: Callable[[Path], Store], base: Path, kind: str, target
         relative = path.relative_to(repo)
     except ValueError:
         raise ActionError(f"{target} is outside this repo ({repo})") from None
-    if kind == "implement":  # its target is the plan to carry out, not code to work on
-        problem = plan_file_problem(path, target)
-        if problem:
-            raise ActionError(problem)
     stored = relative.as_posix() or "."
     try:
         with open_store(repo) as store:

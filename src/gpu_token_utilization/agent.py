@@ -18,7 +18,6 @@ from .bc_config import user_mcp_servers
 
 DEFAULT_MODEL = "bharatcode/qwen-3.8-27b"
 CONFIG_FILE = "opencode.json"
-AGENT_KINDS = ("tests", "docs", "fix", "green", "implement")  # job kinds whose steps run as an agent session; review is one answer
 
 
 def job_mcp_servers(given: Mapping[str, dict] | None) -> dict[str, dict]:
@@ -55,7 +54,7 @@ def permission_config(edit: bool, commands: tuple[str, ...], mcp_servers: Mappin
         # Spelled out although "*" already covers them: "skill": "deny" also drops the list of the
         # user's skills from every request (session/system.ts), ~3.5k tokens a step on the machine
         # measured. Nobody watches a job's session, so nothing may "ask": a prompt there waits
-        # forever (seen 5 Nov: a docs job sat for 10+ minutes on a prompt to read the main repo's
+        # forever (seen 5 Nov: a job sat for 10+ minutes on a prompt to read the main repo's
         # .git/config). Each of these is "ask" in Desktop's defaults.
         "webfetch": "deny", "skill": "deny", "external_directory": "deny", "doom_loop": "deny", "question": "deny",
     }
@@ -103,18 +102,3 @@ class BharatCodeError(Exception):
 class BusyError(BharatCodeError):
     """BharatCode Desktop didn't finish in time: the step is tried again later."""
 
-
-@dataclass
-class Usage:
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-@dataclass
-class ChatResult:
-    """A one-answer step (the review job's), as a read-only Desktop session answered it."""
-    content: str
-    usage: Usage
-    elapsed_ms: float
-    truncated: bool = False

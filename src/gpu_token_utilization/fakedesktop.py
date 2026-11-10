@@ -6,8 +6,8 @@ Speaks the few routes spare-gpu uses: /global/health, POST /session, POST
 assistant message with a step-finish part (and a tool part per tool or file written), like the
 real server. A step can write files into the session's folder, as the model's edit tool would,
 and take several polls to finish. With `calls`, each new session plays its own list of steps (the
-first session the first list, and so on; the last list repeats), so a job whose rounds must differ,
-like green, can be scripted. The job's opencode.json, if one is in the folder when the
+first session the first list, and so on; the last list repeats), so a job whose sessions must
+differ can be scripted. The job's opencode.json, if one is in the folder when the
 prompt arrives, is recorded with the session. A session can be prompted again (an /auto
 conversation): each prompt plays the next list of steps after a new user message. `chats` are
 the user's own chats, busy with a running call to the named tool; `pending` holds permission

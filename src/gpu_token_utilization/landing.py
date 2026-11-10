@@ -39,9 +39,6 @@ MAX_OUTCOME_LINES = 20  # of a step's outcome text shown in RUN.md
 MAX_TOOLS_SHOWN = 8  # per step in RUN.md's table
 # Why a file came out of a job, when its verify step doesn't say.
 DEFAULT_REASON = {
-    "tests": "a new test file whose tests passed",
-    "docs": "documentation changes that passed the check",
-    "review": "the review report",
     "fix": "part of the fix; the test command passed with it",
 }
 

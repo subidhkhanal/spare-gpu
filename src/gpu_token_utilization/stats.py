@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import statistics
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +47,60 @@ def session_db(env: dict[str, str] | None = None, which: str | None = None) -> P
 
 def _same_folder(a: str, b: Path) -> bool:
     return os.path.normcase(os.path.normpath(a.replace("/", os.sep))) == os.path.normcase(os.path.normpath(str(b)))
+
+
+START_WINDOW = 30.0  # minutes of replies start_times() looks at
+START_KEEP = 5  # the latest replies per model it uses
+START_MIN = 2  # replies a model needs before its figure counts
+
+
+def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: float | None = None) -> dict[str, float]:
+    """How long each model took to start answering in this user's own Desktop chats lately: per
+    model id, the median seconds from a reply's creation to its first output (text, reasoning or
+    a tool call), over its latest START_KEEP replies in the last `minutes`. Replies that failed
+    are left out, and so is a model with fewer than START_MIN replies. {} without a database.
+    This is what the user actually waited, which BharatCode's queue figures don't always show."""
+    path = db or session_db()
+    if path is None:
+        return {}
+    since = int(((now if now is not None else datetime.now().timestamp()) - minutes * 60) * 1000)
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        rows = conn.execute("select m.id, m.data, p.data from message m join part p on p.message_id = m.id "
+                            "where m.time_created >= ?", (since,)).fetchall()
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+    replies: dict[str, tuple[str, float, float]] = {}  # message id -> (model, created, first output)
+    for mid, mdata, pdata in rows:
+        try:
+            message, part = json.loads(mdata), json.loads(pdata)
+        except ValueError:
+            continue
+        created = (message.get("time") or {}).get("created")
+        if message.get("role") != "assistant" or message.get("error") or not created or not message.get("modelID"):
+            continue
+        if part.get("type") not in ("text", "reasoning", "tool"):
+            continue
+        start = (part.get("time") or (part.get("state") or {}).get("time") or {}).get("start")
+        if not start:
+            continue
+        known = replies.get(mid)
+        if known is None or start < known[2]:
+            replies[mid] = (message["modelID"], created, start)
+    per_model: dict[str, list[tuple[float, float]]] = {}
+    for model, created, start in replies.values():
+        per_model.setdefault(model, []).append((created, max(0.0, (start - created) / 1000)))
+    figures = {}
+    for model, seen in per_model.items():
+        latest = [seconds for _, seconds in sorted(seen)[-START_KEEP:]]
+        if len(latest) >= START_MIN:
+            figures[model] = statistics.median(latest)
+    return figures
 
 
 def tokens_since(since: datetime, directory: Path | None = None, db: Path | None = None) -> dict[str, dict] | None:

@@ -322,42 +322,6 @@ def test_the_calling_chat_is_the_one_running_the_tool(fake, tmp_path):
     assert desktop.calling_session(conn, tmp_path, "spare-gpu_spare_auto", transport=fake.transport()) is None
 
 
-def test_ask_is_a_session_that_may_not_edit_or_run_anything(fake, tmp_path):
-    inner = fake.transport()
-    configs = []
-
-    class Spy(httpx.BaseTransport):
-        def handle_request(self, request):
-            if request.url.path.endswith("/prompt_async"):
-                configs.append(json.loads((tmp_path / "opencode.json").read_text()))
-            return inner.handle_request(request)
-
-    fake.steps = [Step(800, text="## Likely bugs\nNothing found.")]
-    result = DesktopAgent(Connection(URL, "opencode", PASSWORD), transport=Spy(), sleep=lambda s: None).ask(
-        tmp_path, [{"role": "system", "content": "You review code."}, {"role": "user", "content": "Review a.py"}])
-    assert result.ok and result.text == "## Likely bugs\nNothing found." and result.tokens == 800
-    assert configs[0]["permission"]["edit"] == "deny" and configs[0]["permission"]["bash"] == "deny"
-    prompt = next(iter(fake.sessions.values()))["prompt"]["parts"][0]["text"]
-    assert prompt.startswith("You review code.\n\nReview a.py") and "Don't use any tools" in prompt
-
-
-# --- a review job is one read-only Desktop session ----------------------------------------------
-
-def test_a_review_job_runs_as_one_read_only_desktop_session(fake, tmp_path, store):
-    from gpu_token_utilization.scheduler import Scheduler
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "a.py").write_text("def f(x):\n    return 1 / x\n")
-    job = store.add_job("review", "a.py", str(repo))
-    fake.steps = [Step(900, text="## Likely bugs\n- `a.py:2` divides by zero when x is 0.")]
-    assert Scheduler(store, agent=agent(fake), isolate=False).run_job(job.id) == "done"
-    report = (repo / f"gtu-review-{job.id}.md").read_text()
-    assert "divides by zero" in report
-    assert len(fake.sessions) == 1
-    assert store.request_summary(job.id)["total_tokens"] == 900  # counted against the budget like any step
-
-
 def test_the_session_carries_the_jobs_rules_and_hides_spare_gpus_own_tools(fake, tmp_path):
     agent(fake).run(tmp_path, "x", commands=("python -m pytest",))
     rules = fake.sessions["ses_1"]["permission"]

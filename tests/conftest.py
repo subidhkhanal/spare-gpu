@@ -32,11 +32,11 @@ def no_real_bharatcode_config(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def neutral_routing_policy(tmp_path_factory, monkeypatch):
-    """Tests never depend on the shipped routing_policy.json, which each model evaluation
-    rewrites: nothing is switch-safe unless a test says so."""
+    """Tests never depend on the shipped routing_policy.json, which a benchmark may rewrite:
+    nothing is switch-safe unless a test says so."""
     path = tmp_path_factory.getbasetemp() / "routing_policy.json"
     if not path.exists():
-        path.write_text(json.dumps({"version": 1, "types": {k: "unmeasured" for k in ("tests", "docs", "review")}}),
+        path.write_text(json.dumps({"version": 1, "types": {"fix": "unmeasured"}}),
                         encoding="utf-8")
     monkeypatch.setenv("GTU_ROUTING_POLICY", str(path))
 
@@ -113,8 +113,7 @@ def quick_plans(write=None):
             write(ctx)
         return "wrote it"
 
-    return {kind: [("write", step), ("verify", lambda ctx: "Kept 1 passing test(s), dropped 0.")]
-            for kind in ("tests", "docs", "review", "fix")}
+    return {"fix": [("write", step), ("verify", lambda ctx: "Kept the fix in 1 file(s): the test command passed.")]}
 
 
 def quick_tools(base, http, **kwargs):

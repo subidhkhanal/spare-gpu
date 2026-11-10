@@ -1,7 +1,6 @@
 """Real jobs (fake Desktop, real git and pytest) under the conditions Windows users actually have:
-spaces and non-ASCII in paths, long paths, CRLF line endings, byte-order marks, locked files."""
+spaces and non-ASCII in paths, long paths, locked files."""
 
-import difflib
 import json
 import sys
 from pathlib import Path
@@ -9,14 +8,14 @@ from pathlib import Path
 import pytest
 
 from gpu_token_utilization import worktree
-from gpu_token_utilization.jobs import JobConfig, numbered_listing
+from gpu_token_utilization.jobs import JobConfig
 from gpu_token_utilization.scheduler import Scheduler
 
 from conftest import git
 
-BOM = "﻿"
 SOURCE = "def add(a, b):\n    return a + b\n"
 DOCUMENTED = 'def add(a, b):\n    """Return the sum of a and b."""\n    return a + b\n'
+PASSING = b"def test_ok():\n    assert True\n"
 
 
 def make_repo(root, files: dict[str, bytes], autocrlf="false"):
@@ -33,10 +32,9 @@ def make_repo(root, files: dict[str, bytes], autocrlf="false"):
 
 @pytest.fixture
 def run_job(store, clock, scenario):
-    def run(repo, kind, target, writes=None, review="## Likely bugs\nNothing found."):
-        # a review's answer is the session's closing text; the other kinds just end with "done"
-        desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}], text=review if kind == "review" else "done")
-        job = store.add_job(kind, target, str(repo))
+    def run(repo, target, writes=None):
+        desktop = scenario(steps=[{"tokens": 1000, "writes": writes or {}}])
+        job = store.add_job("fix", target, str(repo), "src/calc.py:1 add a docstring")
         logs = []
         Scheduler(store, agent=desktop.agent(timeout=60),
                   config=JobConfig(test_command=(sys.executable, "-m", "pytest")),
@@ -58,82 +56,28 @@ def produced(job) -> set[str]:
     return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
 
-def deletions(job, path) -> int:
-    """Lines of the user's file that the job's version no longer has, byte for byte."""
-    before = (Path(job.repo) / path).read_bytes().splitlines(keepends=True)
-    after = out(job, path).splitlines(keepends=True)
-    return sum(1 for line in difflib.ndiff(before, after) if line.startswith("- "))
-
-
 # --- paths with spaces and non-ASCII names ---------------------------------------------------
 
-@pytest.mark.parametrize("kind", ["tests", "docs", "review"])
-def test_every_job_kind_works_in_a_path_with_spaces(kind, tmp_path, run_job):
-    repo = make_repo(tmp_path / "My Name" / "my repo", {"src/my calc.py": SOURCE.encode()})
-    writes = {
-        "tests": {"tests/test_my_calc.py": "import importlib.util, pathlib\n"
-                  "p = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'my calc.py'\n"
-                  "spec = importlib.util.spec_from_file_location('calc', p); m = importlib.util.module_from_spec(spec)\n"
-                  "spec.loader.exec_module(m)\n\n\ndef test_add():\n    assert m.add(1, 2) == 3\n"},
-        "docs": {"src/my calc.py": DOCUMENTED},
-        "review": {},
-    }[kind]
-    job, steps, logs = run_job(repo, kind, "src/my calc.py", writes)
+def test_a_fix_job_works_in_a_path_with_spaces(tmp_path, run_job):
+    test = ("import importlib.util, pathlib\n"
+            "p = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'my calc.py'\n"
+            "spec = importlib.util.spec_from_file_location('calc', p); m = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(m)\n\n\ndef test_add():\n    assert m.add(1, 2) == 3\n")
+    repo = make_repo(tmp_path / "My Name" / "my repo",
+                     {"src/my calc.py": SOURCE.encode(), "tests/test_my_calc.py": test.encode()})
+    job, steps, logs = run_job(repo, ".", {"src/my calc.py": DOCUMENTED})
     assert job.status == "done", "\n".join(logs) + json.dumps(steps, default=str)
-    expected = {"tests": "tests/test_my_calc.py", "docs": "src/my calc.py", "review": f"gtu-review-{job.id}.md"}[kind]
-    assert expected in produced(job)
-    if kind == "docs":
-        assert b"Return the sum" in out(job, "src/my calc.py")
+    assert "src/my calc.py" in produced(job) and b"Return the sum" in out(job, "src/my calc.py")
+    assert "the test command passed" in steps[1]["output"], steps[1]["output"]
     assert git(repo, "status", "--porcelain") == ""
 
 
-def test_docs_job_on_a_non_ascii_file_name(tmp_path, run_job):
-    repo = make_repo(tmp_path / "repo", {"src/café.py": SOURCE.encode()})
-    job, steps, logs = run_job(repo, "docs", "src/café.py", {"src/café.py": DOCUMENTED})
+def test_a_fix_job_on_a_non_ascii_file_name(tmp_path, run_job):
+    repo = make_repo(tmp_path / "repo", {"src/café.py": SOURCE.encode(), "tests/test_ok.py": PASSING})
+    job, steps, logs = run_job(repo, ".", {"src/café.py": DOCUMENTED})
     assert job.status == "done", "\n".join(logs)
     assert "kept src/café.py" in steps[1]["output"], steps[1]["output"]
-
-
-# --- byte-order marks and line endings -------------------------------------------------------
-
-def test_docs_job_on_a_file_with_a_byte_order_mark(tmp_path, run_job):
-    # PowerShell 5.1's `Set-Content -Encoding utf8` and some editors write one; Python's parser
-    # rejects it in a str, so these files used to be reverted as "no longer parses"
-    repo = make_repo(tmp_path / "repo", {"src/calc.py": (BOM + SOURCE).encode()})
-    job, steps, logs = run_job(repo, "docs", "src/calc.py", {"src/calc.py": BOM + DOCUMENTED})
-    assert "kept src/calc.py" in steps[1]["output"], steps[1]["output"]
-    assert out(job, "src/calc.py").startswith(BOM.encode())
-
-
-def test_docs_job_keeps_the_files_crlf_and_bom_when_the_cli_drops_them(tmp_path, run_job):
-    # a CRLF file stored as CRLF (autocrlf off), rewritten by the session with LF and no BOM: the
-    # result must show only the added docstring, not every line changed
-    original = (BOM + SOURCE).replace("\n", "\r\n").encode()
-    repo = make_repo(tmp_path / "repo", {"src/calc.py": original})
-    job, steps, logs = run_job(repo, "docs", "src/calc.py", {"src/calc.py": DOCUMENTED})
-    assert "kept src/calc.py" in steps[1]["output"], steps[1]["output"]
-    kept = out(job, "src/calc.py")
-    assert kept.startswith(BOM.encode()) and b"\r\n" in kept and b"\n" not in kept.replace(b"\r\n", b"")
-    assert deletions(job, "src/calc.py") == 0
-
-
-def test_docs_job_with_autocrlf_on_shows_only_added_lines(tmp_path, run_job):
-    # Git for Windows' default: LF in the repo, CRLF in the worktree
-    repo = make_repo(tmp_path / "repo", {"src/calc.py": SOURCE.encode(), "README.md": b"# Calc\n\nAdds.\n"},
-                     autocrlf="true")
-    job, steps, logs = run_job(repo, "docs", "src/calc.py",
-                               {"src/calc.py": DOCUMENTED, "README.md": "# Calc\n\nAdds.\n\nUsage: add(1, 2).\n"})
-    assert job.status == "done", "\n".join(logs)
-    assert "kept src/calc.py" in steps[1]["output"] and "kept README.md" in steps[1]["output"], steps[1]["output"]
-    assert deletions(job, "src/calc.py") == 0 and deletions(job, "README.md") == 0
-    assert b"\r\n" not in out(job, "src/calc.py")  # LF, like the user's file
-
-
-def test_review_listing_does_not_show_the_byte_order_mark(tmp_path):
-    (tmp_path / "calc.py").write_bytes((BOM + SOURCE).replace("\n", "\r\n").encode())
-    listing, _ = numbered_listing(tmp_path, "calc.py", 10_000)
-    assert BOM not in listing and "\r" not in listing
-    assert listing.startswith("calc.py:1| def add(a, b):")
+    assert b"Return the sum" in out(job, "src/café.py")
 
 
 # --- long paths ------------------------------------------------------------------------------
@@ -148,7 +92,7 @@ def test_a_job_whose_worktree_paths_pass_260_characters(tmp_path, run_job):
     rel = f"{deep}"[: room - len("/calc.py")].rstrip("/") + "/calc.py"
     assert len(str(root)) + 1 + len(rel) < 260 < len(str(root)) + 25 + len(rel)
     repo = make_repo(root, {"src/calc.py": SOURCE.encode(), rel: SOURCE.encode()})
-    job, steps, logs = run_job(repo, "review", "src/calc.py")
+    job, steps, logs = run_job(repo, "src/calc.py")
     assert job.status == "done", "\n".join(logs)
 
 

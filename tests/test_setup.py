@@ -174,7 +174,7 @@ def test_integrate_adds_the_auto_command_and_uninstall_removes_it(config_dir):
     assert result.exit_code == 0, result.output
     assert "Added the /auto command" in result.output and command.is_file()
     text = command.read_text(encoding="utf-8")
-    assert text.startswith("---\n") and "description:" in text and "$ARGUMENTS" in text and "spare_delegate" in text
+    assert text.startswith("---\n") and "description:" in text and "$ARGUMENTS" in text and "spare_auto" in text
     agent = config_dir / "agent" / "spare-auto.md"
     assert "agent: spare-auto" in text and agent.is_file()  # the small handoff agent comes with it
     assert "The /auto command is already there" in cli.invoke(app, ["integrate"]).output

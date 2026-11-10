@@ -56,9 +56,9 @@ def test_checking_liveness_never_kills_the_process():
 # --- the scheduler -------------------------------------------------------------------------
 
 def test_cancel_while_waiting_out_a_busy_answer(clock, store, job_repo):
-    job = store.add_job("review", "a.py", job_repo)
+    job = store.add_job("fix", "a.py", job_repo)
 
-    def review(ctx):
+    def write(ctx):
         raise BusyError("BharatCode Desktop did not finish within 60 s")  # Desktop keeps timing out
 
     def sleep(seconds):
@@ -66,7 +66,7 @@ def test_cancel_while_waiting_out_a_busy_answer(clock, store, job_repo):
         if sum(clock.sleeps) >= 5:
             store.cancel_job(job.id)  # the user cancels five seconds into the wait
 
-    s = Scheduler(store, plans={"review": [("x", review)]}, sleep=sleep, isolate=False,
+    s = Scheduler(store, plans={"fix": [("x", write)]}, sleep=sleep, isolate=False,
                   should_stop=lambda: store.get_job(job.id).status == "cancelled")
     assert s.run_job(job.id) == "cancelled"
     assert sum(clock.sleeps) < 10  # woke within seconds, not after the 60 s wait
@@ -77,7 +77,7 @@ def test_cancel_mid_session_aborts_it_and_keeps_nothing(git_repo, store, clock, 
     head = git(git_repo, "rev-parse", "HEAD")
     # a step that would take 1000 polls, writing half a file as it starts
     desktop = scenario(steps=[{"tokens": 100, "writes": {"tests/test_gtu_x.py": "half-written"}, "polls": 1000}])
-    job = store.add_job("tests", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", ".", str(git_repo), "src/calc.py:1 fix it")
     polls = []
 
     def poll_sleep(seconds):
@@ -99,7 +99,7 @@ def test_cancel_mid_session_aborts_it_and_keeps_nothing(git_repo, store, clock, 
 
 
 def test_tidy_makes_a_crashed_job_resumable(git_repo, store):
-    job = store.add_job("docs", "src/calc.py", str(git_repo))
+    job = store.add_job("fix", ".", str(git_repo))
     step = store.add_step(job.id, "write")
     store.add_step(job.id, "verify")
     store.set_step(step, "running")
@@ -130,10 +130,10 @@ def test_cancelling_a_running_job_from_the_chat_stops_it(git_repo, desktop_fake)
         return workers.Worker(agent=desktop_fake.agent(timeout=600, sleep=poll_sleep))
 
     tools = quick_tools(git_repo, no_wait_figures, make_worker=make_worker, plans=DEFAULT_PLANS)
-    text = tools.delegate("tests", "src/calc.py")
+    text = tools.delegate("fix", ".", note="src/calc.py:1 fix it")
     assert answers and answers[0].startswith("Cancelled job ")
     assert "it was running; it stops within a few seconds" in answers[0]
-    assert text.startswith("Cancelled: tests for src/calc.py (job ") and "nothing was copied to spare-gpu/" in text
+    assert text.startswith("Cancelled: fix for . (job ") and "nothing was copied to spare-gpu/" in text
     assert len(polls) < 10 and next(iter(desktop_fake.sessions.values()))["aborted"]
     with Store(db_path(git_repo)) as store:
         (job,) = store.list_jobs()
@@ -144,12 +144,12 @@ def test_cancelling_a_running_job_from_the_chat_stops_it(git_repo, desktop_fake)
 
 def test_delegate_first_pauses_jobs_a_crashed_server_left_running_and_drops_their_copy(git_repo):
     with Store(db_path(git_repo)) as store:
-        crashed = store.add_job("review", "src/calc.py", str(git_repo))
+        crashed = store.add_job("fix", ".", str(git_repo))
         store.set_status(crashed.id, "running")
     wt = worktree.create(git_repo, crashed.id)
     (wt / "src" / "calc.py").write_text("half-edited\n")
-    text = quick_tools(git_repo, no_wait_figures).delegate("docs", "src")
-    assert text.startswith("Done: docs for src (job ")
+    text = quick_tools(git_repo, no_wait_figures).delegate("fix", "src")
+    assert text.startswith("Done: fix for src (job ")
     with Store(db_path(git_repo)) as store:
         assert store.get_job(crashed.id).status == "paused"
     assert not wt.exists()  # a paused job doesn't start again by itself, so its copy isn't kept
@@ -162,7 +162,7 @@ def test_delegate_never_runs_alongside_another_servers_job(git_repo):
         folder = git_repo / ".gtu"
         folder.mkdir(exist_ok=True)
         (folder / runstate.RUN_FILE).write_text(json.dumps({"pid": other.pid}))  # another Desktop window's server
-        text = quick_tools(git_repo, no_wait_figures).delegate("docs", "src")
+        text = quick_tools(git_repo, no_wait_figures).delegate("fix", "src")
         assert text.startswith("Not started: another BharatCode Desktop window is running a spare-gpu job")
         assert f"(process {other.pid})" in text
         with Store(db_path(git_repo)) as store:

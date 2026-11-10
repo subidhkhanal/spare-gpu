@@ -137,11 +137,11 @@ def test_project_state_problems_each_get_a_line(config_dir, project):
     cli.invoke(app, ["integrate"])
     folder = project / ".gtu"
     with Store(folder / "gtu.db") as store:
-        running = store.add_job("review", "src/calc.py", str(project))
+        running = store.add_job("fix", "src/calc.py", str(project))
         store.set_status(running.id, "running")
-        paused = store.add_job("docs", "src", str(project))
+        paused = store.add_job("fix", "src", str(project))
         store.set_status(paused.id, "paused")
-        done = store.add_job("tests", "src", str(project))
+        done = store.add_job("fix", "src", str(project))
         store.set_status(done.id, "running")
         store.set_status(done.id, "done")
     gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True)
@@ -319,13 +319,13 @@ def test_the_project_checks_look_where_the_mcp_server_looks(config_dir, project,
     elsewhere = tmp_path / "elsewhere" / "gtu.db"
     elsewhere.parent.mkdir()
     with Store(elsewhere) as store:
-        store.add_job("review", "src", str(project))
+        store.add_job("fix", "src", str(project))
     monkeypatch.setenv("GTU_DB", str(elsewhere))
     assert "PASS: jobs here: 1 queued" in ask_doctor(project)
     monkeypatch.delenv("GTU_DB")
     # from a subfolder the project's own store is found, as the MCP server's other tools find it
     with Store(project / ".gtu" / "gtu.db") as store:
-        store.add_job("docs", "src", str(project))
+        store.add_job("fix", "src", str(project))
     text = ask_doctor(project / "src")
     assert "PASS: jobs here: 1 queued" in text and "WARN" not in text.split("PASS: jobs here")[0].split("PASS: project")[1]
 
