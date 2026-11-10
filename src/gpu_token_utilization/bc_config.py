@@ -1,4 +1,4 @@
-"""Registering spare-gpu's MCP server in BharatCode Desktop's config (`gtu setup`, `gtu integrate`).
+"""Registering spare-gpu's MCP server in BharatCode Desktop's config (`gtu integrate`).
 
 BharatCode (built on OpenCode) reads a global JSONC file, e.g.
 %APPDATA%\\BharatCode\\Config\\opencode.jsonc. We add an "mcp" entry for spare-gpu:

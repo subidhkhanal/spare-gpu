@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spare-gpu"
 dynamic = ["version"]
-description = "Chat commands for BharatCode Desktop: coding jobs on a private copy, /apply and /undo, code and security review (also of GitHub pull requests), deep research, simplify, app checks, memory across chats, exact costs, fewer permission prompts and a health check, split between DeepSeek and Qwen."
+description = "Chat commands for BharatCode Desktop: any task on whichever model starts sooner, code and security review (also of GitHub pull requests) with fixes on a private copy, /apply and /undo, deep research with checked sources, simplify, app checks, memory across chats, exact costs, fewer permission prompts and a health check, split between DeepSeek and Qwen."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
