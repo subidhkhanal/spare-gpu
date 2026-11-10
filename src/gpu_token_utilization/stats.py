@@ -103,6 +103,42 @@ def start_times(minutes: float = START_WINDOW, db: Path | None = None, now: floa
     return figures
 
 
+def helper_runs(since: datetime, directory: Path | None = None, db: Path | None = None) -> dict[str, int] | None:
+    """How many helper sessions (sessions started by another session, such as a task's subagent)
+    began since `since`, per model of their replies; in `directory` only when it's given. None when
+    there's no database, or it doesn't record which session started which."""
+    path = db or session_db()
+    if path is None:
+        return None
+    started = int(since.timestamp() * 1000)
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = conn.execute("select s.id, s.directory, m.data from session s join message m on m.session_id = s.id "
+                            "where s.parent_id is not null and s.time_created >= ? order by m.time_created",
+                            (started,)).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    model_of: dict[str, str] = {}
+    for sid, folder, data in rows:
+        if sid in model_of or (directory is not None and not (folder and _same_folder(folder, Path(directory)))):
+            continue
+        try:
+            message = json.loads(data)
+        except ValueError:
+            continue
+        if message.get("role") == "assistant" and message.get("modelID"):
+            model_of[sid] = f"{message.get('providerID') or 'bharatcode'}/{message['modelID']}"
+    runs: dict[str, int] = {}
+    for model in model_of.values():
+        runs[model] = runs.get(model, 0) + 1
+    return runs
+
+
 def tokens_since(since: datetime, directory: Path | None = None, db: Path | None = None) -> dict[str, dict] | None:
     """Tokens per model ("bharatcode/qwen-3.8-27b": {messages, input, output, reasoning,
     cache_read, cache_write, tokens}) in the replies Desktop recorded since `since`, in the

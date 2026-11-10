@@ -2,6 +2,7 @@
 benchmarks: exact, from the replies since a moment, optionally one project's only; the channel
 that started us picks the database; nothing is ever written to it."""
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,3 +110,29 @@ def test_start_times_are_each_models_median_first_output_lately(tmp_path):
     db.close()
     assert start_times(db=path, now=now) == {"deepseek-v4.1-flash": 6.0, "qwen-3.8-27b": 26.0}
     assert start_times(db=tmp_path / "missing.db", now=now) == {}
+
+
+def test_helper_runs_are_the_sessions_another_session_started_counted_per_model(tmp_path):
+    project = str(tmp_path / "project")
+    path = tmp_path / "bharatcode.db"
+    db = sqlite3.connect(path)
+    db.execute("create table session (id text primary key, parent_id text, directory text, time_created integer)")
+    db.execute("create table message (id text primary key, session_id text, time_created integer, data text)")
+    sessions = [("lead", None, project, MS + 10, DEEPSEEK), ("s1", "lead", project, MS + 20, QWEN),
+                ("s2", "lead", project, MS + 30, QWEN), ("w1", "lead", project, MS + 40, QWEN),
+                ("chk", "lead", project, MS + 50, DEEPSEEK),
+                ("old", "lead", project, MS - 60_000, QWEN),  # before the start
+                ("else", "x", str(tmp_path / "other"), MS + 60, QWEN)]  # another project
+    for n, (sid, parent, folder, at, model) in enumerate(sessions):
+        db.execute("insert into session values (?, ?, ?, ?)", (sid, parent, folder, at))
+        db.execute("insert into message values (?, ?, ?, ?)", (f"u{n}", sid, at, '{"role": "user"}'))
+        provider, _, model_id = model.partition("/")
+        for k in range(2):  # several replies in one helper are still one run
+            db.execute("insert into message values (?, ?, ?, ?)", (f"m{n}{k}", sid, at + 1 + k, json.dumps(
+                {"role": "assistant", "providerID": provider, "modelID": model_id})))
+    db.commit()
+    db.close()
+    assert stats.helper_runs(START, Path(project), db=path) == {QWEN: 3, DEEPSEEK: 1}
+    assert stats.helper_runs(START, db=path) == {QWEN: 4, DEEPSEEK: 1}
+    old = desktop_db(tmp_path / "old.db", [(project, MS + 1, QWEN, tokens(1, 1))])  # no parent_id recorded
+    assert stats.helper_runs(START, db=old) is None

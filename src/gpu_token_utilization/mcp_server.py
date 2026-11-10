@@ -226,6 +226,11 @@ class SpareTools:
                          f"{used['cache_read']:,} read from cache)")
         if len(lines) == 1:
             lines.append("- no replies recorded yet.")
+        runs = stats.helper_runs(started, self._root())
+        if runs is not None:
+            counted = ", ".join(f"{n} on {waits.name(model)}" for model, n in sorted(runs.items())) or "none"
+            lines.append(f"Helper runs started since then (counted from Desktop's record; report this number, "
+                         f"don't count them yourself): {sum(runs.values())} ({counted}).")
         return "\n".join(lines)
 
     def auto(self, request: str, your_model: str | None = None, new: bool = False,

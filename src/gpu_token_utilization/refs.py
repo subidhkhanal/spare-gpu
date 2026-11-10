@@ -230,16 +230,38 @@ def normalize_url(url: str | None) -> str | None:
     return host + path + (f"?{query}" if query else "")
 
 
+_ARXIV_DOI = re.compile(r"^10\.48550/arxiv\.(.+)$")
+
+
+def identities(item: dict) -> list[str]:
+    """Every id an entry gives (DOI, arXiv, OpenAlex, URL), each as "label:value". Two entries
+    sharing any one of them are the same source. arXiv's own DOI (10.48550/arXiv.<id>) counts as
+    the arXiv id, so the same preprint cited by its DOI and by its id still matches."""
+    found: list[str] = []
+
+    def add(label: str, value) -> None:
+        if value and f"{label}:{str(value).lower()}" not in found:
+            found.append(f"{label}:{str(value).lower()}")
+
+    url = str(item.get("url") or "")
+    for doi in (normalize_doi(item.get("doi")), normalize_doi(item.get("url"))):
+        arxiv_doi = _ARXIV_DOI.match(doi or "")
+        if arxiv_doi:
+            add("arxiv", normalize_arxiv(arxiv_doi.group(1)))
+        else:
+            add("doi", doi)
+    add("arxiv", normalize_arxiv(item.get("arxiv")))
+    if "arxiv.org" in url:
+        add("arxiv", normalize_arxiv(url))
+    add("openalex", normalize_openalex(item.get("openalex")))
+    add("url", normalize_url(item.get("url")))
+    return found
+
+
 def identity(item: dict) -> str | None:
-    """What makes two scouts' entries the same source: the first id of DOI, arXiv, OpenAlex, URL."""
-    for label, value in (("doi", normalize_doi(item.get("doi")) or normalize_doi(item.get("url"))),
-                         ("arxiv", normalize_arxiv(item.get("arxiv"))
-                          or (normalize_arxiv(item.get("url")) if "arxiv.org" in str(item.get("url") or "") else None)),
-                         ("openalex", normalize_openalex(item.get("openalex"))),
-                         ("url", normalize_url(item.get("url")))):
-        if value:
-            return f"{label}:{str(value).lower()}"
-    return None
+    """The entry's first id (DOI, then arXiv, OpenAlex, URL), or None when it gives none."""
+    ids = identities(item)
+    return ids[0] if ids else None
 
 
 def _note_sources(text: str) -> tuple[list[dict], int]:
@@ -297,13 +319,15 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
         for item in items:
             seen += 1
             key = str(item["key"])
-            ident = identity(item)
-            if ident is None:
+            idents = identities(item)
+            if not idents:
                 no_id.append(f"{key} ({path.name})")
                 continue
-            if ident in by_identity:
-                kept = by_identity[ident]
+            kept = next((by_identity[i] for i in idents if i in by_identity), None)
+            if kept is not None:
                 duplicates += 1
+                for ident in idents:  # the ids only this entry gave now find the kept source too
+                    by_identity.setdefault(ident, kept)
                 if key != kept["key"] and key not in kept.setdefault("aliases", []):
                     if key in by_key and by_key[key] is not kept:  # the key already names another source
                         new = _free_key(key, by_key)
@@ -312,7 +336,8 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
                         key = new
                     kept["aliases"].append(key)
                     by_key[key] = kept
-                for field in ("quality", "date", "title", "authors", "year"):  # fill what the first scout left out
+                for field in ("quality", "date", "title", "authors", "year", "doi", "arxiv", "openalex", "url"):
+                    # fill what the first scout left out
                     if not kept.get(field) and item.get(field):
                         kept[field] = item[field]
                 continue
@@ -324,7 +349,8 @@ def collect_sources(folder: Path) -> tuple[Path, str]:
                 key = new
             entry = {k: v for k, v in item.items() if k != "aliases"}
             merged.append(entry)
-            by_identity[ident] = entry
+            for ident in idents:
+                by_identity.setdefault(ident, entry)
             by_key[key] = entry
     out = folder / SOURCES_FILE
     out.write_text(json.dumps({"sources": merged}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -242,6 +242,10 @@ def test_every_lead_picks_the_variant_from_spare_waits_and_reports_pack_cost():
         assert lead["permission"]["spare-gpu_pack_cost"] == "allow"
         flat = " ".join(body.split())
         assert f"`{role}-standard`" in flat and "`pack_cost` tool" in flat and "variant" in flat
+    for component in ("research", "review", "security", "simplify", "verify"):  # parallel helpers queue together
+        _, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS[component]]) if k == "agent"}[f"{component}-lead"])
+        flat = " ".join(body.split())
+        assert "a batch counts once" in flat and "standard-model runs times" not in flat, component
     simplify, body = parse({n: p for k, n, p in pack.markdown_files([COMPONENTS["simplify"]]) if k == "agent"}["simplify-lead"])
     assert simplify["permission"]["spare-gpu_pack_cost"] == "allow" and "`pack_cost` tool" in " ".join(body.split())
 
@@ -288,7 +292,8 @@ def test_the_lead_runs_the_plans_flow_and_reports_the_split():
     for step in ("brief.md", "checklist", "plan.md", "perspectives", "all in the same message", "outline.md",
                  "collect_sources", "sources.json", "verify_refs", "DROP", "spare_waits", "queue time saved",
                  "Never claim a number you didn't measure", "never more than three rounds", "build_report",
-                 "No polishing beyond the review", "01-summary.md", "at most three short questions"):
+                 "No polishing beyond the review", "01-summary.md", "at most three short questions",
+                 "the number `pack_cost` counted"):
         assert step in body, step
     assert body.count("all in the same message") == 2  # scouts and writers both run at once
     for kind in ("academic", "technical", "market", "fact"):  # each kind of question has its own strategy

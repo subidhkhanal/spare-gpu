@@ -221,3 +221,26 @@ def test_collecting_needs_notes_and_skips_lines_that_arent_sources(tmp_path):
     path.write_text('```sources\nnot json\n{"title": "no key"}\n{"key": "ok", "url": "https://a.org"}\n```\n', encoding="utf-8")
     _, summary = refs.collect_sources(tmp_path)
     assert "1 source(s)" in summary and "2 line(s) in ```sources fences" in summary
+
+
+def test_a_preprint_cited_by_its_arxiv_doi_and_by_its_arxiv_id_is_one_source(tmp_path):
+    # from a real run: Self-RAG came back from two scouts, once with arXiv's DOI and once with the bare id
+    notes_file(tmp_path, "1-a.md", [{"key": "asai2023selfrag", "title": "Self-RAG", "arxiv": "2310.11511",
+                                     "doi": "10.48550/arxiv.2310.11511", "url": "https://arxiv.org/abs/2310.11511"}])
+    notes_file(tmp_path, "2-b.md", [{"key": "selfrag-2023", "title": "Self-RAG", "arxiv": "2310.11511v1"},
+                                    {"key": "selfrag-doi", "doi": "https://doi.org/10.48550/arXiv.2310.11511"}])
+    path, summary = refs.collect_sources(tmp_path)
+    items = refs.load_sources(path)
+    assert [i["key"] for i in items] == ["asai2023selfrag"]
+    assert items[0]["aliases"] == ["selfrag-2023", "selfrag-doi"] and "2 duplicate(s) merged" in summary
+
+
+def test_entries_sharing_any_one_id_are_one_source_and_the_kept_one_gains_the_other_ids(tmp_path):
+    notes_file(tmp_path, "1-a.md", [{"key": "lewis2020", "doi": "10.5555/3495724.3496517"}])  # the NeurIPS DOI only
+    notes_file(tmp_path, "2-b.md", [{"key": "rag-paper", "doi": "10.5555/3495724.3496517", "arxiv": "2005.11401"}])
+    notes_file(tmp_path, "3-c.md", [{"key": "rag-arxiv", "url": "https://arxiv.org/abs/2005.11401v4"}])  # known only by arXiv
+    path, summary = refs.collect_sources(tmp_path)
+    items = refs.load_sources(path)
+    assert [i["key"] for i in items] == ["lewis2020"] and items[0]["arxiv"] == "2005.11401"
+    assert items[0]["aliases"] == ["rag-paper", "rag-arxiv"] and "1 source(s) from 3 entr(ies)" in summary
+    assert refs.identities({"doi": "10.48550/arXiv.2005.11401"}) == ["arxiv:2005.11401"]
